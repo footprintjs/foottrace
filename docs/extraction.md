@@ -18,7 +18,24 @@ The subsequent security review found a preexisting rich-value copy defect, also 
 
 ### Security follow-up gate
 
-Release the published FootPrint fix as 9.48.2 before publishing this candidate. Before E4, compare `src/lib/capture/ownData.ts`, `src/lib/capture/freeze.ts` and `src/lib/memory/pathOps.ts` byte-for-byte against that exact release, and run the corresponding public-writer regressions in both packages. The original extraction manifest remains historical provenance; do not rewrite its old blob identities to conceal the follow-up.
+The subsequent own-field boundary review adds three explicit corrections:
+path writes/copy-on-write walks no longer traverse inherited ordinary fields;
+whole-selector refusal happens before prefix mutation; and defaults named
+`toString`/`valueOf` are not suppressed by inherited destination methods. Slot
+placement now has one L0 owner shared by copies, record merges, diagnostics and
+transaction privatization. Its native-compatible and required-slot-creation
+operations preserve their distinct existing typed-array behavior. Own accessors,
+descriptor flags, payload names, record merge laws and built-in serialization
+are not changed. No scan suppression or dismissal is part of this work.
+
+This coordinated follow-up must ship to FootPrint 9.x before Foottrace 1.0.0.
+Its exact release comparison covers `capture/ownData.ts` and `memory/pathOps.ts`,
+`memory/merge.ts`, `memory/utils.ts`, `memory/TransactionBuffer.ts`; the
+corresponding tests differ only where the packages' public entry points differ.
+The 9.48.2 comparison below remains evidence for that earlier fix, not proof for
+the newer candidate. Neither baseline manifests nor frozen fixtures are re-pinned.
+
+The earlier rich-value correction shipped in FootPrint 9.48.2; its three shared files were compared against that release. Before E4, compare the five follow-up files above plus `capture/freeze.ts` against the exact coordinated follow-up release, and run the corresponding public-writer regressions in both packages. The original extraction manifest remains historical provenance; do not rewrite its old blob identities to conceal either correction.
 
 CodeQL now has an explicit source-only JavaScript/TypeScript and Actions workflow. A scan that has not run is unknown, not clean. Pull-request/push results must be inspected before 1.0.0; the weekly scan and a default-branch baseline become active only after the workflow/source reaches `main`.
 
