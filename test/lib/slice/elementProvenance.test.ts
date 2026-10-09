@@ -12,7 +12,7 @@
  * 3. The agent mega-key story end-to-end: a loop growing an array yields
  *    per-element birth stages in BOTH commitValues modes.
  *
- * The runs' records are written through footprintjs/write (test/helpers/recordRun.ts) — the same
+ * The runs' records are written through foottrace/write (test/helpers/recordRun.ts) — the same
  * commit logs, byte for byte, the loop chart and the fetch chart wrote through the engine (E1).
  */
 

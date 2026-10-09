@@ -49,7 +49,7 @@
  *
  * @example
  * ```typescript
- * import { causalChain, flattenCausalDAG, formatCausalChain } from 'footprintjs/trace';
+ * import { causalChain, flattenCausalDAG, formatCausalChain } from 'foottrace';
  *
  * const dag = causalChain(commitLog, 'decide#2', (id) => recorder.getKeysRead(id));
  * const flat = flattenCausalDAG(dag);     // BFS-ordered flat list
@@ -103,7 +103,7 @@ export interface CausalNode {
    * reads were fully tracked.
    *
    * Registry code: `'incomplete-sources'` (`memory/honesty.ts ·
-   * HONESTY_CODES`, served on `footprintjs/trace`) says what this field
+   * HONESTY_CODES`, served on `foottrace`) says what this field
    * means. The field carries no `code` — its values are the
    * {@link UntrackedSource}s.
    */
@@ -119,7 +119,7 @@ export interface CausalNode {
    * signal, read it.)
    *
    * Registry code: `'truncated'` (`memory/honesty.ts · HONESTY_CODES`, served
-   * on `footprintjs/trace`) says what this field means; the field carries no
+   * on `foottrace`) says what this field means; the field carries no
    * `code`.
    */
   truncated?: { byDepth: boolean; byNodes: boolean };

@@ -35,7 +35,7 @@ import type { CommitBundle, TraceEntry, UntrackedSource } from '../memory/types.
  * normalised internally — the engine's path delimiter never appears in this
  * public contract.
  */
-export type StateKey = string | ReadonlyArray<string | number>;
+export type { StateKey } from '../memory/paths.js';
 
 // ── KeysRead sourcing (strategy interface) ─────────────────────────────────
 
@@ -101,7 +101,7 @@ export interface ReadsCoverage {
  *   `findLastWriter`.
  *
  * Each member is registered, with the one sentence that says what it means,
- * in `memory/honesty.ts · HONESTY_CODES` (served on `footprintjs/trace`); the
+ * in `memory/honesty.ts · HONESTY_CODES` (served on `foottrace`); the
  * union declares its members through `RegisteredCode`, so a member the
  * registry does not hold does not compile.
  */
@@ -193,7 +193,7 @@ export interface VariableSlice {
  *   {@link HonestyNote}.
  *
  * Each member is registered, with the one sentence that says what it means,
- * in `memory/honesty.ts · HONESTY_CODES` (served on `footprintjs/trace`); the
+ * in `memory/honesty.ts · HONESTY_CODES` (served on `foottrace`); the
  * union declares its members through `RegisteredCode`, so a member the
  * registry does not hold does not compile.
  */
@@ -204,7 +204,7 @@ export type FedBasis = RegisteredCode<'per-write' | 'stage'>;
  * answer. A consumer BRANCHES on `code`; `detail` is the sentence to show.
  *
  * What each code means is registered ONCE, with the other honesty signals, in
- * `memory/honesty.ts · HONESTY_CODES` (served as `HONESTY_CODES` on `footprintjs/trace`); this
+ * `memory/honesty.ts · HONESTY_CODES` (served as `HONESTY_CODES` on `foottrace`); this
  * union declares its members through `RegisteredCode`, so a code the registry does not hold does
  * not compile.
  */
@@ -458,7 +458,7 @@ export interface ForwardSliceJSON {
  *   element's provenance resets to this commit. Exact but coarse.
  *
  * Each member is registered, with the one sentence that says what it means,
- * in `memory/honesty.ts · HONESTY_CODES` (served on `footprintjs/trace`); the
+ * in `memory/honesty.ts · HONESTY_CODES` (served on `foottrace`); the
  * union declares its members through `RegisteredCode`, so a member the
  * registry does not hold does not compile.
  */
@@ -514,7 +514,7 @@ export interface ElementBirth {
  *   scalar keys the right query is `sliceForKey`.
  *
  * Each member is registered, with the one sentence that says what it means,
- * in `memory/honesty.ts · HONESTY_CODES` (served on `footprintjs/trace`); the
+ * in `memory/honesty.ts · HONESTY_CODES` (served on `foottrace`); the
  * union declares its members through `RegisteredCode`, so a member the
  * registry does not hold does not compile.
  */

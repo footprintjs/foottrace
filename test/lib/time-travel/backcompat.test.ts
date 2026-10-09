@@ -12,14 +12,14 @@
  * from a third of the code, with the classification riding on the stop.
  *
  * Only the record under it changed (E1): it is written through
- * `footprintjs/write` — the bytes the four-stage chart wrote — so the
+ * `foottrace/write` — the bytes the four-stage chart wrote — so the
  * consumer-side code above reads exactly what it read against 9.17.0.
  */
 
 import { describe, expect, it } from 'vitest';
 
-import type { Move, Stop, TimeTravel, TimeTravelSource, TimeTravelStrategy } from '../../../src/trace.js';
-import { commitStops, filterStops, timeTravel } from '../../../src/trace.js';
+import type { Move, Stop, TimeTravel, TimeTravelSource, TimeTravelStrategy } from '../../../src/index.js';
+import { commitStops, filterStops, timeTravel } from '../../../src/index.js';
 import { recordRun } from '../../helpers/recordRun.js';
 
 // ── The consumer's domain vocabulary, exactly as it was ────────────────────
@@ -88,7 +88,7 @@ const newStrategy: TimeTravelStrategy<Milestone> = {
 // ── The run ────────────────────────────────────────────────────────────────
 
 /**
- * Seed → Ask → Call → Wrap, one key each — written through `footprintjs/write`
+ * Seed → Ask → Call → Wrap, one key each — written through `foottrace/write`
  * (test/helpers/recordRun.ts): the record that four-stage chart writes, with
  * no engine loaded.
  */

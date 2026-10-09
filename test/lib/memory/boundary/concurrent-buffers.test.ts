@@ -1,5 +1,5 @@
 /**
- * Boundary: concurrent buffers — a fork's children, each a stage frame (`RecordFrame`, footprintjs/write) at
+ * Boundary: concurrent buffers — a fork's children, each a stage frame (`RecordFrame`, foottrace/write) at
  * the run's address (`['runs', 'p1']`), staged side by side: a hundred commit without loss, the last commit
  * of one key wins, no child sees another's uncommitted write, and the log keeps every child's bundle.
  */

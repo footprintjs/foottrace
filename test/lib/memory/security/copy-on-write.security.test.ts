@@ -13,7 +13,7 @@ import { describe, expect, it } from 'vitest';
 import { TransactionBuffer } from '../../../../src/lib/memory/TransactionBuffer';
 import type { TraceEntry } from '../../../../src/lib/memory/types';
 import { applySmartMergeInto, DELIM, nextGeneration } from '../../../../src/lib/memory/utils';
-import { stateAt } from '../../../../src/trace.js';
+import { stateAt } from '../../../../src/index.js';
 import { EventLog, RecordFrame, SharedMemory } from '../../../../src/write';
 
 const HOSTILE: string[][] = [
@@ -99,7 +99,7 @@ describe('copy-on-write — a served view never reaches into the record', () => 
   it.each(['full', 'delta'] as const)(
     'editing live state, the mirror or a fold in place leaves the commit log as recorded (%s)',
     (commitValues) => {
-      // Three stages through footprintjs/write over one heap, one log and one redacted mirror — what a run
+      // Three stages through foottrace/write over one heap, one log and one redacted mirror — what a run
       // under a policy (`keys: ['unrelatedSecret']`, which selects none of these writes) keeps.
       const state = new SharedMemory();
       const mirror = new SharedMemory();

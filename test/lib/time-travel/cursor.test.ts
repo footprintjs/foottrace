@@ -9,8 +9,8 @@
 import fc from 'fast-check';
 
 import type { CommitBundle } from '../../../src/lib/memory/types.js';
-import type { TimeTravelStrategy } from '../../../src/trace.js';
-import { commitStops, commitValueAt, stateAt, timeTravel } from '../../../src/trace.js';
+import type { TimeTravelStrategy } from '../../../src/index.js';
+import { commitStops, commitValueAt, stateAt, timeTravel } from '../../../src/index.js';
 
 // ── A tiny hand-built log, so the axis is fully predictable ────────────────
 
@@ -248,7 +248,7 @@ describe('marks live BESIDE the log', () => {
     cursor.jumpTo('b#1');
     cursor.mark('note');
     expect(JSON.stringify(run)).not.toContain('note');
-    expect(run.commitLog.every((b) => (b as Record<string, unknown>).marks === undefined)).toBe(true);
+    expect(run.commitLog.every((b) => (b as unknown as Record<string, unknown>).marks === undefined)).toBe(true);
   });
 
   it('are returned detached — a caller cannot edit the cursor’s notes', () => {

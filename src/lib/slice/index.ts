@@ -22,7 +22,8 @@ export { type ForwardSliceForKeyOptions, forwardSliceForKey } from './forwardSli
 export { keysReadFromExecutionTree, keysReadFromMap, resolveKeysReadSource } from './keysReadSources.js';
 export { type KeyTimelineOptions, keyTimeline } from './keyTimeline.js';
 export { formatForwardSlice, formatSlice, formatTimeline, forwardSliceToJSON, sliceToJSON } from './serialize.js';
-export { type SliceForKeyOptions, normaliseStateKey, sliceForKey } from './sliceForKey.js';
+export { type SliceForKeyOptions, sliceForKey } from './sliceForKey.js';
+export { normaliseStateKey } from '../memory/paths.js';
 export type {
   ArrayProvenance,
   AttributionBasis,

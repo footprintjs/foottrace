@@ -23,7 +23,7 @@
  *
  * @example
  * ```typescript
- * import { CommitRangeIndex } from 'footprintjs/trace';
+ * import { CommitRangeIndex } from 'foottrace';
  *
  * const idx = new CommitRangeIndex<string>();
  * const t = idx.open('LLMCall', executor.getCommitCount());

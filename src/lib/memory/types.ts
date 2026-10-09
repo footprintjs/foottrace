@@ -2,9 +2,9 @@
  * types.ts — the record's types: a bundle, its rows, its patches, its encoding, and the
  * execution tree as the record's readers read it.
  *
- * Imports nothing. The record names nothing outside itself (C6, `RECORD_FILES` in
- * scripts/layering.config.cjs): the engine's frame types — the stage snapshot, the flow
- * messages, the retention dials — live beside the frame, in `frameTypes.ts` (L4).
+ * Imports nothing. The standalone record names nothing outside itself: the engine's frame
+ * types — the stage snapshot, flow messages and retention dials — remain in FootPrint's
+ * `frameTypes.ts`. The closed record graph is enforced by scripts/check-layering.mjs.
  */
 
 // ── Patch & Trace ──────────────────────────────────────────────────────────
@@ -46,7 +46,7 @@ export interface TraceEntry {
    *
    * `overwrite` values are therefore VERB-QUALIFIED: consumers that read
    * `bundle.overwrite[key]` as "the full value written" must use
-   * `commitValueAt(commitLog, idx, key)` (from `footprintjs/trace`) when the
+   * `commitValueAt(commitLog, idx, key)` (from `foottrace`) when the
    * log may contain delta-mode bundles.
    */
   verb: 'set' | 'merge' | 'append' | 'delete';
@@ -104,7 +104,7 @@ export interface CommitBundle {
    * retry attempts stamp it once, a continuation (a fork child's `'repeat'`,
    * a mount's `'exit'` after its merge-back) carries none, and a mount whose
    * exit is its only bundle (no `outputMapper`) carries them on that bundle. Free strings: footprintjs assigns
-   * them no meaning; `tagStops` (footprintjs/trace) keeps a stop when any of
+   * them no meaning; `tagStops` (foottrace) keeps a stop when any of
    * them matches.
    */
   tags?: readonly string[];
@@ -124,7 +124,7 @@ export interface CommitBundle {
    * A reader groups a stage's bundles by `runtimeStageId` and reads this
    * field to know what each continuation is; it never infers it from the
    * log's shape. A log written before 9.39.0 carries no `phase` anywhere —
-   * see `inferLegacyPhases` (footprintjs/trace) for how it is still read.
+   * see `inferLegacyPhases` (foottrace) for how it is still read.
    */
   phase?: CommitPhase;
 }
@@ -196,7 +196,7 @@ export type CommitValuesMode = 'full' | 'delta';
  *
  * @example
  * ```typescript
- * import { type ExecutionTree, keysReadFromExecutionTree } from 'footprintjs/trace';
+ * import { type ExecutionTree, keysReadFromExecutionTree } from 'foottrace';
  *
  * const tree: ExecutionTree = {
  *   runtimeStageId: 'seed#0',

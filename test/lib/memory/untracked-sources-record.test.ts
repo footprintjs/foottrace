@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { causalChain, formatCausalChain } from '../../../src/lib/memory/backtrack.js';
-import type { CommitBundle } from '../../../src/trace.js';
+import type { CommitBundle } from '../../../src/index.js';
 
 describe('untrackedSources — backtracker integration (D2 stamps + ⚠ marker)', () => {
   function commit(

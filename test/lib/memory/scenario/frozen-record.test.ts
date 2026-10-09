@@ -1,5 +1,5 @@
 /** The record owns sealing. Engine snapshot/fork/subflow witnesses stay in frozen-log.test.ts. */
-import type { CommitBundle } from '../../../../src/trace';
+import type { CommitBundle } from '../../../../src/index';
 import { EventLog } from '../../../../src/write';
 import { unfrozen } from '../../../helpers/unfrozen';
 

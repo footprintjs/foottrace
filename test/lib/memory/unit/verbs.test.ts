@@ -263,7 +263,7 @@ describe('foldKey — one key across a log (exact-path rows)', () => {
   const touch = (verb: Verb, b: CommitBundle, commitIdx: number): Touch => ({
     verb,
     bundle: b,
-    commitIdx,
+    commitIdx: commitIdx as Touch['commitIdx'],
     path: 'k',
     relation: 'exact',
   });
@@ -331,7 +331,7 @@ describe('foldKey — the rows under the key: inside, around and beside it (F3)'
   const row = (b: CommitBundle, i: number, commitIdx: number, relation?: Touch['relation']): Touch => ({
     verb: b.trace[i].verb,
     bundle: b,
-    commitIdx,
+    commitIdx: commitIdx as Touch['commitIdx'],
     path: b.trace[i].path,
     ...(relation !== undefined && { relation }),
   });

@@ -11,7 +11,7 @@
  * 3. A read before any write → no `fromWriteIdx` + the pre-run-origin note.
  * 4. The typo guard, shared with the forward walk (bytes pinned there).
  *
- * The runs' records are written through footprintjs/write (test/helpers/recordRun.ts) — the same
+ * The runs' records are written through foottrace/write (test/helpers/recordRun.ts) — the same
  * commit logs and execution trees, byte for byte, the charts wrote through the engine (E1).
  */
 

@@ -73,7 +73,7 @@ function tagsAt(log: readonly CommitBundle[], stop: Stop<unknown>): readonly str
  * @example
  * ```typescript
  * import { flowChart } from 'footprintjs';
- * import { tagStops, timeTravel } from 'footprintjs/trace';
+ * import { tagStops, timeTravel } from 'foottrace';
  *
  * const chart = flowChart<State>('Seed', seedFn, 'seed')
  *   .addFunction('Call model', callFn, 'call-llm')

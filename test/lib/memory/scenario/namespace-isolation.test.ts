@@ -1,5 +1,5 @@
 /**
- * Scenario: namespace isolation between runs — a stage's frame (`RecordFrame`, footprintjs/write) reads and
+ * Scenario: namespace isolation between runs — a stage's frame (`RecordFrame`, foottrace/write) reads and
  * writes at its run's address (`['runs', <runId>]`, as the engine's frame of that run does), so two runs
  * write one key without collision, and both read the root (the global keys).
  */

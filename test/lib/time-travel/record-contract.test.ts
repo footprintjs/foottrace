@@ -10,7 +10,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { bundleRefusal } from '../../../src/lib/time-travel/bundles.js';
-import { stateAt, tagStops, timeTravel } from '../../../src/trace.js';
+import { stateAt, tagStops, timeTravel } from '../../../src/index.js';
 
 /** A record written by hand — the shape the contract page describes. */
 function handBuiltRecord() {

@@ -12,7 +12,7 @@
  *   - The default 'full' mode pays ZERO: detection is mode-gated.
  *
  * Load tier — the retained-payload linearity that kills the quadratic:
- *   the growing-history loop, written through footprintjs/write (one stage
+ *   the growing-history loop, written through foottrace/write (one stage
  *   frame per iteration, test/helpers/recordRun.ts — the bytes the loop chart
  *   writes): the delta commit log's VALUE bytes grow linearly (one tail per
  *   iteration) while full mode's grow quadratically; at N iterations delta is

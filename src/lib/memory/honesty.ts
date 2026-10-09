@@ -20,7 +20,7 @@
  *     `WriterBasis` — the basis twins of `commitValueAt` / `findLastWriter`) declares its members
  *     through `RegisteredCode`, so a member the registry does not hold fails to COMPILE. And
  *     `test/architecture/honesty-vocabulary.test.ts` asks the type checker for every exported type
- *     alias of `footprintjs/trace` that is a union of string literals: each one is inside the
+ *     alias of `foottrace` that is a union of string literals: each one is inside the
  *     registry or is named, with its reason, as not an honesty vocabulary.
  *
  * NO OBJECT GAINS A FIELD from being registered. Three signals carry no code of their own — a
@@ -30,16 +30,16 @@
  *
  * NOT HERE: the two strings a redaction leaves where a value was. The engine writes those on every
  * redacted run; the log's lives in its own leaf, `memory/placeholders.ts` (the scope channel's with
- * the verdict, `memory/redaction.ts`), so that an app which only runs charts does not carry these
+ * the verdict, in FootPrint's `memory/redaction.ts`), so that an app which only runs charts does not carry these
  * sentences in its bundle (`HONESTY_CODES` is a pure expression, so a bundler drops it wherever
  * nothing reads it).
  *
  * WHY L0. This file imports NOTHING, and `slice/` and `time-travel/` (L3) type their codes through
- * it, so it sits below them — the layer table is `scripts/layering.config.cjs`.
+ * it, so it sits below them — the layer table is `scripts/layers.json`.
  *
  * @example
  * ```typescript
- * import { HONESTY_CODES } from 'footprintjs/trace';
+ * import { HONESTY_CODES } from 'foottrace';
  *
  * for (const { code } of forwardSlice.notes) console.log(code, '→', HONESTY_CODES[code]);
  * // reads-not-recorded → This log carries no recorded read at all (the readTracking: 'off' signature), …
@@ -48,13 +48,13 @@
  */
 
 /**
- * Every honesty code the trace readers (`footprintjs/trace`) speak, with the one sentence that says
+ * Every honesty code the trace readers (`foottrace`) speak, with the one sentence that says
  * what it means.
  *
  * Frozen and closed: the keys are exactly the codes below, and {@link HonestyCode} is derived from
  * them. A new code is one new line here: a union declared through {@link RegisteredCode} cannot hold
  * a code that is not on it, and `test/architecture/honesty-vocabulary.test.ts` fails on an exported
- * type alias of `footprintjs/trace` that is a union of string literals neither inside the registry
+ * type alias of `foottrace` that is a union of string literals neither inside the registry
  * nor named there as not an honesty vocabulary. The values are typed `string`, not literal types,
  * on purpose: the sentences are for a screen and may be reworded; a consumer branches on the KEY.
  */

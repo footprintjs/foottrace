@@ -1,5 +1,5 @@
 /**
- * Scenario: write → commit → read — a stage's frame (`RecordFrame`, footprintjs/write) at its run's address
+ * Scenario: write → commit → read — a stage's frame (`RecordFrame`, foottrace/write) at its run's address
  * (`['runs', <runId>]`): its writes reach live state at its commit, a later frame reads them, an uncommitted
  * write stays the stage's own, and the log keeps every commit.
  */

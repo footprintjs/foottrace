@@ -17,15 +17,15 @@
  *   3. `[start, …stages, end]` WAS AN UNSTATED CONTRACT. Every composer wrote
  *      its own guard. `splitAxis` states it; `filterStops` keeps it.
  *
- * Every record here is written through `footprintjs/write`
+ * Every record here is written through `foottrace/write`
  * (test/helpers/recordRun.ts) — the bytes the charts' executor wrote (a mount
  * and a fork included), with no engine loaded.
  */
 
 import { describe, expect, it } from 'vitest';
 
-import type { ExecutionTree, Stop, TimeTravelStrategy } from '../../../src/trace.js';
-import { commitStops, filterStops, splitAxis, stateAt, timeTravel } from '../../../src/trace.js';
+import type { ExecutionTree, Stop, TimeTravelStrategy } from '../../../src/index.js';
+import { commitStops, filterStops, splitAxis, stateAt, timeTravel } from '../../../src/index.js';
 import { recordRun } from '../../helpers/recordRun.js';
 
 // ── A real run: a seed, a mount, and stages worth classifying ───────────────
@@ -60,7 +60,7 @@ function markMount(tree: ExecutionTree | undefined, id: string): ExecutionTree |
 
 /**
  * Seed → Prepare → Ask → the `sf-lookup` subflow (one stage, Lookup) → Answer,
- * written through `footprintjs/write` (test/helpers/recordRun.ts) — the record
+ * written through `foottrace/write` (test/helpers/recordRun.ts) — the record
  * that chart's executor wrote, with no engine loaded. The mount is written as
  * the engine writes one: the subflow's OWN record (its seed, the inputMapper's
  * values, committed under the mount's id `sf-lookup#3`; then its stage under the

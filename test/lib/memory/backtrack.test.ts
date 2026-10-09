@@ -595,6 +595,7 @@ describe('causalChain — additional coverage', () => {
       linkedBy: '',
       depth: 0,
       parents: [],
+      parentEdges: [],
     };
     expect(flattenCausalDAG(node)).toEqual([node]);
   });

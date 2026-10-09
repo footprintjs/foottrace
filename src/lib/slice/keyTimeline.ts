@@ -37,7 +37,7 @@ import {
   writeEntry,
 } from './keyIndex.js';
 import { resolveKeysReadSource } from './keysReadSources.js';
-import { normaliseStateKey } from './sliceForKey.js';
+import { normaliseStateKey } from '../memory/paths.js';
 import type { HonestyNote, KeyMoment, KeysReadSource, KeyTimeline, StateKey } from './types.js';
 
 /** Options for {@link keyTimeline}. */

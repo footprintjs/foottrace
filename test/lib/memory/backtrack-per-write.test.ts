@@ -13,7 +13,7 @@
  * 4. SAFETY property: the per-write slice is always a SUBSET of the
  *    stage-level slice (it refines, never invents).
  * 5. End-to-end: the dial → sliceForKey default 'per-write'. The record is
- *    written through footprintjs/write (test/helpers/recordRun.ts) under the
+ *    written through foottrace/write (test/helpers/recordRun.ts) under the
  *    record's own dial (`RecordEncoding.writeProvenance`) — the same bytes the
  *    executor's `writeProvenance` option writes (the record-bytes fixtures'
  *    `readsPrefix` scenario pins the executor side).
@@ -218,7 +218,7 @@ describe('per-write end-to-end — dial → sliceForKey', () => {
 
   it('with the dial: slice for x excludes b entirely; slice for y includes it', () => {
     const snap = mixedRun('reads-prefix');
-    const reads = keysReadFromExecutionTree(snap.executionTree);
+    const reads = keysReadFromExecutionTree(snap.executionTree!);
 
     const xSlice = sliceForKey(snap.commitLog, 'x', reads); // defaults to per-write
     const xIds = [...ids(xSlice.root!)];
@@ -232,7 +232,7 @@ describe('per-write end-to-end — dial → sliceForKey', () => {
 
   it('without the dial: same query degrades to the stage-level ceiling (x appears to depend on b)', () => {
     const snap = mixedRun();
-    const xSlice = sliceForKey(snap.commitLog, 'x', keysReadFromExecutionTree(snap.executionTree));
+    const xSlice = sliceForKey(snap.commitLog, 'x', keysReadFromExecutionTree(snap.executionTree!));
     expect([...ids(xSlice.root!)].some((id) => id.startsWith('write-b#'))).toBe(true); // honest ceiling
   });
 });

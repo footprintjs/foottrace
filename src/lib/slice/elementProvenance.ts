@@ -53,7 +53,7 @@ import { type ValueBasis, commitValueAtWithBasis, rowsUnderRoot, writersOf } fro
 import type { CommitBundle } from '../memory/types.js';
 import { deepEqual, DELIM } from '../memory/utils.js';
 import { type Touch, foldKey, recordsTail } from '../memory/verbs.js';
-import { normaliseStateKey } from './sliceForKey.js';
+import { normaliseStateKey } from '../memory/paths.js';
 import type { ArrayProvenance, AttributionBasis, ElementBirth, StateKey } from './types.js';
 
 /** `prev` is a strict (leading, element-equal) prefix of `next`. */

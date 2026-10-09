@@ -17,8 +17,8 @@
  */
 import { deepFreeze } from '../../../../src/lib/capture/freeze';
 import { queryWork } from '../../../../src/lib/memory/keyPaths';
-import type { CommitBundle } from '../../../../src/trace';
-import { causalChain, commitValueAt, findLastWriter } from '../../../../src/trace';
+import type { CommitBundle } from '../../../../src/index';
+import { causalChain, commitValueAt, findLastWriter } from '../../../../src/index';
 
 const D = '\u001F';
 

@@ -26,7 +26,7 @@ interface Schema {
  *  is set AFTER `self` so a compare walks the cycle before it can find the
  *  one leaf that differs between two versions. */
 function cyclicSchema(version = 1): Schema {
-  const s = { name: 'search', params: { q: 'string' } } as Schema;
+  const s = { name: 'search', params: { q: 'string' } } as unknown as Schema;
   s.self = s;
   s.version = version;
   return s;

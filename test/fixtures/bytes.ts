@@ -1,7 +1,7 @@
 /**
  * The record's bytes as the fixtures pin them (README.md in this folder).
  *
- * `stringifySnapshot` — the record's own encoder: JSON, key order kept — over
+ * JSON.stringify — the same JSON law as the original engine encoder — over
  * a copy that spells what JSON drops and settles what the clock stamps:
  *   - Date → '«date:<ISO>»', Map → { '«map»': [[k, v], …] }, Set → { '«set»': […] },
  *     an own `undefined` (or an array slot) → '«undefined»';
@@ -12,7 +12,6 @@
  * ±Infinity → null, -0 → 0, an Error or RegExp → {}). Laid out two-space
  * indented, one value per line, so a re-pin reads as a diff.
  */
-import { stringifySnapshot } from '../../src/index.js';
 
 const RUN_ID = /^\d+-\d{10}$/;
 const CLOCK_KEYS = new Set(['timestamp', 'pausedAt']);
@@ -38,7 +37,7 @@ export function pinnedText(value: unknown): string {
     for (const k of Object.keys(v)) out[k] = tag((v as Record<string, unknown>)[k], k);
     return out;
   };
-  return `${JSON.stringify(JSON.parse(stringifySnapshot(tag(value, ''))), null, 2)}\n`;
+  return `${JSON.stringify(JSON.parse(JSON.stringify(tag(value, ''))), null, 2)}\n`;
 }
 
 /** The value a pinned text spelled: Date, Map, Set and own `undefined` restored. */

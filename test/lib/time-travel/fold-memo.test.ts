@@ -8,12 +8,12 @@
  * byte-identical before and after) · Contract (the standalone `stateAt`
  * keeps its answer).
  *
- * The record is written through `footprintjs/write` (test/helpers/recordRun.ts): the same bytes the
+ * The record is written through `foottrace/write` (test/helpers/recordRun.ts): the same bytes the
  * chart's executor wrote, with no engine loaded.
  */
 import { describe, expect, it } from 'vitest';
 
-import { stateAt, timeTravel } from '../../../src/trace.js';
+import { stateAt, timeTravel } from '../../../src/index.js';
 import { recordRun } from '../../helpers/recordRun.js';
 
 type State = {
@@ -23,7 +23,7 @@ type State = {
   [k: string]: unknown;
 };
 
-/** Twenty-five stages, written through `footprintjs/write` — the record a 25-stage chart writes. */
+/** Twenty-five stages, written through `foottrace/write` — the record a 25-stage chart writes. */
 function runFixture() {
   const run = recordRun();
   run.step(

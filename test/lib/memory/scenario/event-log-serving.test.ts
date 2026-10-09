@@ -4,12 +4,12 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import type { CommitBundle } from '../../../../src/trace';
-import { commitValueAt } from '../../../../src/trace';
+import type { CommitBundle } from '../../../../src/index';
+import { commitValueAt } from '../../../../src/index';
 import { EventLog } from '../../../../src/write';
 
 describe('EventLog serving and reader isolation', () => {
-  it('EventLog.list() on footprintjs/write serves its bundles the same way', () => {
+  it('EventLog.list() on foottrace/write serves its bundles the same way', () => {
     const log = new EventLog({});
     log.record({
       stage: 'S',
@@ -86,7 +86,7 @@ describe('EventLog serving and reader isolation', () => {
     });
     log.record(bundle(0, 'cfg', { cfg: { a: { x: 1 } } }));
     log.record(bundle(1, 'cfg\u001fa', { cfg: { a: { x: 2 } } }));
-    const frozenLog = Object.freeze(log.list());
+    const frozenLog = Object.freeze(log.list()) as unknown as CommitBundle[];
     const first = commitValueAt(frozenLog, 0, 'cfg\u001fa') as { x: number };
     first.x = 99;
     expect(commitValueAt(frozenLog, 0, 'cfg\u001fa')).toEqual({ x: 1 });

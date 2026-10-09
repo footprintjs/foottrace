@@ -208,7 +208,8 @@ export interface VandalOptions {
  * error's `cause`, and own non-enumerable values are reached too.
  */
 export function vandalize(root: unknown, options: VandalOptions | number = {}): number {
-  const { skip, onVisit, budget = 20_000 } = typeof options === 'number' ? { budget: options } : options;
+  const resolved: VandalOptions = typeof options === 'number' ? { budget: options } : options;
+  const { skip, onVisit, budget = 20_000 } = resolved;
   const seen = new Set<object>();
   let landed = 0;
   const visit = (v: unknown, path: VandalPath): void => {

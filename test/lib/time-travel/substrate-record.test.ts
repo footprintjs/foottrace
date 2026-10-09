@@ -1,5 +1,5 @@
 /** Reader compatibility; engine seed/resume/serving witnesses stay in substrate.test.ts. */
-import { stateAt, timeTravel } from '../../../src/trace';
+import { stateAt, timeTravel } from '../../../src/index';
 import { recordRun } from '../../helpers/recordRun';
 
 describe('the fold base is optional, but never invented', () => {

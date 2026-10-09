@@ -14,15 +14,15 @@
  * a reason. Never a crash, and never a silently shorter log — which would
  * shift every commit index after it.
  *
- * Every recording here is written through `footprintjs/write`
+ * Every recording here is written through `foottrace/write`
  * (test/helpers/recordRun.ts) — the bytes the charts' executor wrote, with no
  * engine loaded.
  */
 
 import { describe, expect, it } from 'vitest';
 
-import type { ExecutionTree } from '../../../src/trace.js';
-import { stateAt, timeTravel } from '../../../src/trace.js';
+import type { ExecutionTree } from '../../../src/index.js';
+import { stateAt, timeTravel } from '../../../src/index.js';
 import { recordRun } from '../../helpers/recordRun.js';
 
 /**
@@ -37,7 +37,7 @@ interface StoredRecording {
 
 /**
  * Collect → Decide → Report over a seeded tenant, written through
- * `footprintjs/write` (test/helpers/recordRun.ts) — the record that chart's
+ * `foottrace/write` (test/helpers/recordRun.ts) — the record that chart's
  * executor wrote, with no engine loaded. `live` is what a reader read off the
  * run: the log, its fold base, and the heap (`sharedState`).
  */

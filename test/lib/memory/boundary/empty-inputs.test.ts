@@ -1,6 +1,6 @@
 /**
  * Boundary: empty inputs — the record's classes with nothing in them: a heap with no seed, a buffer with no
- * writes, a log with no bundles, and a stage frame (`RecordFrame`, footprintjs/write) that stages nothing.
+ * writes, a log with no bundles, and a stage frame (`RecordFrame`, foottrace/write) that stages nothing.
  *
  * The frame's diagnostics are the engine's, not the record's: their empty case lives in
  * unit/DiagnosticCollector.test.ts.

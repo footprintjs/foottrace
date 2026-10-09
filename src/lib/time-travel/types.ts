@@ -2,7 +2,7 @@
  * time-travel/types.ts — the shapes of the reader's cursor.
  *
  * WHY THIS MODULE EXISTS (context for future readers, human or LLM):
- * Time travel in footprintjs is a READER'S cursor over a FINISHED trace, with
+ * Time travel in foottrace is a READER'S cursor over a FINISHED trace, with
  * a fold at each stop. It is not the Walker — the engine's traversal — and it
  * must never become a second live cursor: nothing here can move, re-run or
  * mutate an execution. Every consumer (a why-panel, a flow view, a chart
@@ -11,7 +11,7 @@
  * once, in the library that owns the substrate.
  *
  * DAG position: memory ← time-travel. Every file here is a record file
- * (`RECORD_FILES`, scripts/layering.config.cjs, C6): it may import only record
+ * (ranked in scripts/layers.json): it may import only record
  * files — memory/, the id grammar (`ids/runtimeStageId`), and the record's two
  * capture/ leaves (`freeze`, `valueKinds`). Recorders, traversal and runner
  * must never be imported here; the snapshot arrives as a plain structural
@@ -103,7 +103,7 @@ export interface TimeTravelSource {
  * so on screen. `index` is the position in that source's own log.
  *
  * Registry code: `'log-gap'` (`memory/honesty.ts · HONESTY_CODES`, served on
- * `footprintjs/trace`) says what a gap means. A gap carries no `code` field —
+ * `foottrace`) says what a gap means. A gap carries no `code` field —
  * it is registered so a reader explains it from the same place as the other
  * honesty signals.
  */
@@ -274,7 +274,7 @@ export type AxisSplit<TMeta = unknown> =
  *
  * What each value means is registered ONCE, with the other honesty signals, in
  * `memory/honesty.ts · HONESTY_CODES` (served as `HONESTY_CODES` on
- * `footprintjs/trace`); this union declares its members through
+ * `foottrace`); this union declares its members through
  * `RegisteredCode`, so a code the registry does not hold does not compile.
  */
 export type FoldBasis = RegisteredCode<'initial+log' | 'log-only'>;
@@ -292,7 +292,7 @@ export interface FoldedState {
    * rather than present a scrubbed value as the real one.
    *
    * Registry code: `'redacted'` (`memory/honesty.ts · HONESTY_CODES`, served on
-   * `footprintjs/trace`) says what this field and {@link FoldedState.redactedPaths} mean;
+   * `foottrace`) says what this field and {@link FoldedState.redactedPaths} mean;
    * neither carries a `code`. The placeholder is the log's string,
    * `memory/placeholders.ts · LOG_PLACEHOLDER`.
    */
@@ -374,7 +374,7 @@ export interface Mark {
 /**
  * How stops are DERIVED from a recorded log. The seam.
  *
- * footprintjs ships one strategy — `commitStops`, one stop per executed stage
+ * foottrace ships one strategy — `commitStops`, one stop per executed stage
  * — because that is the only stop grammar the substrate itself knows. A
  * consumer with a richer vocabulary (milestones, tool calls, turns) supplies
  * its own and gets the same cursor over it, and puts that vocabulary on

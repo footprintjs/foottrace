@@ -13,13 +13,13 @@
  * → `[]`) · Integration (a stored recording: JSON round trip; a row with
  * `tags` is accepted by `bundleRefusal`).
  *
- * Every record here is written through `footprintjs/write` (test/helpers/recordRun.ts): a tagged
+ * Every record here is written through `foottrace/write` (test/helpers/recordRun.ts): a tagged
  * stage is a step with `tags` — the bytes the chart with `.tag(...)` writes, with no engine loaded.
  */
 import { describe, expect, it } from 'vitest';
 
 import { bundleRefusal } from '../../../src/lib/time-travel/bundles.js';
-import { commitStops, isCommitBundle, splitAxis, stateAt, tagStops, timeTravel } from '../../../src/trace.js';
+import { commitStops, isCommitBundle, splitAxis, stateAt, tagStops, timeTravel } from '../../../src/index.js';
 import type { StepScope } from '../../helpers/recordRun.js';
 import { recordRun } from '../../helpers/recordRun.js';
 
