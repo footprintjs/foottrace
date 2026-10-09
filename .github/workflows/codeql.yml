@@ -1,0 +1,50 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [main, extract/foottrace]
+  pull_request:
+    # This filter names the PR's base; the extraction PR targets main.
+    branches: [main]
+  schedule:
+    # Scheduled scans start only after this file reaches the default branch.
+    - cron: '27 5 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codeql-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        # Match FootPrint's default CodeQL coverage and default query suite.
+        language: [javascript-typescript, actions]
+    steps:
+      - name: Check out the scan target
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        with:
+          languages: ${{ matrix.language }}
+          # Both languages are scanned from source; no dependency install or build hooks.
+          build-mode: none
+
+      - name: Analyze and upload results
+        uses: github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        with:
+          category: /language:${{ matrix.language }}

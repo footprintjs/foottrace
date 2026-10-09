@@ -12,7 +12,17 @@ This is the E3 candidate, not a published release. `package.json` names the inte
 
 ## Intentional changes
 
-Record algorithms and record bytes are unchanged. The only implementation relocation within the record is `normaliseStateKey`, with its `StateKey` type, from the slice layer into the path leaf. Its body is unchanged; slices import it there. This prevents a path-only import from loading the slice graph.
+The original extraction leaves record algorithms and frozen record bytes unchanged. `normaliseStateKey`, with its `StateKey` type, moves from the slice layer into the path leaf. Its body is unchanged; slices import it there. This prevents a path-only import from loading the slice graph.
+
+The subsequent security review found a preexisting rich-value copy defect, also present in published FootPrint 9.48.1. The coordinated 9.48.2 correction moves the existing `putOwn` implementation unchanged into private `capture/ownData.ts`; `capture/freeze.ts` and `memory/pathOps.ts` share it. Array named properties and restored built-in expandos no longer invoke an inherited setter or replace the fresh copy's prototype. No fixture is re-pinned. A corrected rich-value copy retains its own data field instead of losing it; ordinary copies, selectors and built-in serialization do not change. This is an explicit security fix in both maintained copies, not an unreported extraction behavior change.
+
+### Security follow-up gate
+
+Release the published FootPrint fix as 9.48.2 before publishing this candidate. Before E4, compare `src/lib/capture/ownData.ts`, `src/lib/capture/freeze.ts` and `src/lib/memory/pathOps.ts` byte-for-byte against that exact release, and run the corresponding public-writer regressions in both packages. The original extraction manifest remains historical provenance; do not rewrite its old blob identities to conceal the follow-up.
+
+CodeQL now has an explicit source-only JavaScript/TypeScript and Actions workflow. A scan that has not run is unknown, not clean. Pull-request/push results must be inspected before 1.0.0; the weekly scan and a default-branch baseline become active only after the workflow/source reaches `main`.
+
+Carry-over from FootPrint's security review: nested-helper alerts #12–17 were fixed in 9.48.1. The reviewed `pathOps` (#3, #7–10), `TransactionBuffer` (#4–6) and `utils` (#18) sites retain their selector/own-property guards; no alerts were dismissed during extraction. The separate adjacent `shallowCopy` defect is corrected here and in 9.48.2. Reconcile new Foottrace findings with those controls rather than treating an empty repository history as proof of safety. FootPrint's test-only ReDoS alert and consumer-audit shell alert belong to engine files that were not moved.
 
 Three entry points replace engine-hosted exports. Test imports follow those public entries except tests explicitly checking a private record rule. FootPrint's engine composes these same classes; it contains no substitute record implementation and re-exports no foottrace declarations.
 

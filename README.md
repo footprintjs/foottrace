@@ -2,7 +2,7 @@
 
 Execution records and the tools to read them: replay, time travel, slices, and evidence about where values came from. No flowchart engine, AI provider, or runtime dependency is required.
 
-This package extracts FootPrint's established record layer. It does not introduce a second writer or a different replay law. The first release preserves the record bytes produced by footprintjs 9.48.1, including its nested-selector safety fix.
+This package extracts FootPrint's established record layer. It does not introduce a second writer or a different replay law. The first release preserves the frozen record fixtures from footprintjs 9.48.1 and includes the coordinated 9.48.2 copy-safety correction: an own `__proto__` payload field stays data, never the copy's prototype. See the [changelog](CHANGELOG.md) for the limited rich-value behavior change.
 
 **Release status:** extraction candidate. Version 1.0.0 is not ready to publish until review and release checks are complete.
 

@@ -1,5 +1,6 @@
 {
   "src/lib/capture/freeze.ts": 0,
+  "src/lib/capture/ownData.ts": 0,
   "src/lib/capture/valueKinds.ts": 0,
   "src/lib/ids/runtimeStageId.ts": 0,
   "src/lib/memory/EventLog.ts": 3,

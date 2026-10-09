@@ -1,6 +1,6 @@
 # memory/ — the record writer and read model
 
-This directory owns the record, not the engine that produces it. It was extracted from FootPrint 9.48.1 without changing recorded bytes. Historical rationale remains in Git; current laws are in the [record contract](../../../docs/guides/record-contract.md).
+This directory owns the record, not the engine that produces it. It was extracted from FootPrint 9.48.1 without re-pinning its recorded-byte fixtures. The coordinated 9.48.2 security correction keeps copied payload fields as data through the shared private `capture/ownData.ts` helper; serving and path copying use that same rule. Historical rationale remains in Git; current laws are in the [record contract](../../../docs/guides/record-contract.md).
 
 ## One rule per owner
 
