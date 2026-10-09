@@ -38,9 +38,12 @@ function probe(files: Record<string, string>, ranks: Record<string, number>) {
 }
 
 describe('the record fence', () => {
+  // This integration check creates a cold TypeScript program for all source files.
+  // Coverage on a shared Node 22 runner can exceed the unit-test default (5 s);
+  // the fence is a correctness check, not a wall-clock performance assertion.
   it('accepts the real source graph without engine or platform dependencies', () => {
     expect(checkLayers().problems).toEqual([]);
-  });
+  }, 30_000);
 
   it('accepts a downward dependency', () => {
     expect(
