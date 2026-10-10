@@ -120,6 +120,7 @@ describe('foottrace public ownership', () => {
       'normalisePath',
       'getRunAndGlobalPaths',
       'redactPatch',
+      'causalChainFromCommit',
     ];
     for (const exports of Object.values(exportsByDoor))
       for (const name of privateNames) expect(exports.has(name), name).toBe(false);

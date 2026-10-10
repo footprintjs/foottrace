@@ -27,4 +27,13 @@ jobs:
         env:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: node -e "if (process.env.RELEASE_TAG !== 'v' + require('./package.json').version) process.exit(1)"
-      - run: npm publish --access public
+      - name: Pack the checked release
+        run: npm pack
+      - name: Retain the exact archive being published
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-tarball
+          path: foottrace-*.tgz
+          if-no-files-found: error
+      - name: Publish the checked archive
+        run: npm publish "./foottrace-$(node -p "require('./package.json').version").tgz" --access public
