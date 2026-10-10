@@ -1,6 +1,6 @@
 # Extraction evidence and release gates
 
-This is the E3 candidate, not a published release. `package.json` names the intended first version, 1.0.0; that is not a publication-ready declaration.
+This document records the E3 extraction and its first-release gates. `package.json` names the first version, 1.0.0; that alone proves neither publication readiness nor publication. The exact reviewed commit, its completed checks and the owner's publication are separate evidence.
 
 ## Provenance
 
@@ -16,7 +16,7 @@ The original extraction leaves record algorithms and frozen record bytes unchang
 
 The subsequent security review found a preexisting rich-value copy defect, also present in published FootPrint 9.48.1. The coordinated 9.48.2 correction moves the existing `putOwn` implementation unchanged into private `capture/ownData.ts`; `capture/freeze.ts` and `memory/pathOps.ts` share it. Array named properties and restored built-in expandos no longer invoke an inherited setter or replace the fresh copy's prototype. No fixture is re-pinned. A corrected rich-value copy retains its own data field instead of losing it; ordinary copies, selectors and built-in serialization do not change. This is an explicit security fix in both maintained copies, not an unreported extraction behavior change.
 
-### Security follow-up gate
+### Security follow-up and exact-release gate
 
 The subsequent own-field boundary review adds three explicit corrections:
 path writes/copy-on-write walks no longer traverse inherited ordinary fields;
@@ -26,20 +26,24 @@ placement now has one L0 owner shared by copies, record merges, diagnostics and
 transaction privatization. Its native-compatible and required-slot-creation
 operations preserve their distinct existing typed-array behavior. Own accessors,
 descriptor flags, payload names, record merge laws and built-in serialization
-are not changed. No scan suppression or dismissal is part of this work.
+are not changed. These guarantees cover ordinary data, not a sandbox for
+deliberately hostile proxies, getters or setters; existing own accessors keep
+their native behavior. The runtime fix adds no scan suppression.
 
-This coordinated follow-up must ship to FootPrint 9.x before Foottrace 1.0.0.
-Its exact release comparison covers `capture/ownData.ts` and `memory/pathOps.ts`,
-`memory/merge.ts`, `memory/utils.ts`, `memory/TransactionBuffer.ts`; the
-corresponding tests differ only where the packages' public entry points differ.
-The 9.48.2 comparison below remains evidence for that earlier fix, not proof for
-the newer candidate. Neither baseline manifests nor frozen fixtures are re-pinned.
+This coordinated follow-up shipped in FootPrint **9.48.3**, commit
+`0df7f5dd2f399915d6c57ad806ca434481838515`, before Foottrace 1.0.0 publication.
+The corresponding Foottrace fix is `14db5f93d74313c9ed026aa4b67e5b0922e9b6a4`.
+The exact comparison against that maintained release matches
+`capture/ownData.ts`, `memory/pathOps.ts`, `memory/merge.ts`, `memory/utils.ts`,
+`memory/TransactionBuffer.ts` and unchanged `capture/freeze.ts` byte-for-byte.
+The corresponding tests differ only where the packages' public entry points
+differ. Neither baseline manifests nor frozen fixtures are re-pinned.
 
-The earlier rich-value correction shipped in FootPrint 9.48.2; its three shared files were compared against that release. Before E4, compare the five follow-up files above plus `capture/freeze.ts` against the exact coordinated follow-up release, and run the corresponding public-writer regressions in both packages. The original extraction manifest remains historical provenance; do not rewrite its old blob identities to conceal either correction.
+The earlier rich-value correction shipped in FootPrint 9.48.2; its three shared files were compared against that release. That earlier comparison remains historical evidence, not proof for the newer candidate. The 9.48.3 comparison above and corresponding public-writer regressions in both packages cover the follow-up. Recheck them if these source files change before E4. The original extraction manifest remains historical provenance; do not rewrite its old blob identities to conceal either correction.
 
-CodeQL now has an explicit source-only JavaScript/TypeScript and Actions workflow. A scan that has not run is unknown, not clean. Pull-request/push results must be inspected before 1.0.0; the weekly scan and a default-branch baseline become active only after the workflow/source reaches `main`.
+CodeQL now has an explicit source-only JavaScript/TypeScript and Actions workflow. A scan that has not run is unknown, not clean. After owner approval, Foottrace findings [#7](https://github.com/footprintjs/foottrace/security/code-scanning/7), [#10](https://github.com/footprintjs/foottrace/security/code-scanning/10) and [#11](https://github.com/footprintjs/foottrace/security/code-scanning/11) were individually dismissed as false positives, with the reason, regression-test reference and ordinary-data limitation recorded on each finding. This review does not remove queries or exclude source paths. Before 1.0.0 publication, merge the reviewed candidate and require a completed full scan of the **exact final `main`/release commit**, with zero **open** findings. A never-scanned `main` or a pull-request-only result does not count. Approved dismissed findings can remain in raw scan results. If release preparation changes the commit, scan that final commit again before declaring readiness.
 
-Carry-over from FootPrint's security review: nested-helper alerts #12–17 were fixed in 9.48.1. The reviewed `pathOps` (#3, #7–10), `TransactionBuffer` (#4–6) and `utils` (#18) sites retain their selector/own-property guards; no alerts were dismissed during extraction. The separate adjacent `shallowCopy` defect is corrected here and in 9.48.2. Reconcile new Foottrace findings with those controls rather than treating an empty repository history as proof of safety. FootPrint's test-only ReDoS alert and consumer-audit shell alert belong to engine files that were not moved.
+Carry-over from FootPrint's security review: nested-helper alerts #12–17 were fixed in 9.48.1. The reviewed `pathOps` (#3, #7–10), `TransactionBuffer` (#4–6) and `utils` (#18) sites retain their selector/own-property guards; the initial extraction did not dismiss those FootPrint alerts. Foottrace's later owner-approved dispositions are listed separately above. The separate adjacent `shallowCopy` defect is corrected here and in 9.48.2. Reconcile new Foottrace findings with those controls rather than treating an empty repository history as proof of safety. FootPrint's test-only ReDoS alert and consumer-audit shell alert belong to engine files that were not moved.
 
 Three entry points replace engine-hosted exports. Test imports follow those public entries except tests explicitly checking a private record rule. FootPrint's engine composes these same classes; it contains no substitute record implementation and re-exports no foottrace declarations.
 
@@ -65,8 +69,8 @@ The candidate's tests must also run without an installed footprintjs package. No
 
 ## First release is separately gated
 
-1. Independently review both candidates and pass GitHub checks.
-2. Complete E4 release preparation, name the exact commit and tag, and explicitly declare that foottrace 1.0.0 is ready to publish.
+1. Independently review both candidates and pass GitHub checks. Merge Foottrace with the extracted file history preserved; FootPrint's engine extraction remains unmerged.
+2. Complete E4 release preparation, pass the exact final `main`/release-commit scan above with zero open findings, name that commit and tag, and explicitly declare that foottrace 1.0.0 is ready to publish. Do not reuse a scan of an earlier commit.
 3. The owner manually publishes that exact version using their own npm login and two-factor authentication. Never publish a placeholder.
 4. Configure trusted publishing close to the first automated release, following current npm instructions. The workflow is `.github/workflows/publish.yml`, uses direct `npm publish`, and has no GitHub environment. Its initial `v1.0.0` event is deliberately excluded so it cannot race the manual bootstrap.
 5. Only after publication do E5 consumer migrations begin. The FootPrint extraction branch remains unmerged until those migrations are complete, then ships as FootPrint 10.0.0 in E6.
