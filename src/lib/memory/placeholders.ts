@@ -16,14 +16,14 @@
  *     (`slice/`, `time-travel/`) only name it in their docs: they meet it as data in the log;
  *   - `SCOPE_PLACEHOLDER` (`'[REDACTED]'`) is the ENGINE's: the scope channel's retained reads and
  *     writes, recorder events, the narrative. It lives beside the verdict that writes it
- *     (`memory/redaction.ts`, L4). Until C4 both sat in this file ("two placeholders, one leaf");
+ *     (FootPrint's `memory/redaction.ts`). Until C4 both sat in this file ("two placeholders, one leaf");
  *     the record took the engine's string with it.
  *
  * WHY A LEAF OF ITS OWN (and not beside `honesty.ts · HONESTY_CODES`). Different readers, different
  * reasons to change: this string is written on the engine's WRITE path on every redacted run, the
  * honesty registry is read by a reader that explains a recording — and the registry's sentences have
  * no business in the bundle of an app that only runs charts. This file imports NOTHING, so it is L0
- * (the layer table is `scripts/layering.config.cjs`).
+ * (the layer table is `scripts/layers.json`).
  */
 
 /**

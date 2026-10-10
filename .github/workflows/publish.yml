@@ -1,0 +1,30 @@
+name: Publish
+on:
+  release:
+    types: [published]
+permissions:
+  contents: read
+jobs:
+  publish:
+    # Bootstrap 1.0.0 belongs to the owner. This workflow must never race that manual publish.
+    if: github.event.release.tag_name != 'v1.0.0' && !github.event.release.prerelease
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - run: npm install -g npm@11
+      - run: npm ci
+      - run: npm run check
+      - name: Require the tag to match the package version
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: node -e "if (process.env.RELEASE_TAG !== 'v' + require('./package.json').version) process.exit(1)"
+      - run: npm publish --access public

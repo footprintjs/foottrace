@@ -3,13 +3,13 @@
  *
  * One law (`memory/verbs.ts`), seen the way a consumer sees it:
  *
- *   (a) RECORDED LOGS — a run's stages written through footprintjs/write (the
+ *   (a) RECORDED LOGS — a run's stages written through foottrace/write (the
  *       frame the engine writes with; test/helpers/recordRun.ts — byte for byte
  *       the log the flowchart of these stages writes), both `commitValues`
  *       encodings, carry only the four verbs, and every door agrees on it: the
  *       whole log folded through `applySmartMerge` is the live state,
  *       `commitValueAt` / `arrayProvenance` answer what the state holds (all
- *       three on `footprintjs/trace`; the fold is also on `/advanced` until
+ *       three on `foottrace`; the fold is also on `/advanced` until
  *       10.0.0), and nothing throws. The engine's own half of R2 — "engine-written
  *       logs never carry an unknown verb, so every engine run is byte-identical"
  *       — is pinned byte for byte by the record-bytes fixtures (`verbs`).
@@ -23,7 +23,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { CommitBundle } from '../../../../src/lib/memory/types';
 import { isVerb } from '../../../../src/lib/memory/verbs';
-import { applySmartMerge, arrayProvenance, commitValueAt, stateAt, UnknownVerbError } from '../../../../src/trace';
+import { applySmartMerge, arrayProvenance, commitValueAt, stateAt, UnknownVerbError } from '../../../../src/index';
 import { recordRun } from '../../../helpers/recordRun';
 
 type Loose = Record<string, unknown>;

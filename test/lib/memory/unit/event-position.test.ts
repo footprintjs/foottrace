@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
 import { EventLog } from '../../../../src/lib/memory/EventLog.js';
+import type { CommitBundle } from '../../../../src/lib/memory/types.js';
 
 describe('EventLog source position', () => {
   it('stays unknown without an engine binding, even when history exists', () => {
     const log = new EventLog({});
-    log.record({ stage: 'one', overwrite: {}, updates: {}, trace: [], redactedPaths: [] });
+    log.record({ stage: 'one', overwrite: {}, updates: {}, trace: [], redactedPaths: [] } as unknown as CommitBundle);
     expect(log.address).toBeUndefined();
     expect(log.capturePosition('leg')).toBeUndefined();
   });
@@ -22,7 +23,7 @@ describe('EventLog source position', () => {
       drillPath: ['mount#1'],
       committedThroughIdx: -1,
     });
-    log.record({ stage: 'one', overwrite: {}, updates: {}, trace: [], redactedPaths: [] });
+    log.record({ stage: 'one', overwrite: {}, updates: {}, trace: [], redactedPaths: [] } as unknown as CommitBundle);
     log.bindAddress('resumed-leg', []);
     const after = log.capturePosition('resumed-leg')!;
     expect(after).toEqual({ ...before, runId: 'resumed-leg', committedThroughIdx: 0 });

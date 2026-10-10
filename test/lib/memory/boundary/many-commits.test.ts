@@ -1,5 +1,5 @@
 /**
- * Boundary: many commits — a chain of stage frames (`RecordFrame`, footprintjs/write), one per commit, at a
+ * Boundary: many commits — a chain of stage frames (`RecordFrame`, foottrace/write), one per commit, at a
  * run's address (`['runs', 'p1']`): the log keeps every bundle, folds at any step, and accumulates merges.
  */
 import { EventLog, RecordFrame, SharedMemory } from '../../../../src/write';

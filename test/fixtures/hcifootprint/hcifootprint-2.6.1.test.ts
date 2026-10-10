@@ -1,21 +1,7 @@
 /**
- * hcifootprint 2.6.1's real transitions (./transitions-2.6.1.json), replayed
- * two ways, must give what they gave on footprintjs 9.44.1, byte for byte: the
- * commit log, the fold base, the state and the reads.
- *
- *   - through the calls 2.6.1 makes on the `/advanced` door — its session
- *     constructor and `#commitDelta` (src/traverse/session.ts), copied below;
- *   - through `footprintjs/write` (C5), the way hcifootprint 2.7.0 writes the
- *     same session — the calls its constructor and `#commitDelta` make, copied
- *     below with the session's fields replaced by the captured values (`open`,
- *     each write's redact flag, `stage` and `stageId`, which 2.7.0 both takes
- *     from its stage name): a `SharedMemory`, an `EventLog`, and one
- *     `RecordFrame` per transition.
- *
- * How they were captured, and the re-pin policy: ../README.md.
- *
- * Test types: Byte-identity (seven sessions, both encodings, both routes) ·
- * Contract (the capture holds what it claims).
+ * Captured hcifootprint 2.6.1 transitions, replayed through the record writer
+ * used since 2.7.0. The original JSON bytes and capture assertions are unchanged.
+ * The retired engine-frame replay stays out of this engine-free package (E3).
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -23,8 +9,6 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
-import { ExecutionRuntime, RedactionRule, runPolicy, ScopeFacade } from '../../../src/advanced.js';
-import type { ScopeRecorder } from '../../../src/index.js';
 import type { RecordEncoding, WriteScrub } from '../../../src/write.js';
 import { EventLog, RecordFrame, SharedMemory } from '../../../src/write.js';
 import { pinnedText, revive } from '../bytes.js';
@@ -53,48 +37,10 @@ const FILE = join(dirname(fileURLToPath(import.meta.url)), 'transitions-2.6.1.js
 const doc = JSON.parse(readFileSync(FILE, 'utf8')) as { capturedFrom: string; sessions: CapturedSession[] };
 const { sessions } = doc;
 
-/** One 2.6.1 session, reduced to its record calls. */
-function replay({ open, transitions }: CapturedSession) {
-  // constructor
-  const runtime = new ExecutionRuntime(
-    open.rootName,
-    open.rootId,
-    undefined,
-    revive(open.initialState),
-    runPolicy({ commitValues: open.commitValues, writeProvenance: open.writeProvenance }, new RedactionRule(), false),
-  );
-  const readsByStep = new Map<string, string[]>();
-  const recorder: ScopeRecorder = {
-    id: 'hcifootprint-session',
-    onRead: (event) => {
-      if (!event.key || !event.runtimeStageId) return;
-      const reads = readsByStep.get(event.runtimeStageId) ?? [];
-      reads.push(event.key);
-      readsByStep.set(event.runtimeStageId, reads);
-    },
-  };
-  for (const t of transitions) {
-    // #commitDelta
-    const ctx = runtime.newRoot(t.stage, t.stageId);
-    ctx.runtimeStageId = t.runtimeStageId;
-    const scope = new ScopeFacade(ctx, t.stage);
-    scope.attachScopeRecorder(recorder);
-    for (const key of t.reads) scope.getValue(key);
-    for (const [key, value, redact] of t.writes) scope.setValue(key, revive(value), redact);
-    ctx.commit();
-  }
-  return {
-    commitLog: [...runtime.executionHistory.list()],
-    initialState: runtime.executionHistory.getInitialState(),
-    state: runtime.globalStore.getState(),
-    reads: [...readsByStep],
-  };
-}
-
 /** The whole-value scrub hcifootprint 2.7.0 hands a `redactedKeys` write. */
 const REDACT_WHOLE: WriteScrub = Object.freeze({ whole: true });
 
-/** The same session, written the way hcifootprint 2.7.0 writes it: through `footprintjs/write`. */
+/** The same session, written the way hcifootprint 2.7.0 writes it: through `foottrace/write`. */
 function replayThroughWrite({ open, transitions }: CapturedSession) {
   // constructor
   const state = new SharedMemory(undefined, revive(open.initialState));
@@ -127,16 +73,16 @@ function replayThroughWrite({ open, transitions }: CapturedSession) {
 
 // Re-pin, for a named law fix only (../README.md): the calls never change; what they record does.
 if (process.env.RECORD_BYTES_REPIN === '1') {
-  for (const session of sessions) session.recorded = replay(session);
+  for (const session of sessions) session.recorded = replayThroughWrite(session);
   writeFileSync(FILE, pinnedText(doc));
 }
 
 describe('record bytes — hcifootprint 2.6.1 transitions pinned on 9.44.1', () => {
-  it.each(sessions.map((s) => [s.name, s] as const))('%s', (_name, session) => {
-    expect(pinnedText(replay(session))).toBe(pinnedText(session.recorded));
+  it('the standalone JSON encoder preserves the complete stored fixture bytes', () => {
+    expect(pinnedText(doc)).toBe(readFileSync(FILE, 'utf8'));
   });
 
-  it.each(sessions.map((s) => [s.name, s] as const))('%s — through footprintjs/write (2.7.0)', (_name, session) => {
+  it.each(sessions.map((s) => [s.name, s] as const))('%s — through foottrace/write (2.7.0)', (_name, session) => {
     expect(pinnedText(replayThroughWrite(session))).toBe(pinnedText(session.recorded));
   });
 

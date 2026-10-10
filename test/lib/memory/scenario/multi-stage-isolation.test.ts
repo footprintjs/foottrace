@@ -1,5 +1,5 @@
 /**
- * Scenario: multi-stage isolation — each stage's frame (`RecordFrame`, footprintjs/write) stages into its own
+ * Scenario: multi-stage isolation — each stage's frame (`RecordFrame`, foottrace/write) stages into its own
  * buffer: a fork's children (two frames at the run's address, `['runs', 'p1']`) and a linear chain alike
  * see only their own uncommitted writes and every committed one.
  */

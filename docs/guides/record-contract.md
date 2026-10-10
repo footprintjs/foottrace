@@ -3,7 +3,7 @@
 Time travel, the fold and the lenses read a finished run's **record**. They
 never call the executor. So the record's shape is an interface: write it,
 from any runtime, and you get the cursor, the fold, the stops, and the
-Lens. This page is that interface, as footprintjs 9.27.0 reads it. The
+Lens. This page is that interface, carried from footprintjs into foottrace 1.0.0. The
 tests that enforce every line are named at the bottom.
 
 ## What a record is
@@ -85,13 +85,13 @@ producer that writes only top-level keys never needs it.
   agentfootprint's tag vocabulary over this record, not part of it.
 - The served receipt, injections and the story trace are agentfootprint's
   own keys in the state; the fold carries them like any key.
-- A record version field. The contract is versioned by the footprintjs
+- A record version field. The contract is versioned by the foottrace
   version that reads it, named at the top of this page.
 
 ## Bring your own record
 
 ```ts
-import { stateAt, tagStops, timeTravel } from 'footprintjs/trace';
+import { stateAt, tagStops, timeTravel } from 'foottrace';
 
 const record = {
   initialState: { count: 0, items: [] },
@@ -113,7 +113,7 @@ The full example, run as an integration test, is
 
 ## Writing a record
 
-A record can be written by hand, as above, or through `footprintjs/write`:
+A record can be written by hand, as above, or through `foottrace/write`:
 the record layer the engine itself writes with. There is no wrapper, so a
 record written this way comes from the same code — and the same bytes — as one
 a flowchart wrote, and it keeps the laws above by construction:
@@ -130,7 +130,7 @@ a flowchart wrote, and it keeps the laws above by construction:
   names you declare up front (law 6), never a value the step computed.
 - **Addresses are yours to keep unique** (law 5): build them with
   `buildRuntimeStageId` and one `createExecutionCounter` from
-  `footprintjs/trace`, never reset.
+  `foottrace`, never reset.
 - **The two dials** are the frame's encoding (`useEncoding`):
   `commitValues: 'full' | 'delta'` (a grown array is an `append` of its tail
   under `'delta'`) and `writeProvenance: 'off' | 'reads-prefix'` (each row
@@ -145,12 +145,11 @@ a flowchart wrote, and it keeps the laws above by construction:
   setValue` / `updateValue` (they write the heap with no bundle), `EventLog ·
   clear` (wipes the history), `materialise` (deprecated: use `stateAt`),
   `recorded` / `bindAddress` (internal), and `RecordFrame · useAddress` (only
-  before a frame's first write, which the frame does not check). The API page,
-  `docs-site/src/content/docs/api/write.mdx`, says why for each.
+  before a frame's first write, which the frame does not check).
 
 ```ts
-import { buildRuntimeStageId, createExecutionCounter, stateAt, tagStops, timeTravel } from 'footprintjs/trace';
-import { EventLog, RecordFrame, SharedMemory } from 'footprintjs/write';
+import { buildRuntimeStageId, createExecutionCounter, stateAt, tagStops, timeTravel } from 'foottrace';
+import { EventLog, RecordFrame, SharedMemory } from 'foottrace/write';
 
 const state = new SharedMemory(undefined, { count: 0, items: [] as number[] });
 const log = new EventLog(state.getState()); // the frozen base (law 1)
@@ -175,8 +174,72 @@ stateAt(record, 3).state; // { items: [10] }
 timeTravel(record, { strategy: tagStops(['milestone:step']) }).stops; // start, the `grow` stop, end
 ```
 
-The full example, with a redacted write and the readers that read it, is
-`examples/post-execution/time-travel/07-write-a-record.ts`.
+The standalone reader example is
+`examples/post-execution/time-travel/06-bring-your-own-record.ts`.
+
+## Public helpers and their contracts
+
+The three doors have distinct responsibilities: `foottrace` reads records and
+runtime IDs, `foottrace/write` owns record creation, and `foottrace/paths` owns
+record paths and nested diagnostic writes. A declaration has one public door.
+
+ID paths and record paths use different grammars. `idPathSegments('/a//b/')`
+returns `['a', 'b']`, dropping empty ID segments. Record `pathSegments` preserves
+empty segments and literal dots. `normaliseStateKey` accepts either an already
+encoded record path or a readonly array of segments; a string such as `'a.b'`
+is a literal key. `nativeGet` and `nativeHas` accept arrays or dot-separated
+strings, so decode a recorded path before passing it to them:
+
+```ts
+import { normaliseStateKey, pathSegments, nativeGet } from 'foottrace/paths';
+
+const key = normaliseStateKey(['a.b', 'c']);
+nativeGet({ 'a.b': { c: 1 } }, pathSegments(key)); // 1
+```
+
+`nativeGet` refuses `__proto__`, `constructor` and `prototype` selectors and
+requires an own property at every step. `nativeHas` tests own existence,
+including those names and values that are `undefined`; it does not apply the
+denied-name rule. `isDeniedSegment` exposes that exact rule. The nested writers
+refuse a whole selector containing a denied name before creating any containers.
+Their arrays concatenate when updated, an empty array clears, and object updates
+use the existing shallow merge. Payload keys remain data.
+
+The ID helpers do not validate arbitrary strings. `isExecutionKey` checks for
+the execution delimiter; `stageIdOf` returns the full prefixed stage ID, while
+`splitStageId(...).localStageId` returns its final segment. `PATH_DELIMITER` and
+`EXECUTION_DELIMITER` describe the ID grammar, not the record-path encoding.
+
+`deepEqual` compares recorded state: an own `undefined` equals an absent key,
+`0` equals `-0`, array expandos are ignored, and Map keys use identity. Its
+default opaque-value rule is identity. Use `'copies'` only when comparing copies
+of one recorded value: it considers opaque values of the same kind equal, without
+inspecting their contents.
+
+`freezeRecord` consumes a writer-owned object in place. It freezes containers,
+may replace a typed-array or DataView slice with a copy of its visible bytes,
+and remembers values that cannot be sealed. `serveRecord` then copies those
+values and their containing paths, sharing sealed subtrees. Both functions must
+come from the same installed package and module format so they share that
+metadata. Passing an arbitrary object directly to `serveRecord` returns that
+object unchanged; it is not a general copying or validation function.
+
+```ts
+import { serveRecord } from 'foottrace';
+import { freezeRecord } from 'foottrace/write';
+
+const record = freezeRecord({ when: new Date(5), label: { text: 'kept' } });
+const held = serveRecord(record);
+held.when.setTime(99);
+serveRecord(record).when.getTime(); // 5
+held.label === record.label; // true: a frozen subtree can be shared
+```
+
+`deepFreeze` is a guard over owned containers, not a guarantee that every
+native internal slot is immutable. It skips typed-array views, leaves a Date's
+time and Map/Set contents mutable, and does not descend into already frozen
+objects. Its default array walk includes expandos; `'indices'` does not. The
+writer's `LOG_PLACEHOLDER` is the historical `'REDACTED'` record byte.
 
 ## Enforced by
 
@@ -187,11 +250,14 @@ The full example, with a redacted write and the readers that read it, is
   the cursor with no cast.
 - `test/lib/time-travel/fold-memo.test.ts` — the fold never touches the
   record, and stepping equals a fresh fold at every stop.
-- `test/lib/memory/scenario/write-door-same-bytes.test.ts` — the same steps
-  written through `footprintjs/write` and run as a flowchart give the same
-  commit log, byte for byte, and the readers answer the same on both.
+- The footprintjs engine witness `test/lib/memory/scenario/write-door-same-bytes.test.ts`
+  checks that the same steps through `foottrace/write` and a flowchart give
+  the same commit log and reader answers.
 - `test/fixtures/hcifootprint/hcifootprint-2.6.1.test.ts` — a real
-  producer's stored transitions, replayed through `footprintjs/write`, give
+  producer's stored transitions, replayed through `foottrace/write`, give
   the stored bytes.
-- `test/architecture/write-door.test.ts` — `footprintjs/write` names and
-  loads nothing of the engine.
+- `test/architecture/exports.test.ts` and `test/architecture/layering.test.ts`
+  enforce three canonical doors and an engine-free source graph.
+- `test/architecture/public-door-state.test.ts` and
+  `test/architecture/public-helper-contracts.test.ts` exercise the helper
+  contracts, including shared freeze metadata through the built ESM and CJS doors.

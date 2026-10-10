@@ -14,7 +14,7 @@ import { SharedMemory } from '../../../../src/lib/memory/SharedMemory';
 import { TransactionBuffer } from '../../../../src/lib/memory/TransactionBuffer';
 import type { CommitBundle, TraceEntry } from '../../../../src/lib/memory/types';
 import { applySmartMerge, applySmartMergeInto, dryFold, nextGeneration } from '../../../../src/lib/memory/utils';
-import { stateAt } from '../../../../src/trace';
+import { stateAt } from '../../../../src/index';
 
 function expectDataKey(object: object, key: string, value: unknown, frozen = false): void {
   expect(Object.getPrototypeOf(object)).toBe(Object.prototype);
@@ -174,14 +174,13 @@ describe('merge — the CI counterexample through every replay discipline', () =
     buffer.merge(['a'], updates.a);
     expectDataKey(buffer.get(['a']) as object, '__proto__', []);
     const patch = buffer.commit();
-    const bundle: CommitBundle = {
+    const bundle = {
       idx: 0,
       stage: 'Merge',
       stageId: 'merge',
       runtimeStageId: 'merge#0',
-      redactedPaths: [],
       ...patch,
-    };
+    } as unknown as CommitBundle;
     const memory = new SharedMemory(undefined, {});
     memory.applyPatch(patch.overwrite, patch.updates, patch.trace);
     expectDataKey(memory.getState().a as object, '__proto__', []);

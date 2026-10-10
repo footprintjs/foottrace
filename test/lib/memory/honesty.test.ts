@@ -48,7 +48,7 @@ import {
   keyTimeline,
   sliceForKey,
   stateAt,
-} from '../../../src/trace';
+} from '../../../src/index';
 
 const REPO = resolve(__dirname, '../../..');
 
@@ -488,7 +488,7 @@ describe('every code the slice queries and the fold emit is on the registry — 
 });
 
 describe('the doors', () => {
-  it('footprintjs/trace hands out the very registry object', () => {
+  it('foottrace hands out the very registry object', () => {
     expect(publicHonestyCodes).toBe(HONESTY_CODES);
   });
 });

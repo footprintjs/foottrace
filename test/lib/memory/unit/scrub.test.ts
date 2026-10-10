@@ -14,7 +14,7 @@ import { DELIM } from '../../../../src/lib/memory/paths';
 import { LOG_PLACEHOLDER } from '../../../../src/lib/memory/placeholders';
 import { redactPatch, scrubPatch } from '../../../../src/lib/memory/scrub';
 
-describe('redactPatch — the public scrub (footprintjs/advanced)', () => {
+describe('redactPatch — the retained internal scrub', () => {
   it('redacts an existing defined value', () => {
     const patch = { user: { name: 'Alice', ssn: '123-45-6789' }, score: 99 };
     const redacted = redactPatch(patch, new Set([`user${DELIM}ssn`]));

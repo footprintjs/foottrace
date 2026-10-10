@@ -9,7 +9,7 @@
  *             every later rewrite of the container, because each commit re-copies the Blob
  *   scenario  the replacement check still sees a new Blob: replacing one commits a row
  *
- * The scenarios' stages are written through footprintjs/write (test/helpers/recordRun.ts — the log the
+ * The scenarios' stages are written through foottrace/write (test/helpers/recordRun.ts — the log the
  * flowchart of those stages writes, byte for byte). The borrowed-mutation guard (a stage that only READS a
  * Blob is not warned that it changed it in place) is the engine frame's dev-mode report, not the record's:
  * it moved to unit/StageContext.test.ts ("the borrowed-mutation guard — an opaque value").
@@ -17,7 +17,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { deepEqual } from '../../../../src/lib/memory/equality';
-import { findLastWriter } from '../../../../src/trace';
+import { findLastWriter } from '../../../../src/index';
 import { recordRun } from '../../../helpers/recordRun';
 
 describe("deepEqual's two rules for an opaque value", () => {

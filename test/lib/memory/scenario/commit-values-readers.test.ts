@@ -1,5 +1,5 @@
 /** Readers of either encoding need the record, not the engine's loop scheduler. */
-import { causalChain, commitValueAt, findCommit, findLastWriter } from '../../../../src/trace';
+import { causalChain, commitValueAt, findCommit, findLastWriter } from '../../../../src/index';
 import { growingHistoryRecord } from '../../../helpers/growingHistoryRecord';
 
 const canonical = (value: unknown): unknown => JSON.parse(JSON.stringify(value) ?? 'null');

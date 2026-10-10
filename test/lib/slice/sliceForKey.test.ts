@@ -6,7 +6,7 @@
  * key's last writer, delegate to causalChain, honest absence as a result
  * (`missing`), and the keysRead strategy breadcrumb (`keysReadKind`).
  *
- * The functional run's record is written through footprintjs/write (test/helpers/recordRun.ts) — the
+ * The functional run's record is written through foottrace/write (test/helpers/recordRun.ts) — the
  * same commit log and execution tree, byte for byte, the chart wrote through the engine (E1). The
  * control-edge integration needs the engine's ControlDepRecorder: it lives in sliceForKey.engine.test.ts.
  */

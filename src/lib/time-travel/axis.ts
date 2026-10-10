@@ -36,7 +36,7 @@ import type { AxisSplit, Stop, StopKind } from './types.js';
  *
  * @example
  * ```typescript
- * import { commitStops, splitAxis } from 'footprintjs/trace';
+ * import { commitStops, splitAxis } from 'foottrace';
  *
  * const axis = splitAxis(commitStops(snapshot.commitLog, snapshot.executionTree));
  * if (axis.ok) {
@@ -122,8 +122,8 @@ function retyped<TMeta>(stop: Stop<unknown>): Stop<TMeta> {
  *
  * @example
  * ```typescript
- * import { commitStops, filterStops } from 'footprintjs/trace';
- * import type { Stop, TimeTravelStrategy } from 'footprintjs/trace';
+ * import { commitStops, filterStops } from 'foottrace';
+ * import type { Stop, TimeTravelStrategy } from 'foottrace';
  *
  * type Milestone = { kind: 'llm-turn' | 'tool-call'; label: string };
  * declare function milestoneFor(runtimeStageId: string): Milestone | null;

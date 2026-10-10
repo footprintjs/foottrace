@@ -13,11 +13,11 @@
  *             replacing stage commits a row, and live state and the record hold the new value
  *   boundary  a replacement with the same content commits no row — the filter still drops a no-op
  *
- * Public doors only — the two stages are written through footprintjs/write (test/helpers/recordRun.ts:
- * the frame a `$setValue` stages on) and read through footprintjs/trace — so the file runs unchanged
+ * Public doors only — the two stages are written through foottrace/write (test/helpers/recordRun.ts:
+ * the frame a `$setValue` stages on) and read through foottrace — so the file runs unchanged
  * against any build that has the write door (9.47.0 on).
  */
-import { commitValueAt } from '../../../../src/trace';
+import { commitValueAt } from '../../../../src/index';
 import { recordRun } from '../../../helpers/recordRun';
 import { recordKey } from '../../../helpers/valueKinds';
 

@@ -12,12 +12,12 @@
  * (the same content — an opaque value inside is never the same one), and `b` the very object `a`.
  * Red before 9.44.2: the first counterexample is two RegExps, buffers or errors that differ.
  *
- * The two stages are written through footprintjs/write (test/helpers/recordRun.ts): the frame a
+ * The two stages are written through foottrace/write (test/helpers/recordRun.ts): the frame a
  * `$setValue` stages on, with nothing of the engine around it.
  */
 import fc from 'fast-check';
 
-import { commitValueAt } from '../../../../src/trace';
+import { commitValueAt } from '../../../../src/index';
 import { recordRun } from '../../../helpers/recordRun';
 import { cloneable, recordKey } from '../../../helpers/valueKinds';
 

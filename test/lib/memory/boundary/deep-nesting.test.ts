@@ -1,6 +1,6 @@
 /**
  * Boundary: deep nesting — a write 20 levels deep, staged by one stage's frame (`RecordFrame`,
- * footprintjs/write) at a run's address, commits and reads back.
+ * foottrace/write) at a run's address, commits and reads back.
  *
  * The frame's own deep trees (a 50-stage `createNext` chain, a branching `createChild` tree) are the
  * engine's frame, not the record: they live in unit/StageContext.test.ts ("deep trees").

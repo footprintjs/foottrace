@@ -1,11 +1,11 @@
 /**
- * One vocabulary for what a reader cannot see (F4a) — asked of the type checker, over `footprintjs/trace`.
+ * One vocabulary for what a reader cannot see (F4a) — asked of the type checker, over `foottrace`.
  *
  * `memory/honesty.ts · HONESTY_CODES` is the registry of every honesty code a trace reader speaks, and a
  * union declared through `RegisteredCode` cannot hold a code the registry does not. What that cannot stop
  * is a NEW union of codes that never goes through `RegisteredCode` — a second vocabulary, with its own
  * words, that a why-panel or an agent tool would have to explain from a table of its own. This test asks
- * the TypeScript checker for every type alias `src/trace.ts` exports (re-exports resolved to their
+ * the TypeScript checker for every type alias `src/index.ts` exports (re-exports resolved to their
  * declarations) and, for each one that is a union of string literals, demands one of two things:
  *
  *   - every member is a registered code (`Object.keys(HONESTY_CODES)`), or
@@ -24,22 +24,21 @@ import { describe, expect, it } from 'vitest';
 import { HONESTY_CODES } from '../../src/lib/memory/honesty';
 
 const REPO = resolve(__dirname, '../..');
-const TRACE = join(REPO, 'src/trace.ts');
+const TRACE = join(REPO, 'src/index.ts');
 
 /**
- * Unions of string literals `footprintjs/trace` exports that are NOT honesty vocabularies — each with
+ * Unions of string literals `foottrace` exports that are NOT honesty vocabularies — each with
  * the reason. A name here is a decision, not an escape hatch: it must still be exported and still be a
  * literal union, or the scenario below fails.
  */
 const NOT_HONESTY: Record<string, string> = {
   AxisRefusal:
     'what splitAxis answers when a list of stops has no bookended axis — a verdict on the stops, not a gap in the recording',
+  CommitValuesMode: 'how a record encodes committed values (full / delta) — encoding, not missing evidence',
   CommitPhase:
     'which continuation of a stage a bundle is (exit / repeat, F8) — structure of the record, not a gap in it',
   MoveRefusal: 'why a cursor move did not happen (clamped, miss, empty) — navigation, not a gap in the recording',
   StopKind: 'what a time-travel stop is (its place on the axis) — structure, not what a reader cannot see',
-  InOutPhase: 'which side of a boundary an in/out entry records — structure',
-  TopologyIncomingKind: 'how a topology node was entered — structure',
   UntrackedSource:
     "the VALUES `CausalNode.incompleteSources` carries (args, env, silent); the signal itself is registered as 'incomplete-sources'",
 };
@@ -128,7 +127,7 @@ describe('the literal-union classifier', () => {
 
 // ── scenario: the real door ──────────────────────────────────────────────────
 
-describe('footprintjs/trace — every union of string literals it exports', () => {
+describe('foottrace — every union of string literals it exports', () => {
   const unions = exportedLiteralUnions(programOver(TRACE), TRACE);
   const registered = new Set(Object.keys(HONESTY_CODES));
 
@@ -144,7 +143,7 @@ describe('footprintjs/trace — every union of string literals it exports', () =
       .map(([name, unregistered]) => `${name}: ${unregistered.map((m) => `'${m}'`).join(' | ')}`);
     expect(
       strays,
-      'A union of string literals on footprintjs/trace holds codes HONESTY_CODES does not. If it is an honesty ' +
+      'A union of string literals on foottrace holds codes HONESTY_CODES does not. If it is an honesty ' +
         'vocabulary (it says what a reader cannot see), register each code in src/lib/memory/honesty.ts and declare ' +
         'the union through RegisteredCode; if it is a different kind of word, add it to NOT_HONESTY with the reason.',
     ).toEqual([]);

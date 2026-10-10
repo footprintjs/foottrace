@@ -26,6 +26,14 @@
  */
 export const DELIM = '\u001F';
 
+/** A canonical encoded path, or its literal segments (dots inside a segment stay literal). */
+export type StateKey = string | ReadonlyArray<string | number>;
+
+/** Normalise a consumer key with the same codec the writer uses. */
+export function normaliseStateKey(key: StateKey): string {
+  return typeof key === 'string' ? key : normalisePath([...key]);
+}
+
 /**
  * Normalises an array path into a stable string key using DELIM.
  */
@@ -47,7 +55,7 @@ export function normalisePath(path: (string | number)[]): string {
  * one-element array, so callers need no special case.
  *
  * ```ts
- * import { pathSegments } from 'footprintjs/trace';
+ * import { pathSegments } from 'foottrace/paths';
  *
  * for (const entry of bundle.trace) {
  *   console.log(pathSegments(entry.path).join(' › ')); // 'order › lines'

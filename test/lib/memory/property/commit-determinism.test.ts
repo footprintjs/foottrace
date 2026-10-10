@@ -1,5 +1,5 @@
 /**
- * Property: commit determinism — a chain of stage frames (`RecordFrame`, footprintjs/write) at a run's
+ * Property: commit determinism — a chain of stage frames (`RecordFrame`, foottrace/write) at a run's
  * address, one commit each: the same writes give the same log, and a fold at step K ignores later commits.
  */
 import fc from 'fast-check';

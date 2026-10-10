@@ -10,7 +10,7 @@
  *     read-back (base + tail); found by the PR #11 review, a 9.30.0 regression;
  *   - `setAppend` — a hard write of base + tail; open since before 9.29.0.
  *
- * Written through footprintjs/write: two stage frames over one heap, one log and
+ * Written through foottrace/write: two stage frames over one heap, one log and
  * one redacted mirror (`RecordFrame · useMirror`), each write of `list` carrying
  * the bytes of the policy `fields: { list: ['1.token'] }` — the scrub
  * `{ fields: ['1.token'] }` the engine's verdict hands the frame. The same log,

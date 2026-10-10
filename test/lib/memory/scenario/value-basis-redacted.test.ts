@@ -7,7 +7,7 @@
  * bundle's `redactedPaths`, never of the string), plus `'nested-rows'` / `'from-initial-state'` — the value
  * rests on a write inside the key and no whole write of it.
  *
- * The records are written through footprintjs/write (test/helpers/recordRun.ts), byte for byte the ones the
+ * The records are written through foottrace/write (test/helpers/recordRun.ts), byte for byte the ones the
  * engine writes for these charts: a subflow mount whose outputMapper merges `{ cfg: { b } }` back is one
  * row at `cfg␟b` on the mount's bundle, then its `exit` and `repeat` bundles; a policy's verdict on it is
  * the frame's scrub (`{ whole: true }`) — the engine decides it, the record writes it.
@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { LOG_PLACEHOLDER } from '../../../../src/lib/memory/placeholders';
-import { commitValueAt, commitValueAtWithBasis, findLastWriterWithBasis, HONESTY_CODES } from '../../../../src/trace';
+import { commitValueAt, commitValueAtWithBasis, findLastWriterWithBasis, HONESTY_CODES } from '../../../../src/index';
 import { recordRun } from '../../../helpers/recordRun';
 
 /**

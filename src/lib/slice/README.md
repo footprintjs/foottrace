@@ -1,6 +1,6 @@
 # slice/ — variable-first slicing, both directions
 
-The **triage query layer** of footprintjs: given a *variable* (a state key, or one
+The **triage query layer** of foottrace: given a *variable* (a state key, or one
 element of an array-valued key), answer the two questions every investigation
 asks about it —
 
@@ -16,7 +16,7 @@ One contract, three consumers:
 | LLM tool | a `backtrack(variable, element?)` tool an agent calls to answer "why did you say that?" |
 | Offline autopsy | a triage agent fed a stored run's commit log |
 
-All three call the same queries below, so their answers can never disagree.
+All three call the same queries. Given the same recorded input and options, the query results agree; a UI or model can still interpret them incorrectly.
 
 **Picking an entry point:** know the failing **variable** → `sliceForKey` /
 `elementProvenance` (here). Know only that **quality dropped** somewhere →
@@ -75,7 +75,7 @@ an optional `basis` — the codes of `commitValueAtWithBasis` at `atIdx`, less w
 
 ```typescript
 import type { RuntimeSnapshot } from 'footprintjs';
-import { arrayProvenance, keysReadFromExecutionTree, sliceForKey } from 'footprintjs/trace';
+import { arrayProvenance, keysReadFromExecutionTree, sliceForKey } from 'foottrace';
 
 // Application boundary: inspect an actual completed run, not an invented log.
 function inspectChanges(snapshot: RuntimeSnapshot) {
@@ -94,7 +94,7 @@ function inspectChanges(snapshot: RuntimeSnapshot) {
 
 ```typescript
 import { flowChart, FlowChartExecutor } from 'footprintjs';
-import { keysReadFromExecutionTree, keyTimeline } from 'footprintjs/trace';
+import { keysReadFromExecutionTree, keyTimeline } from 'foottrace';
 
 const inner = flowChart('Enrich', (scope: any) => {
   scope.score = 7;
@@ -290,7 +290,7 @@ with the names it recorded (`test/lib/slice/nested-rows.test.ts`).
   `'conservative-fed-edges'`, `'truncated'`, and `'nested-rows'` (9.33.0 — a
   write reached the key only through paths inside it). What each code MEANS is
   registered once, in `memory/honesty.ts · HONESTY_CODES` (served as
-  `HONESTY_CODES` on `footprintjs/trace`): `HONESTY_CODES[note.code]` is the
+  `HONESTY_CODES` on `foottrace`): `HONESTY_CODES[note.code]` is the
   one-sentence explanation, and the `detail` is the per-instance sentence (it
   names the key or the budget). The module's other honesty words are
   registered there too — the `missing` reasons (`MissingSliceReason`,
@@ -326,7 +326,7 @@ as a lower bound on consumers, exactly as a backward slice is on causes.
 - **No recorder/engine/runner imports.** DAG position is `memory ← slice`;
   keeping the import set to `memory/` is what lets this evolve as a tiny
   library (its consumers — trace toolpacks, UI adapters — live above it).
-  Every file here is a record file (`RECORD_FILES`, C6), so even the tree
+  Every file here belongs to the standalone closed record graph, so even the tree
   `keysReadFromExecutionTree` walks is the record's own type, `ExecutionTree`
   (`memory/types.ts`): the ids, the keys of `stageReads`, `next` and
   `children`. A snapshot's `StageSnapshot` tree is one; so is a stored tree.

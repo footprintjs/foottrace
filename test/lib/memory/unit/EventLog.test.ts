@@ -13,7 +13,7 @@ function makeBundle(
   for (const key of Object.keys(updates)) {
     trace.push({ path: key, verb: 'merge' });
   }
-  return { stage, trace, redactedPaths: [], overwrite, updates };
+  return { stage, trace, redactedPaths: [], overwrite, updates } as unknown as CommitBundle;
 }
 
 describe('EventLog', () => {

@@ -69,7 +69,7 @@ export class EventLog {
    * Replays commits from the beginning — O(n) but low memory footprint.
    *
    * INDEX CONVENTION — `stepIdx` is EXCLUSIVE: `materialise(3)` folds commits
-   * 0, 1 and 2. `stateAt(source, commitIdx)` (footprintjs/trace) folds the
+   * 0, 1 and 2. `stateAt(source, commitIdx)` (foottrace) folds the
    * same log but its `commitIdx` is INCLUSIVE, because a reader's cursor asks
    * "the state AT this stop", which must include that stop's own commit. Two
    * folds over one log with opposite conventions: check which one you hold.
@@ -80,7 +80,7 @@ export class EventLog {
    * path). The result is the caller's: it shares nothing with the base or
    * the log.
    *
-   * @deprecated Since 9.33.0 — use `stateAt` from `footprintjs/trace`, which folds the same log
+   * @deprecated Since 9.33.0 — use `stateAt` from `foottrace`, which folds the same log
    * from the same base (`RuntimeSnapshot.initialState`) and says how it was derived (`basis`).
    * Nothing in the library calls this; it stays for one minor and is then removed. Mind the
    * index: `materialise(n)` folds commits `0..n-1`, `stateAt(source, n - 1)` the same commits.
@@ -97,7 +97,7 @@ export class EventLog {
   /**
    * Persists a commit bundle for a finished stage, and FREEZES it (see the module doc): the bundle
    * is stamped with its position, then deep-frozen, then appended. The engine hands it a bundle
-   * built for the log alone; a caller of this class (`footprintjs/write`) hands over a bundle it
+   * built for the log alone; a caller of this class (`foottrace/write`) hands over a bundle it
    * will no longer edit — its own object is the one frozen.
    */
   record(bundle: CommitBundle): void {

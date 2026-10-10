@@ -135,7 +135,7 @@ export function rowsUnderRoot(commitLog: readonly CommitBundle[], key: string, e
  *   value in the run's INITIAL state folds from absent here — the log alone
  *   cannot see the pre-run base, so merges and nested writes onto a seeded key
  *   give only what they added. Since 9.17.0 the base TRAVELS with the log:
- *   `stateAt(snapshot, idx)` (footprintjs/trace) folds from
+ *   `stateAt(snapshot, idx)` (foottrace) folds from
  *   `RuntimeSnapshot.initialState`, which this function never receives.
  * @throws {@link UnknownVerbError} when a row under the key's top-level key
  *   carries a verb other than `set | merge | append | delete` — a foreign or
@@ -156,7 +156,7 @@ export function commitValueAt(commitLog: CommitBundle[], idx: number, key: strin
 /**
  * Why {@link commitValueAtWithBasis} answered what it did. Each code is registered, with the one
  * sentence that says what it means, in `memory/honesty.ts · HONESTY_CODES` (served on
- * `footprintjs/trace`); the union declares its members through `RegisteredCode`.
+ * `foottrace`); the union declares its members through `RegisteredCode`.
  *
  * - `'never-written'`      — no commit in range wrote the key (the writer rule — the answer
  *                            `findLastWriter` and the slice layer give), unless the run removed a value

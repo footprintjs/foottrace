@@ -1,6 +1,6 @@
 # time-travel/ — the reader's cursor
 
-Time travel in footprintjs is a **reader's cursor over a finished Trace, with a
+Time travel in foottrace is a **reader's cursor over a finished Trace, with a
 Fold at each stop**. The run is over. The commit log is what it left behind.
 Nothing in this folder can move, re-run or mutate an execution — it is a
 read-time query layer, exactly like `slice/`.
@@ -10,7 +10,7 @@ hand — a why-panel, a flow view, a dashboard — from the same log, and disagr
 about the answers. This is that arithmetic, once, in the library that owns the
 substrate.
 
-Import from `footprintjs/trace`.
+Import from `foottrace`.
 
 ## The five laws
 
@@ -60,7 +60,7 @@ const { state, basis, redacted } = cursor.stateAt();
 
 What each `basis` means — and what `redacted` and a `LogGap` (below) mean — is
 registered once, with the other honesty signals, in `memory/honesty.ts ·
-HONESTY_CODES` (served as `HONESTY_CODES` on `footprintjs/trace`):
+HONESTY_CODES` (served as `HONESTY_CODES` on `foottrace`):
 `HONESTY_CODES[basis]` is the one-sentence explanation, `HONESTY_CODES.redacted`
 and `HONESTY_CODES['log-gap']` explain the two signals that carry no code, and
 `FoldBasis` declares its members through `RegisteredCode`, so a code the registry
@@ -111,7 +111,7 @@ actually stopped.
 
 ```ts
 import { getSubtreeSnapshot, type RuntimeSnapshot } from 'footprintjs';
-import { stateAt } from 'footprintjs/trace';
+import { stateAt } from 'foottrace';
 
 // Application-supplied snapshot from a completed executor.getSnapshot().
 declare const snapshot: RuntimeSnapshot;
@@ -159,7 +159,7 @@ asks where a stage *starts*. `commitIndexOf` returns `-1` on a miss (the
 
 ```ts
 import type { RuntimeSnapshot } from 'footprintjs';
-import { buildCommitIndex, commitIndexOf, stateAt } from 'footprintjs/trace';
+import { buildCommitIndex, commitIndexOf, stateAt } from 'foottrace';
 
 // Application-supplied snapshot from a completed executor.getSnapshot().
 declare const snapshot: RuntimeSnapshot;
@@ -176,7 +176,7 @@ const index = buildCommitIndex(snapshot.commitLog);  // for many lookups
 The cursor.
 
 ```ts
-import { timeTravel, type TimeTravelSource } from 'footprintjs/trace';
+import { timeTravel, type TimeTravelSource } from 'foottrace';
 
 // Application-supplied live snapshot or stored recording.
 declare const snapshot: TimeTravelSource;
@@ -223,14 +223,14 @@ One stop per executed stage, plus `'start'` / `'end'` bookends.
 - **A log older than 9.39.0** carries no `phase` anywhere. With its execution
   tree, the tree names the mounts and nothing is inferred; without it,
   `commitStops` asks the ONE legacy reader (`inferLegacyPhases`, exported from
-  `footprintjs/trace`), which applies 9.38.0's rule — a stage's bundle
+  `foottrace`), which applies 9.38.0's rule — a stage's bundle
   right after its first is a mount's exit — so a stored recording keeps the
   axis it always had, known miss included (a one-child fork of a leaf child
   reads as a mount). A log that records any phase is never inferred.
 
   ```ts
   import type { RuntimeSnapshot } from 'footprintjs';
-  import { commitStops, recordsPhases } from 'footprintjs/trace';
+  import { commitStops, recordsPhases } from 'foottrace';
 
   // Application-supplied snapshot; 9.39.0+ records continuation phases.
   declare const snapshot: RuntimeSnapshot;
@@ -257,7 +257,7 @@ One stop per executed stage, plus `'start'` / `'end'` bookends.
 
 ### `TimeTravelStrategy` — the seam
 
-footprintjs ships one stop grammar of its own — `commitStops`, one stop per
+foottrace ships one stop grammar of its own — `commitStops`, one stop per
 executed stage, the only grammar the substrate itself knows — and, since
 9.21.0, one reader over the names a chart DECLARED: `tagStops` (see
 "Declared vs derived tags" below). A consumer with a richer vocabulary —
@@ -265,8 +265,8 @@ milestones, turns, tool calls — supplies its own and gets the same cursor over
 it.
 
 ```ts
-import { commitStops, filterStops, timeTravel } from 'footprintjs/trace';
-import type { TimeTravelSource, TimeTravelStrategy } from 'footprintjs/trace';
+import { commitStops, filterStops, timeTravel } from 'foottrace';
+import type { TimeTravelSource, TimeTravelStrategy } from 'foottrace';
 
 const milestonesOnly: TimeTravelStrategy = {
   stopsFor: (log, tree) =>
@@ -315,8 +315,8 @@ stop and drops that meta — only the decision's own `meta` rides on a
 
 ```ts
 import { flowChart, FlowChartExecutor } from 'footprintjs';
-import { commitStops, filterStops, parseRuntimeStageId, timeTravel } from 'footprintjs/trace';
-import type { TimeTravelStrategy } from 'footprintjs/trace';
+import { commitStops, filterStops, parseRuntimeStageId, timeTravel } from 'foottrace';
+import type { TimeTravelStrategy } from 'foottrace';
 
 interface Beat { kind: 'turn' | 'tool'; title: string }
 const knownBeats = new Map<string, Beat>([
@@ -368,7 +368,7 @@ strategy that absorbs stages into its start should too. A reader that means
 
 ```ts
 import { flowChart, FlowChartExecutor } from 'footprintjs';
-import { commitStops, filterStops, stateAt, timeTravel, type TimeTravelStrategy } from 'footprintjs/trace';
+import { commitStops, filterStops, stateAt, timeTravel, type TimeTravelStrategy } from 'foottrace';
 
 const chart = flowChart<{ tenant: string; needle: number; prepared?: boolean; question?: string }>('Seed', (s) => {
   s.tenant = 'acme';
@@ -414,7 +414,7 @@ calls it, so most composers never see it.
 
 ```ts
 import type { RuntimeSnapshot } from 'footprintjs';
-import { commitStops, splitAxis } from 'footprintjs/trace';
+import { commitStops, splitAxis } from 'foottrace';
 
 // Application-supplied snapshot from a completed executor.getSnapshot().
 declare const snapshot: RuntimeSnapshot;
@@ -480,7 +480,7 @@ real resume, and every fold's `basis` still says what it stood on.
 
 ```ts
 import type { RuntimeSnapshot } from 'footprintjs';
-import { timeTravel } from 'footprintjs/trace';
+import { timeTravel } from 'foottrace';
 
 // Application-supplied snapshots from the runnable example linked below:
 // paused = executor A at the pause; resumed = executor B after resume(checkpoint).
@@ -529,7 +529,7 @@ nothing. `isCommitBundle(row)` is exported for a consumer that wants to validate
 rows itself.
 
 ```ts
-import { stateAt, timeTravel } from 'footprintjs/trace';
+import { stateAt, timeTravel } from 'foottrace';
 
 interface StoredRecording {
   readonly commitLog: readonly unknown[];        // honest: parsed JSON
@@ -593,7 +593,7 @@ fresh executor is two tagged stops on a chained axis — it ran twice.
 
 ```ts
 import { flowChart, FlowChartExecutor } from 'footprintjs';
-import { tagStops, timeTravel } from 'footprintjs/trace';
+import { tagStops, timeTravel } from 'foottrace';
 
 interface State { messages?: string[]; answer?: string; route?: string; [key: string]: unknown }
 
@@ -624,8 +624,8 @@ the fallback for a recording made before its chart declared tags.
 
 ```ts
 import { flowChart, FlowChartExecutor } from 'footprintjs';
-import { commitStops, filterStops, timeTravel } from 'footprintjs/trace';
-import type { TimeTravelStrategy } from 'footprintjs/trace';
+import { commitStops, filterStops, timeTravel } from 'foottrace';
+import type { TimeTravelStrategy } from 'foottrace';
 
 // The same writes as the declared-tag example, but no tags are needed here.
 const chart = flowChart<{ messages: string[]; answer?: string; route?: string }>('Seed', (s) => {
@@ -667,7 +667,7 @@ declaration is the fact.
 
 - **Not the Walker.** The engine's traversal is the walk; this is a reader. No
   API here resumes, re-runs or edits a run. To continue an execution from a
-  prior point, use pause/resume (`M2` in `.claude/rules/backtracking.md`).
+  prior point, use the producing engine's pause/resume API, not this package.
 - **Not a second cursor.** One position per `TimeTravel`. Drilling makes a new
   cursor over a new log; it never splits this one.
 - **Not a state-rollback.** Folding produces a detached *view* of history.
@@ -679,11 +679,11 @@ declaration is the fact.
 grammar that defines what a `runtimeStageId` means — and the record's two
 `capture/` leaves: the freezer (`capture/freeze.ts`, `stateAt`'s detached
 result) and the value-kind classifier (`capture/valueKinds.ts`). Every file
-here is a record file (`RECORD_FILES`, C6): it imports only record files, by
+here belongs to the standalone record graph: it imports only record files, by
 value or by type. Recorders, traversal and runner are never imported here: the
 snapshot arrives as a plain structural shape, so a stored JSON trace works
 exactly like a live `getSnapshot()`. The tree is the record's own
-`ExecutionTree` (`memory/types.ts`, on `footprintjs/trace`) — the fields
+`ExecutionTree` (`memory/types.ts`, on `foottrace`) — the fields
 `commitStops` reads, a supertype of the engine's `StageSnapshot` — so a
 strategy's `stopsFor(log, tree)` names nothing of the engine either.
 
@@ -694,7 +694,7 @@ recording's tree over as parsed (`bundles.ts · readTree` narrows it to "a plain
 object", no more) — so a field beyond `ExecutionTree`'s is read defensively:
 
 ```typescript
-import { type CommitBundle, type ExecutionTree, type Stop, type TimeTravelStrategy, commitStops } from 'footprintjs/trace';
+import { type CommitBundle, type ExecutionTree, type Stop, type TimeTravelStrategy, commitStops } from 'foottrace';
 
 // Names the start bookend after the run's first stage, when the tree carries a name.
 const namedStart: TimeTravelStrategy = {
@@ -734,25 +734,22 @@ const namedStart: TimeTravelStrategy = {
 
 ## Examples
 
-- `examples/post-execution/time-travel/01-a-readers-cursor.ts`
-- `examples/post-execution/time-travel/02-fold-a-stored-run.ts`
-- `examples/post-execution/time-travel/03-compose-a-strategy.ts` — `filterStops`, `Stop.meta`, `Stop.prologue`, `splitAxis`
-- `examples/post-execution/time-travel/04-chain-a-pause-and-resume.ts` — a chained cursor and its refusals
-- `examples/post-execution/time-travel/05-a-stored-recording-needs-no-cast.ts` — `unknown[]` rows, gaps by index
+- [Standalone writer and replay](../../../examples/post-execution/time-travel/06-bring-your-own-record.ts), with no engine installed.
+- [FootPrint integration examples](https://github.com/footprintjs/footPrint/tree/main/examples/post-execution/time-travel): reader cursors, stored recordings, composed strategies and pause/resume chains. Engine integrations require FootPrint separately; it is not a dependency of foottrace.
 
-**How the fold got fast** — the base algorithm and every optimisation in order, with the numbers and the traps: [docs/guides/the-fold-and-how-it-got-fast.md](../../../docs/guides/the-fold-and-how-it-got-fast.md).
+**How the fold got fast** — the inherited algorithm and optimisation history, with the original measurements: [FootPrint 9.48.1 design notes](https://github.com/footprintjs/footPrint/blob/0ada790ae38c16a58caa72cb9af279efb658035d/docs/guides/the-fold-and-how-it-got-fast.md).
 
 ## Performance — how the read side got fast
 
 Two patterns, both pinned against a fresh fold at every stop
 (`test/lib/time-travel/fold-memo.test.ts`), both measured by
-`npm run bench:time-travel`: the fold clones its base ONCE and applies every
+FootPrint's `npm run bench:time-travel`: the fold clones its base ONCE and applies every
 bundle into that private copy (`foldLegsFrom` · `applySmartMergeInto`), and
 the cursor keeps that copy as a `FoldMemo` so a step forward applies one
 bundle. At ten thousand commits: 8.13 s → 2.8 ms for a fold, 15.6 s → 4.8 ms
 for a step. The patterns, with the write-side ones and the JSON encoder,
 are told for teaching in
-[docs/guides/performance-patterns.md](../../../docs/guides/performance-patterns.md).
+[the original performance-pattern guide](https://github.com/footprintjs/footPrint/blob/0ada790ae38c16a58caa72cb9af279efb658035d/docs/guides/performance-patterns.md). These are historical measurements, not a new benchmark claim for this extraction.
 
 ## The contract this reader enforces
 

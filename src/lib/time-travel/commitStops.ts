@@ -1,5 +1,5 @@
 /**
- * commitStops — the one strategy footprintjs ships.
+ * commitStops — the one strategy foottrace ships.
  *
  * One stop per executed stage, in execution order, plus `'start'` / `'end'`
  * bookends. It is the only stop grammar the substrate itself knows: the engine

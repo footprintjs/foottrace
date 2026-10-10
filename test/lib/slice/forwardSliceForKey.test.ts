@@ -17,7 +17,7 @@
  *    doors accept identical inputs.
  * 6. Both writeProvenance dial states are verified against REAL runs.
  *
- * The runs' records are written through footprintjs/write (test/helpers/recordRun.ts) — the same
+ * The runs' records are written through foottrace/write (test/helpers/recordRun.ts) — the same
  * commit logs and execution trees, byte for byte, the charts wrote through the engine (E1).
  */
 

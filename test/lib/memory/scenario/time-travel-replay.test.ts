@@ -1,6 +1,6 @@
 /**
  * Scenario: time-travel replay via EventLog — three stages written through their frames (`RecordFrame`,
- * footprintjs/write) at a run's address, folded back at every step by `EventLog · materialise`.
+ * foottrace/write) at a run's address, folded back at every step by `EventLog · materialise`.
  */
 import { EventLog, RecordFrame, SharedMemory } from '../../../../src/write';
 

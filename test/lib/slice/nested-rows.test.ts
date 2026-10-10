@@ -15,7 +15,7 @@
  *   edge      a write BESIDE a key, through a string-valued container, moves it — the writer rule finds it
  *   regression  a recording in the pre-R13 shape still reads with every reader, with its old answers
  *
- * The records are written through footprintjs/write (test/helpers/recordRun.ts): a subflow mount as the parent
+ * The records are written through foottrace/write (test/helpers/recordRun.ts): a subflow mount as the parent
  * log holds it — its merge-back rows, then its `'exit'` and `'repeat'` continuations — and the subflow's own log
  * where a test reads it; the same commit logs, byte for byte, the charts wrote through the engine (E1). R13 (the
  * engine stamps the merge-back and the seed with the MOUNT's names) is the engine's own behaviour: it lives in
@@ -24,7 +24,7 @@
 import { deepFreeze } from '../../../src/lib/capture/freeze';
 import { nativeGet } from '../../../src/lib/memory/pathOps';
 import { DELIM } from '../../../src/lib/memory/paths';
-import type { CommitBundle, ExecutionTree } from '../../../src/trace';
+import type { CommitBundle, ExecutionTree } from '../../../src/index';
 import {
   arrayProvenance,
   causalChain,
@@ -38,7 +38,7 @@ import {
   sliceForKey,
   stateAt,
   timeTravel,
-} from '../../../src/trace';
+} from '../../../src/index';
 import { type RecordRun, type StepScope, recordRun } from '../../helpers/recordRun';
 
 const at = (...segments: string[]) => segments.join(DELIM);

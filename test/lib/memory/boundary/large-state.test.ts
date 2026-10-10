@@ -1,5 +1,5 @@
 /**
- * Boundary: large state — one stage's frame (`RecordFrame`, footprintjs/write) commits a thousand keys and
+ * Boundary: large state — one stage's frame (`RecordFrame`, foottrace/write) commits a thousand keys and
  * a 100 KB value at a run's address (`['runs', 'p1']`, where the engine's frame of run `p1` writes), and the
  * log folds them back.
  */

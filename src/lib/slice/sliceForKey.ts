@@ -16,20 +16,10 @@
 import { type CausalChainOptions, type KeysReadLookup, causalChain } from '../memory/backtrack.js';
 import { commitValueAtWithBasis, findLastWriterWithBasis } from '../memory/commitLogUtils.js';
 import type { CommitBundle } from '../memory/types.js';
-import { normalisePath } from '../memory/utils.js';
+import { normaliseStateKey } from '../memory/paths.js';
 import { fromInitialStateNote, nestedRowsNote, redactedValueNote } from './keyIndex.js';
 import { resolveKeysReadSource } from './keysReadSources.js';
 import type { KeysReadSource, StateKey, VariableSlice } from './types.js';
-
-/**
- * Normalise a consumer-facing {@link StateKey} to the engine's canonical
- * string form (the `TraceEntry.path` space). Path arrays go through the same
- * normaliser the engine writes with — the delimiter never leaks into the
- * public contract.
- */
-export function normaliseStateKey(key: StateKey): string {
-  return typeof key === 'string' ? key : normalisePath([...key]);
-}
 
 /** Options for {@link sliceForKey} — causalChain's options plus anchoring. */
 export interface SliceForKeyOptions extends CausalChainOptions {

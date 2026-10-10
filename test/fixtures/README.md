@@ -1,13 +1,13 @@
 # Record bytes — the pinned fixtures
 
-**Why.** The clean-up that moves the record half of a frame out of `StageContext` (steps C1–C6 of the writer-door design) must not move a single byte of the record. These fixtures pin the bytes footprintjs 9.44.1 writes, so a later change that moves one fails a test that names the scenario and shows the line.
+**Why.** The writer cleanup and extraction must not move a single record byte. These fixtures originated with footprintjs 9.44.1. The standalone package owns the HCI writer replay; FootPrint retains the engine-produced pins. A later change that moves a byte fails a test naming the scenario and line.
 
 | What | Pinned in | Checked by |
 |---|---|---|
-| 26 small flowchart runs: everything `getSnapshot()` serves (commit log, `initialState`, state, execution tree, subflow results, the dials, the log address), plus the checkpoint and the resumed run when one pauses, `getSnapshot({ redact: true })` under a policy, and how a failed run failed | `record-bytes/pinned/<scenario>.json` | `record-bytes/record-bytes.test.ts` |
-| hcifootprint 2.6.1's real transitions: the calls it made and the log, fold base, state and reads they gave — replayed through 2.6.1's `/advanced` calls and through `footprintjs/write` (2.7.0) | `hcifootprint/transitions-2.6.1.json` | `hcifootprint/hcifootprint-2.6.1.test.ts` |
+| 26 flowchart runs: served snapshots, pause/resume, redaction and failures | **In FootPrint:** `test/fixtures/record-bytes/pinned/<scenario>.json` | **In FootPrint:** `test/fixtures/record-bytes/record-bytes.test.ts` |
+| hcifootprint 2.6.1's stored transitions, replayed through the public writer | `hcifootprint/transitions-2.6.1.json` | `hcifootprint/hcifootprint-2.6.1.test.ts` |
 
-**How bytes are compared** (`bytes.ts · pinnedText`). JSON with key order kept, written by `stringifySnapshot` (the record's own encoder), after one pass that spells what JSON drops and settles what the clock stamps:
+**How bytes are compared** (`bytes.ts · pinnedText`). JSON with key order kept, written by `JSON.stringify` (the same JSON law as the original engine encoder), after one pass that spells what JSON drops and settles what the clock stamps:
 
 ```text
 new Date('2026-07-02')        → "«date:2026-07-02T00:00:00.000Z»"
@@ -37,7 +37,9 @@ RECORD_BYTES_REPIN=1 npx vitest run test/fixtures
 
 The hcifootprint calls (`open`, `transitions`) are never re-pinned: they are what 2.6.1 did. Only what they gave (`recorded`) moves, and only under the same rule.
 
-## The flowchart scenarios (`record-bytes/scenarios.ts`)
+## Engine-owned flowchart scenarios (in FootPrint)
+
+The following inventory describes [FootPrint's fixtures](https://github.com/footprintjs/footPrint/tree/main/test/fixtures/record-bytes), not files installed in foottrace. Its integration gate runs them against the exact foottrace candidate.
 
 The first nine are the charts of `scripts/byte-identity-probe.ts` (removed), promoted: now stored and checked on every run. The probe also dumped the narrative and the resume's return value; those are not record bytes and are not pinned here (the execution tree pins the same retained values).
 
@@ -76,4 +78,4 @@ Seven sessions: the six of hcifootprint 2.6.1's `test/trace.test.ts` (both encod
 
 **Captured once**, on 2026-10-08, by running those sessions in a copy of hcifootprint 2.6.1 (main `bcb6306`, its lockfile's footprintjs 9.44.1 from npm). A vitest module mock wrapped `footprintjs/advanced` and recorded every `ExecutionRuntime`, `newRoot`, `ScopeFacade · getValue` / `setValue` and `commit`. The same sessions run without the mock gave the same log, state and reads. hcifootprint itself was not edited.
 
-The test replays each session twice, against the same bytes: through 2.6.1's constructor and `#commitDelta`, copied verbatim (an `ExecutionRuntime`, a frame from `newRoot` and a `ScopeFacade` with a read tap, on `/advanced`), and through `footprintjs/write` (C5) — the calls hcifootprint 2.7.0's constructor and `#commitDelta` make, with the session's fields replaced by the captured values: a `SharedMemory`, an `EventLog`, and one `RecordFrame` per transition that notes the guard reads, stages each write (a redacted one with the `{ whole: true }` scrub) and commits under the transition's names. The second replay is `/write`'s promise to a real producer: the door writes what the engine's frame wrote.
+The standalone test replays each session through `foottrace/write`: a `SharedMemory`, an `EventLog`, and one `RecordFrame` per transition that notes the guard reads, stages each write (a redacted one with the `{ whole: true }` scrub), and commits under the captured names. It must reproduce the bytes the engine's frame originally wrote. It also checks the complete fixture's serialization round trip. E3 intentionally retired the duplicate replay through 2.6.1's engine-frame calls; no engine is installed here. The original JSON remains unchanged.
