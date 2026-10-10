@@ -27,7 +27,10 @@ node test/fixtures/causal-phases/generate.mjs /path/to/footprintjs-10-install --
 ```
 
 The generator requires exact producer/record versions and emits JSON to
-stdout. It does not install packages or write files. The capture used
+stdout: the reader projection normally, or the full snapshot directly with
+`--full`. The original full capture extracted the unchanged `runtimeSnapshot`
+field from the capture wrapper before serialization. It does not install
+packages or write files. The capture used
 `/private/tmp/npm-signature-procedure.Rl9mcj/postpublish-LAZgAa`, an isolated
 installation of the verified published packages. That path is evidence, not
 a test prerequisite. Foottrace's tests import only its own public entry and

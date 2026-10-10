@@ -49,4 +49,4 @@ const readerFixture = {
   commitLog: snapshot.commitLog,
   executionTree: readTree(snapshot.executionTree),
 };
-console.log(JSON.stringify(process.argv.includes('--full') ? { readerFixture, runtimeSnapshot: snapshot } : readerFixture, null, 2));
+console.log(JSON.stringify(process.argv.includes('--full') ? snapshot : readerFixture, null, 2));
