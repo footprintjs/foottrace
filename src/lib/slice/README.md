@@ -243,6 +243,29 @@ Every slice records which strategy produced it (`keysReadKind`) plus optional
 `readsCoverage` — `stepsWithReads === 0` over a multi-step run is the
 machine-detectable signature of `readTracking: 'off'`.
 
+`keysReadFromExecutionTree` accepts a live tree or unknown saved JSON, including
+an array of roots. Its one iterative traversal validates the fields it reads:
+nodes are objects, `runtimeStageId` is a string when present, `stageReads` is an
+object when present, `next` is a node when present, and `children` is an array
+of nodes when present. Absent/undefined optional fields are allowed. A malformed
+field, null node or sparse root/child slot throws a `TypeError` identifying its
+path (for example `$.children[1].stageReads`); it never returns a partial reads
+strategy after discarding that evidence. Stored values and unrelated metadata
+are not inspected. This is a reader-field shape check, not a full snapshot
+schema or a new plain-prototype restriction: structural class objects remain
+accepted, and rich objects used as read bags retain `Object.keys` semantics
+(for example, a Map's entries are not object keys). This covers ordinary data,
+not hostile proxies or accessors.
+
+Valid trees keep their existing lookup, ordering and coverage. Cyclic/shared
+objects are visited once. Distinct nodes with the same runtime ID keep the
+existing last-visited nonempty read set; shape validation does not invent a
+union or resolve conflicting identities. Coverage is observed-node telemetry,
+not a completeness claim: missing/empty reads do not establish independence.
+A missing source tree should remain unknown in its consumer, not be replaced
+with an invented empty tree. A producer such as HCI that supplies a read map
+continues to use `keysReadFromMap`; no tree is required or fabricated.
+
 ## Subflow boundaries (read this before slicing agent charts)
 
 A subflow runs in an **isolated runtime**: its commits live in

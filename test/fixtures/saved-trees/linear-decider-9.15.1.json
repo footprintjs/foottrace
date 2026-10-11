@@ -1,0 +1,739 @@
+{
+  "name": "linear-decider",
+  "description": "3 linear stages into a decider (decide() filter+fn rules, default branch). Exercises: typed writes, deep write, $metric timing path, decision evidence, branch routing.",
+  "structureEvents": [
+    {
+      "method": "onStageAdded",
+      "event": {
+        "stageId": "intake",
+        "name": "Intake",
+        "type": "stage",
+        "spec": {
+          "name": "Intake",
+          "id": "intake",
+          "type": "stage",
+          "description": "Receive the loan application"
+        }
+      }
+    },
+    {
+      "method": "onStageAdded",
+      "event": {
+        "stageId": "enrich",
+        "name": "Enrich",
+        "type": "stage",
+        "spec": {
+          "name": "Enrich",
+          "id": "enrich",
+          "type": "stage",
+          "description": "Attach applicant profile"
+        }
+      }
+    },
+    {
+      "method": "onEdgeAdded",
+      "event": {
+        "from": "intake",
+        "to": "enrich",
+        "kind": "next"
+      }
+    },
+    {
+      "method": "onStageAdded",
+      "event": {
+        "stageId": "classify-risk",
+        "name": "ClassifyRisk",
+        "type": "stage",
+        "spec": {
+          "name": "ClassifyRisk",
+          "id": "classify-risk",
+          "type": "stage",
+          "hasDecider": true,
+          "description": "Route by computed risk tier"
+        }
+      }
+    },
+    {
+      "method": "onEdgeAdded",
+      "event": {
+        "from": "enrich",
+        "to": "classify-risk",
+        "kind": "next"
+      }
+    },
+    {
+      "method": "onStageAdded",
+      "event": {
+        "stageId": "approve",
+        "name": "Approve",
+        "type": "stage",
+        "spec": {
+          "name": "Approve",
+          "id": "approve",
+          "type": "stage",
+          "description": "Issue approval"
+        }
+      }
+    },
+    {
+      "method": "onEdgeAdded",
+      "event": {
+        "from": "classify-risk",
+        "to": "approve",
+        "kind": "decision-branch",
+        "label": "approve"
+      }
+    },
+    {
+      "method": "onStageAdded",
+      "event": {
+        "stageId": "review",
+        "name": "ManualReview",
+        "type": "stage",
+        "spec": {
+          "name": "ManualReview",
+          "id": "review",
+          "type": "stage",
+          "description": "Queue for manual review"
+        }
+      }
+    },
+    {
+      "method": "onEdgeAdded",
+      "event": {
+        "from": "classify-risk",
+        "to": "review",
+        "kind": "decision-branch",
+        "label": "review"
+      }
+    },
+    {
+      "method": "onStageAdded",
+      "event": {
+        "stageId": "reject",
+        "name": "Reject",
+        "type": "stage",
+        "spec": {
+          "name": "Reject",
+          "id": "reject",
+          "type": "stage",
+          "description": "Issue rejection"
+        }
+      }
+    },
+    {
+      "method": "onEdgeAdded",
+      "event": {
+        "from": "classify-risk",
+        "to": "reject",
+        "kind": "decision-branch",
+        "label": "reject"
+      }
+    },
+    {
+      "method": "onDeciderComplete",
+      "event": {
+        "decider": "classify-risk",
+        "type": "decider",
+        "branchIds": [
+          "approve",
+          "review",
+          "reject"
+        ],
+        "defaultBranch": "reject"
+      }
+    }
+  ],
+  "runtimeEvents": [
+    {
+      "channel": "flow",
+      "method": "onRunStart",
+      "event": {
+        "payload": {
+          "requestId": "req-1"
+        },
+        "traversalContext": {
+          "runId": "run-1",
+          "stageId": "__root__",
+          "runtimeStageId": "__root__#0",
+          "stageName": "__root__",
+          "depth": 0
+        }
+      }
+    },
+    {
+      "channel": "scope",
+      "method": "onCommit",
+      "event": {
+        "stageName": "Intake",
+        "stageId": "intake",
+        "runtimeStageId": "intake#0",
+        "pipelineId": "",
+        "timestamp": 0,
+        "mutations": [
+          {
+            "key": "application",
+            "value": {
+              "id": "APP-1",
+              "amount": 25000
+            },
+            "operation": "set"
+          },
+          {
+            "key": "creditScore",
+            "value": 712,
+            "operation": "set"
+          },
+          {
+            "key": "dti",
+            "value": 0.31,
+            "operation": "set"
+          }
+        ]
+      }
+    },
+    {
+      "channel": "flow",
+      "method": "onStageExecuted",
+      "event": {
+        "stageName": "Intake",
+        "description": "Receive the loan application",
+        "traversalContext": {
+          "runId": "run-1",
+          "stageId": "intake",
+          "runtimeStageId": "intake#0",
+          "stageName": "Intake",
+          "depth": 0
+        },
+        "stageType": "linear"
+      }
+    },
+    {
+      "channel": "scope",
+      "method": "onCommit",
+      "event": {
+        "stageName": "Enrich",
+        "stageId": "enrich",
+        "runtimeStageId": "enrich#1",
+        "pipelineId": "",
+        "timestamp": 0,
+        "mutations": [
+          {
+            "key": "applicant",
+            "value": {
+              "address": {
+                "zip": "94016"
+              }
+            },
+            "operation": "update"
+          }
+        ]
+      }
+    },
+    {
+      "channel": "flow",
+      "method": "onStageExecuted",
+      "event": {
+        "stageName": "Enrich",
+        "description": "Attach applicant profile",
+        "traversalContext": {
+          "runId": "run-1",
+          "stageId": "enrich",
+          "runtimeStageId": "enrich#1",
+          "stageName": "Enrich",
+          "parentStageId": "intake",
+          "parentRuntimeStageId": "intake#0",
+          "depth": 1
+        },
+        "stageType": "linear"
+      }
+    },
+    {
+      "channel": "scope",
+      "method": "onCommit",
+      "event": {
+        "stageName": "ClassifyRisk",
+        "stageId": "classify-risk",
+        "runtimeStageId": "classify-risk#2",
+        "pipelineId": "",
+        "timestamp": 0,
+        "mutations": []
+      }
+    },
+    {
+      "channel": "flow",
+      "method": "onStageExecuted",
+      "event": {
+        "stageName": "ClassifyRisk",
+        "description": "Route by computed risk tier",
+        "traversalContext": {
+          "runId": "run-1",
+          "stageId": "classify-risk",
+          "runtimeStageId": "classify-risk#2",
+          "stageName": "ClassifyRisk",
+          "parentStageId": "enrich",
+          "parentRuntimeStageId": "enrich#1",
+          "depth": 2
+        },
+        "stageType": "decider"
+      }
+    },
+    {
+      "channel": "scope",
+      "method": "onCommit",
+      "event": {
+        "stageName": "Approve",
+        "stageId": "approve",
+        "runtimeStageId": "approve#3",
+        "pipelineId": "",
+        "timestamp": 0,
+        "mutations": [
+          {
+            "key": "decision",
+            "value": "approved",
+            "operation": "set"
+          },
+          {
+            "key": "apr",
+            "value": 6.49,
+            "operation": "set"
+          }
+        ]
+      }
+    },
+    {
+      "channel": "flow",
+      "method": "onStageExecuted",
+      "event": {
+        "stageName": "Approve",
+        "description": "Issue approval",
+        "traversalContext": {
+          "runId": "run-1",
+          "stageId": "approve",
+          "runtimeStageId": "approve#3",
+          "stageName": "Approve",
+          "parentStageId": "classify-risk",
+          "parentRuntimeStageId": "classify-risk#2",
+          "depth": 3
+        },
+        "stageType": "linear"
+      }
+    },
+    {
+      "channel": "flow",
+      "method": "onRunEnd",
+      "event": {
+        "traversalContext": {
+          "runId": "run-1",
+          "stageId": "__root__",
+          "runtimeStageId": "__root__#0",
+          "stageName": "__root__",
+          "depth": 0
+        }
+      }
+    }
+  ],
+  "narrativeEntries": [
+    {
+      "type": "stage",
+      "text": "Stage 1: The process began: Receive the loan application.",
+      "depth": 0,
+      "stageName": "Intake",
+      "stageId": "intake",
+      "runtimeStageId": "intake#0"
+    },
+    {
+      "type": "step",
+      "text": "Step 1: Write application = {id, amount}",
+      "depth": 1,
+      "stageName": "Intake",
+      "stageId": "intake",
+      "runtimeStageId": "intake#0",
+      "stepNumber": 1,
+      "key": "application",
+      "rawValue": {
+        "id": "APP-1",
+        "amount": 25000
+      }
+    },
+    {
+      "type": "step",
+      "text": "Step 2: Write creditScore = 712",
+      "depth": 1,
+      "stageName": "Intake",
+      "stageId": "intake",
+      "runtimeStageId": "intake#0",
+      "stepNumber": 2,
+      "key": "creditScore",
+      "rawValue": 712
+    },
+    {
+      "type": "step",
+      "text": "Step 3: Write dti = 0.31",
+      "depth": 1,
+      "stageName": "Intake",
+      "stageId": "intake",
+      "runtimeStageId": "intake#0",
+      "stepNumber": 3,
+      "key": "dti",
+      "rawValue": 0.31
+    },
+    {
+      "type": "emit",
+      "text": "[emit] metric.durationMs: {name, value}",
+      "depth": 1,
+      "stageName": "Intake",
+      "stageId": "intake",
+      "runtimeStageId": "intake#0",
+      "stepNumber": 4
+    },
+    {
+      "type": "stage",
+      "text": "Stage 2: Next step: Attach applicant profile.",
+      "depth": 0,
+      "stageName": "Enrich",
+      "stageId": "enrich",
+      "runtimeStageId": "enrich#1"
+    },
+    {
+      "type": "step",
+      "text": "Step 1: Write applicant = {name, address}",
+      "depth": 1,
+      "stageName": "Enrich",
+      "stageId": "enrich",
+      "runtimeStageId": "enrich#1",
+      "stepNumber": 1,
+      "key": "applicant",
+      "rawValue": {
+        "name": "Ada",
+        "address": {
+          "zip": "90210"
+        }
+      }
+    },
+    {
+      "type": "step",
+      "text": "Step 2: Read applicant = {name, address}",
+      "depth": 1,
+      "stageName": "Enrich",
+      "stageId": "enrich",
+      "runtimeStageId": "enrich#1",
+      "stepNumber": 2,
+      "key": "applicant",
+      "rawValue": {
+        "name": "Ada",
+        "address": {
+          "zip": "90210"
+        }
+      }
+    },
+    {
+      "type": "step",
+      "text": "Step 3: Update applicant = {address}",
+      "depth": 1,
+      "stageName": "Enrich",
+      "stageId": "enrich",
+      "runtimeStageId": "enrich#1",
+      "stepNumber": 3,
+      "key": "applicant",
+      "rawValue": {
+        "address": {
+          "zip": "94016"
+        }
+      }
+    },
+    {
+      "type": "stage",
+      "text": "Stage 3: Next step: Route by computed risk tier.",
+      "depth": 0,
+      "stageName": "ClassifyRisk",
+      "stageId": "classify-risk",
+      "runtimeStageId": "classify-risk#2"
+    },
+    {
+      "type": "step",
+      "text": "Step 1: Read creditScore = 712",
+      "depth": 1,
+      "stageName": "ClassifyRisk",
+      "stageId": "classify-risk",
+      "runtimeStageId": "classify-risk#2",
+      "stepNumber": 1,
+      "key": "creditScore",
+      "rawValue": 712
+    },
+    {
+      "type": "step",
+      "text": "Step 2: Read dti = 0.31",
+      "depth": 1,
+      "stageName": "ClassifyRisk",
+      "stageId": "classify-risk",
+      "runtimeStageId": "classify-risk#2",
+      "stepNumber": 2,
+      "key": "dti",
+      "rawValue": 0.31
+    },
+    {
+      "type": "condition",
+      "text": "[Condition]: It evaluated Rule 0 \"Good credit\": creditScore 712 gt 700 ✓, dti 0.31 lt 0.43 ✓, and chose Approve.",
+      "depth": 1,
+      "stageName": "ClassifyRisk",
+      "stageId": "classify-risk",
+      "runtimeStageId": "classify-risk#2"
+    },
+    {
+      "type": "stage",
+      "text": "Stage 4: Next step: Issue approval.",
+      "depth": 0,
+      "stageName": "Approve",
+      "stageId": "approve",
+      "runtimeStageId": "approve#3"
+    },
+    {
+      "type": "step",
+      "text": "Step 1: Write decision = \"approved\"",
+      "depth": 1,
+      "stageName": "Approve",
+      "stageId": "approve",
+      "runtimeStageId": "approve#3",
+      "stepNumber": 1,
+      "key": "decision",
+      "rawValue": "approved"
+    },
+    {
+      "type": "step",
+      "text": "Step 2: Write apr = 6.49",
+      "depth": 1,
+      "stageName": "Approve",
+      "stageId": "approve",
+      "runtimeStageId": "approve#3",
+      "stepNumber": 2,
+      "key": "apr",
+      "rawValue": 6.49
+    }
+  ],
+  "snapshot": {
+    "sharedState": {
+      "application": {
+        "id": "APP-1",
+        "amount": 25000
+      },
+      "creditScore": 712,
+      "dti": 0.31,
+      "applicant": {
+        "name": "Ada",
+        "address": {
+          "zip": "94016"
+        }
+      },
+      "decision": "approved",
+      "apr": 6.49
+    },
+    "executionTree": {
+      "id": "intake",
+      "runtimeStageId": "intake#0",
+      "name": "Intake",
+      "isDecider": false,
+      "isFork": false,
+      "logs": {},
+      "errors": {},
+      "metrics": {
+        "durationMs": 12
+      },
+      "evals": {},
+      "stageWrites": {
+        "application": {
+          "id": "APP-1",
+          "amount": 25000
+        },
+        "creditScore": 712,
+        "dti": 0.31
+      },
+      "description": "Receive the loan application",
+      "flowMessages": [
+        {
+          "type": "next",
+          "description": "Moving to Enrich stage",
+          "timestamp": 0,
+          "targetStage": "Enrich"
+        }
+      ],
+      "next": {
+        "id": "enrich",
+        "runtimeStageId": "enrich#1",
+        "name": "Enrich",
+        "isDecider": false,
+        "isFork": false,
+        "logs": {},
+        "errors": {},
+        "metrics": {},
+        "evals": {},
+        "stageWrites": {
+          "applicant": {
+            "address": {
+              "zip": "94016"
+            }
+          }
+        },
+        "stageReads": {
+          "applicant": {
+            "name": "Ada",
+            "address": {
+              "zip": "90210"
+            }
+          }
+        },
+        "description": "Attach applicant profile",
+        "flowMessages": [
+          {
+            "type": "next",
+            "description": "Moving to ClassifyRisk stage",
+            "timestamp": 0,
+            "targetStage": "ClassifyRisk"
+          }
+        ],
+        "next": {
+          "id": "classify-risk",
+          "runtimeStageId": "classify-risk#2",
+          "name": "ClassifyRisk",
+          "isDecider": false,
+          "isFork": false,
+          "logs": {},
+          "errors": {},
+          "metrics": {},
+          "evals": {},
+          "stageReads": {
+            "creditScore": 712,
+            "dti": 0.31
+          },
+          "description": "Route by computed risk tier",
+          "flowMessages": [
+            {
+              "type": "branch",
+              "description": "Evaluated scope and returned 'approve' → chose Approve path.",
+              "timestamp": 0,
+              "targetStage": "Approve",
+              "rationale": "returned branchId: approve"
+            }
+          ],
+          "children": [
+            {
+              "id": "approve",
+              "runtimeStageId": "approve#3",
+              "name": "Approve",
+              "isDecider": false,
+              "isFork": false,
+              "logs": {},
+              "errors": {},
+              "metrics": {},
+              "evals": {},
+              "stageWrites": {
+                "decision": "approved",
+                "apr": 6.49
+              },
+              "description": "Issue approval"
+            }
+          ]
+        }
+      }
+    },
+    "commitLog": [
+      {
+        "overwrite": {
+          "application": {
+            "id": "APP-1",
+            "amount": 25000
+          },
+          "creditScore": 712,
+          "dti": 0.31
+        },
+        "updates": {},
+        "redactedPaths": [],
+        "trace": [
+          {
+            "path": "application",
+            "verb": "set"
+          },
+          {
+            "path": "creditScore",
+            "verb": "set"
+          },
+          {
+            "path": "dti",
+            "verb": "set"
+          }
+        ],
+        "stage": "Intake",
+        "stageId": "intake",
+        "runtimeStageId": "intake#0",
+        "idx": 0
+      },
+      {
+        "overwrite": {
+          "applicant": {
+            "name": "Ada",
+            "address": {
+              "zip": "90210"
+            }
+          }
+        },
+        "updates": {
+          "applicant": {
+            "address": {
+              "zip": "94016"
+            }
+          }
+        },
+        "redactedPaths": [],
+        "trace": [
+          {
+            "path": "applicant",
+            "verb": "set"
+          },
+          {
+            "path": "applicant",
+            "verb": "merge"
+          }
+        ],
+        "stage": "Enrich",
+        "stageId": "enrich",
+        "runtimeStageId": "enrich#1",
+        "idx": 1
+      },
+      {
+        "overwrite": {},
+        "updates": {},
+        "redactedPaths": [],
+        "trace": [],
+        "stage": "ClassifyRisk",
+        "stageId": "classify-risk",
+        "runtimeStageId": "classify-risk#2",
+        "idx": 2
+      },
+      {
+        "overwrite": {
+          "decision": "approved",
+          "apr": 6.49
+        },
+        "updates": {},
+        "redactedPaths": [],
+        "trace": [
+          {
+            "path": "decision",
+            "verb": "set"
+          },
+          {
+            "path": "apr",
+            "verb": "set"
+          }
+        ],
+        "stage": "Approve",
+        "stageId": "approve",
+        "runtimeStageId": "approve#3",
+        "idx": 3
+      }
+    ],
+    "commitValues": "full",
+    "writeProvenance": "off",
+    "runId": "run-1"
+  }
+}
