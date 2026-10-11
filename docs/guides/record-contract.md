@@ -36,9 +36,11 @@ One bundle is one stage's commit: what it wrote, as the log spells it.
 | `idx`, `stage`, `stageId` | | no | Advisory. The reader derives the commit index from position. |
 
 A trace row's `verb` is one of exactly four: `set`, `merge`, `append`,
-`delete`. `path` is a top-level key or a nested path; a nested path uses
+`delete`. `path` must be a string: a top-level key or a nested path; a nested path uses
 the record's own separator (U+001F between segments), and a foreign
 producer that writes only top-level keys never needs it.
+The validator does not coerce another type to a string or impose a new path
+syntax: empty strings and historical string spellings remain accepted.
 
 ## The laws a producer keeps
 
@@ -75,6 +77,15 @@ producer that writes only top-level keys never needs it.
   - `trace is missing | a <type>, not an array`
   - `updates is not a plain object` · `overwrite is not a plain object`
   - `trace[i].verb is missing | "<verb>", not set | merge | append | delete`
+  - `trace[i].path is missing | null | an array | a <type>, not a string`
+- **One saved-row boundary.** `isCommitBundle(row)` applies the same checks as
+  replay. Causal readers still accept typed `CommitBundle[]`, not unknown input.
+  A consumer preparing a causal query from stored rows must validate every row
+  in its selected prefix first; it must not discard refused rows and present
+  the result as complete. The whole unreadable bundle is one replay gap,
+  including any otherwise valid writes within it. Existing envelope checks and
+  a trace entry's verb refusal take precedence over that entry's path refusal.
+  Advisory `stage`, `stageId` and `idx` metadata remain optional.
 - **Same answer, any producer.** A record footprintjs wrote and the same
   record written by hand fold to the same state. The example below is that
   record.

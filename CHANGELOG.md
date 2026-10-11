@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.0.3
+
+### Fixed
+
+- The shared saved-record validator now rejects missing or non-string write
+  paths. Previously these could pass `isCommitBundle`, silently hide a causal
+  writer in a short log, or crash reading a longer log. Replay reports the
+  entire malformed bundle as an indexed gap instead of partially applying it.
+  Causal readers still take typed bundles: unknown saved rows must first pass
+  `isCommitBundle`. Valid records, optional historical metadata, string path
+  spellings and recorded bytes are unchanged. This reader-only fix adds no
+  export or dependency.
+
 ## 1.0.2
 
 ### Fixed

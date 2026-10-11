@@ -70,6 +70,10 @@ export function readTree(value: unknown): ExecutionTree | undefined {
  *   `changedSince` reads its paths), so a row without one is not a bundle the
  *   fold can survive — it is the crash a gap exists to prevent. `CommitBundle`
  *   declares it required, so no live log is affected.
+ * - Each trace entry needs a known verb and a string `path`. Readers use
+ *   string path operations; accepting a number can silently lose a causal
+ *   writer in a short log and crash the indexed lookup in a longer one.
+ *   Empty strings and historical path spellings remain valid strings.
  * - `updates` / `overwrite`, when present, must be plain objects. They are
  *   read only AT THE PATHS THE TRACE NAMES, so an absent one is harmless and
  *   is tolerated, exactly as the fold tolerates an absent `redactedPaths`.
@@ -101,6 +105,12 @@ export function bundleRefusal(row: unknown): string | undefined {
     const verb = isPlainish(entry) ? entry.verb : undefined;
     if (!isVerb(verb)) {
       return `trace[${i}].verb is ${verb === undefined ? 'missing' : JSON.stringify(verb)}, not ${VERBS.join(' | ')}`;
+    }
+    const path = isPlainish(entry) ? entry.path : undefined;
+    if (typeof path !== 'string') {
+      const kind =
+        path === undefined ? 'missing' : path === null ? 'null' : Array.isArray(path) ? 'an array' : `a ${typeof path}`;
+      return `trace[${i}].path is ${kind}, not a string`;
     }
   }
   return undefined;
