@@ -1,0 +1,171 @@
+{
+  "sourceId": "hci:storefront",
+  "source": {
+    "initialState": {
+      "authenticated": false,
+      "items": [],
+      "itemCount": 0
+    },
+    "commitLog": [
+      {
+        "overwrite": {
+          "authenticated": true,
+          "privateNote": "REDACTED"
+        },
+        "updates": {},
+        "redactedPaths": [
+          "privateNote"
+        ],
+        "trace": [
+          {
+            "path": "authenticated",
+            "verb": "set",
+            "readKeys": [
+              "authenticated"
+            ]
+          },
+          {
+            "path": "privateNote",
+            "verb": "set",
+            "readKeys": [
+              "authenticated"
+            ]
+          }
+        ],
+        "stage": "unlock",
+        "stageId": "unlock",
+        "runtimeStageId": "unlock#0",
+        "idx": 0
+      },
+      {
+        "overwrite": {
+          "items": [
+            {
+              "id": "p1"
+            }
+          ],
+          "itemCount": 1
+        },
+        "updates": {},
+        "redactedPaths": [],
+        "trace": [
+          {
+            "path": "items",
+            "verb": "append",
+            "readKeys": [
+              "authenticated"
+            ]
+          },
+          {
+            "path": "itemCount",
+            "verb": "set",
+            "readKeys": [
+              "authenticated"
+            ]
+          }
+        ],
+        "stage": "add",
+        "stageId": "add",
+        "runtimeStageId": "add#1",
+        "idx": 1
+      },
+      {
+        "overwrite": {
+          "items": [
+            {
+              "id": "p2"
+            }
+          ],
+          "itemCount": 2
+        },
+        "updates": {},
+        "redactedPaths": [],
+        "trace": [
+          {
+            "path": "items",
+            "verb": "append",
+            "readKeys": [
+              "authenticated"
+            ]
+          },
+          {
+            "path": "itemCount",
+            "verb": "set",
+            "readKeys": [
+              "authenticated"
+            ]
+          }
+        ],
+        "stage": "add",
+        "stageId": "add",
+        "runtimeStageId": "add#2",
+        "idx": 2
+      },
+      {
+        "overwrite": {
+          "orderId": "demo-order-1"
+        },
+        "updates": {},
+        "redactedPaths": [],
+        "trace": [
+          {
+            "path": "orderId",
+            "verb": "set",
+            "readKeys": [
+              "authenticated",
+              "itemCount"
+            ]
+          }
+        ],
+        "stage": "checkout",
+        "stageId": "checkout",
+        "runtimeStageId": "checkout#3",
+        "idx": 3
+      }
+    ]
+  },
+  "reads": {
+    "origin": "Session.readsByStep",
+    "byStep": {
+      "unlock#0": [
+        "authenticated"
+      ],
+      "add#1": [
+        "authenticated"
+      ],
+      "add#2": [
+        "authenticated"
+      ],
+      "checkout#3": [
+        "authenticated",
+        "itemCount"
+      ]
+    }
+  },
+  "observation": {
+    "pendingId": "add#4",
+    "transitions": [
+      {
+        "id": "unlock#0",
+        "outcome": "committed"
+      },
+      {
+        "id": "add#1",
+        "outcome": "committed"
+      },
+      {
+        "id": "add#2",
+        "outcome": "committed"
+      },
+      {
+        "id": "checkout#3",
+        "outcome": "committed"
+      },
+      {
+        "id": "add#4",
+        "outcome": "pending"
+      }
+    ],
+    "liveItemCount": 2
+  }
+}

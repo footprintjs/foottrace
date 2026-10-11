@@ -13,6 +13,11 @@ import type { KeysReadLookup } from '../memory/backtrack.js';
 import type { ExecutionTree } from '../memory/types.js';
 import type { KeysReadSource } from './types.js';
 
+/** Narrow only the object shape this reader uses; stored values stay opaque. */
+function isReadTreeObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 /**
  * Post-hoc reads from a finished run's execution tree — ZERO setup.
  *
@@ -38,28 +43,56 @@ import type { KeysReadSource } from './types.js';
  * Passing multiple trees widens READ resolution only (useful when one log
  * genuinely spans them); it does not let a root-log slice cross a subflow
  * mount — see README.md § Subflow boundaries.
+ *
+ * A live {@link ExecutionTree} or unknown saved JSON uses this same traversal.
+ * Malformed reader fields throw a TypeError naming their source path; no partial
+ * reads strategy is returned. Optional fields may be absent or undefined, but
+ * null nodes, sparse arrays and wrongly shaped fields are not missing evidence
+ * to silently skip. Only read-map KEYS are inspected, never their stored values.
+ * Cycles/shared objects are visited once; existing traversal order is retained.
+ * Coverage counts observed nodes and nonempty read sets, not capture completeness.
+ * This is an ordinary-data boundary, not a sandbox for hostile proxies/accessors.
  */
-export function keysReadFromExecutionTree(tree: ExecutionTree | readonly ExecutionTree[]): KeysReadSource {
+export function keysReadFromExecutionTree(tree: unknown): KeysReadSource {
   const byStep = new Map<string, string[]>();
   let steps = 0;
   // The tree is acyclic by construction (next/children), but this walker is
-  // also handed CONSUMER-provided data — a visited set makes a malformed or
+  // also handed CONSUMER-provided data — a visited set makes a cycle in a
   // hand-built tree a non-event instead of an infinite loop.
-  const visited = new Set<ExecutionTree>();
-  const stack: ExecutionTree[] = [tree].flat(); // one root, or several (subflow trees); a hole is skipped
+  const visited = new Set<object>();
+  const stack: { node: unknown; path: string }[] = [];
+  if (Array.isArray(tree)) {
+    // Indexing retains holes as invalid evidence, unlike flat()/map().
+    for (let i = 0; i < tree.length; i++) stack.push({ node: tree[i], path: `$[${i}]` });
+  } else {
+    stack.push({ node: tree, path: '$' });
+  }
   while (stack.length > 0) {
-    const node = stack.pop()!;
+    const { node, path } = stack.pop()!;
+    if (!isReadTreeObject(node)) throw new TypeError(`keysReadFromExecutionTree: ${path} must be an object`);
     if (visited.has(node)) continue;
     visited.add(node);
-    if (node.runtimeStageId) {
+    const { runtimeStageId, stageReads, next, children } = node;
+    if (runtimeStageId !== undefined && typeof runtimeStageId !== 'string') {
+      throw new TypeError(`keysReadFromExecutionTree: ${path}.runtimeStageId must be a string when present`);
+    }
+    if (stageReads !== undefined && !isReadTreeObject(stageReads)) {
+      throw new TypeError(`keysReadFromExecutionTree: ${path}.stageReads must be an object when present`);
+    }
+    if (children !== undefined && !Array.isArray(children)) {
+      throw new TypeError(`keysReadFromExecutionTree: ${path}.children must be an array when present`);
+    }
+    if (runtimeStageId) {
       steps++;
-      if (node.stageReads) {
-        const keys = Object.keys(node.stageReads);
-        if (keys.length > 0) byStep.set(node.runtimeStageId, keys);
+      if (stageReads !== undefined) {
+        const keys = Object.keys(stageReads);
+        if (keys.length > 0) byStep.set(runtimeStageId, keys);
       }
     }
-    if (node.next) stack.push(node.next);
-    if (node.children) for (const c of node.children) stack.push(c);
+    if (next !== undefined) stack.push({ node: next, path: `${path}.next` });
+    if (children !== undefined) {
+      for (let i = 0; i < children.length; i++) stack.push({ node: children[i], path: `${path}.children[${i}]` });
+    }
   }
   return {
     kind: 'execution-tree',

@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.2
+
+### Fixed
+
+- Saved execution-tree read evidence now accepts unknown input through the public
+  `keysReadFromExecutionTree` helper and rejects malformed reader fields with a
+  path-bearing `TypeError`. Invalid child lists, read maps and sparse root slots
+  can no longer silently lose evidence or produce misleading coverage. Valid
+  trees, traversal/coverage semantics and recorded bytes are unchanged. This is
+  a reader-only correctness fix; it adds no new export or dependency.
+
 ## 1.0.1
 
 ### Fixed
