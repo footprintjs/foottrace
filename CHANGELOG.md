@@ -26,7 +26,7 @@
   object surviving `structuredClone`, an unknown outcome) is counted in `log.sinkFailures` and reported to
   `sink.onFailure({ entry, error })`, never thrown. A `meta` that will not copy is lost on its own and its entry
   still goes. The writer's door refuses what the reader would: a base that is not a plain object, an address with a
-  hole or a non-string segment. `memorySink` keeps its entries frozen all the way down.
+  hole or a non-string segment. `memorySink` keeps its entries frozen as far as freezing reaches.
 - **`readStoredRecord(entries, limits?)`** (root) reads a sink's entries back into a `StoredRecord`: `logs` by
   address, `root(logRunId)`, `log(address)`, and `unread` — every entry it did not read into a log, with its
   position and reason. Each `StoredLog` has `initialState`, `commitLog`, `gaps`, `notes` (`StoredNote`, arrival
@@ -43,8 +43,8 @@
   mount id is its seed, so a subflow killed in its first stage reads `[start, end]`, as on a live cursor.
 - **Bounded work on untrusted input** (`StoredRecordLimits`, raised per call): no recursion, no walk of a stored
   value, an address read by index (never through its own iterator), work per entry bounded by the address limits,
-  at most `missingCommits` gap rows for the whole record (spent on the logs that need the fewest first, so one
-  corrupt log cannot starve the rest), and at most `entries` entries read. Defaults: `entries` 16,777,216 ·
+  at most `missingCommits` gap rows for the whole record (spent on the logs that need the fewest first, so a
+  corrupt log asking for the most is the one cut), and at most `entries` entries read. Defaults: `entries` 16,777,216 ·
   `missingCommits` 1,048,576 · `drillDepth` 1,024 · `addressLength` 65,536 characters. Whatever a limit stops is
   named in `unread` — never a hang, never a silent cut; so is an entry whose fields throw when read. A limit that
   is not a non-negative integer (or `Infinity`) is a `RangeError`.
@@ -59,8 +59,9 @@
 
 - `EventLog.clear()` throws on a log built with a sink: a stored record cannot be wiped. The one-argument log is
   unchanged — the same bytes and the same own fields as 1.0.3.
-- `TimeTravel.drill(id)` returns `undefined` for the cursor's own mount or one it was drilled out of, so a viewer
-  that opens every mount cannot loop on a stored or hand-built log that names one. A live, sound run never asks it.
+- `TimeTravel.drill(id)` returns `undefined` for the cursor's own mount, one it was drilled out of, or the log it
+  already reads, so a viewer that opens every mount cannot loop on a stored or hand-built log that names one. A
+  live, sound run never asks it.
 - `commitStops`, without an execution tree, reads a head commit stamped with the log's own mount id as the seed
   when the subflow results say this log is that mount's: the seed opens `start` instead of standing as a stop.
   Logs with a tree, and every other tree-less log, read as before.

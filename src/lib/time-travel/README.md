@@ -587,7 +587,7 @@ those entries back into logs, and says what each one is before any fold:
   address read by index (never through its own iterator), and four limits
   (`StoredRecordLimits`, raised per call): `entries` read (16,777,216), gap rows
   for the whole record — `missingCommits` (1,048,576), spent on the logs that
-  need the fewest first, so one corrupt log cannot starve the rest — and an
+  need the fewest first, so a corrupt log asking for the most is the one cut — and an
   address's `drillDepth` (1,024) and `addressLength` (65,536 characters). Past a
   limit, the entry is named in `unread`: never a hang, never a silent cut. An
   entry whose fields throw when read is named there too.

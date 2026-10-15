@@ -217,9 +217,25 @@ describe('what the store lost — a gap at its own index, never a shifted log', 
     const log = stored.root('run-1')!;
     expect(log.gaps).toEqual([]);
     expect(stateAt(log.source(), 2).state).toEqual(run.state.getState());
-    // The other way round: the readable one stood first, the torn one is the second entry.
+    // The other way round: the readable one stood first, and the torn one is named against it.
     expect(readStoredRecord([...entries, torn]).unread).toEqual([
-      { index: 7, reason: 'a second commit entry for index 0 — the one at 1 stands' },
+      { index: 7, reason: 'an unreadable commit entry for index 0 — the readable one at 1 stands' },
+    ]);
+  });
+
+  it('each displaced commit entry is named against the entry that holds its index in the end', () => {
+    const { sink } = writeRun();
+    const entries = throughJson(sink.entries) as { kind: string; bundle?: { idx: number; trace?: unknown } }[];
+    const readable = entries.find((e) => e.kind === 'commit' && e.bundle!.idx === 0)!;
+    const torn = () => {
+      const copy = JSON.parse(JSON.stringify(readable));
+      delete copy.bundle.trace;
+      return copy;
+    };
+    const stored = readStoredRecord([torn(), torn(), readable]);
+    expect(stored.unread).toEqual([
+      { index: 0, reason: 'an unreadable commit entry for index 0 — the readable one at 2 stands' },
+      { index: 1, reason: 'an unreadable commit entry for index 0 — the readable one at 2 stands' },
     ]);
   });
 
@@ -326,6 +342,49 @@ describe('stored mounts — the cursor and drill read the stored structure', () 
     expect(drilled.stateAt().state).toEqual({ given: 21 });
     // A cursor never drills back into its own mount.
     expect(drilled.drill('sf#1')).toBeUndefined();
+  });
+
+  it('a mount log opened on its own never drills into itself either', () => {
+    const sink = memorySink();
+    const mount: LogAddress = { logRunId: 'run-1', drillPath: ['sf#1'] };
+    const inner = recordRun({}, {}, { sink, address: mount });
+    inner.step('sf', (s) => s.set('given', 21), { runtimeStageId: 'sf#1' });
+    inner.step('sf/a', (s) => s.set('a', 1), { runtimeStageId: 'sf/a#2' });
+    const cursor = timeTravel(readStoredRecord(sink.entries).log(mount)!.source());
+    expect(cursor.mountRuntimeStageId).toBeUndefined();
+    expect(cursor.drill('sf#1')).toBeUndefined();
+  });
+
+  it('the seed rule is for tree-less logs only: a log with its tree reads as it always did', () => {
+    const lazy = {
+      stage: 'lazy',
+      stageId: 'lazy',
+      runtimeStageId: 'lazy#1',
+      trace: [],
+      redactedPaths: [],
+      overwrite: {},
+      updates: {},
+    };
+    const ask = {
+      stage: 'ask',
+      stageId: 'ask',
+      runtimeStageId: 'ask#2',
+      trace: [],
+      redactedPaths: [],
+      overwrite: {},
+      updates: {},
+    };
+    const history = [lazy, ask];
+    const subflowResults = { 'lazy#1': { treeContext: { history } } };
+    const tree = { id: 'lazy', runtimeStageId: 'lazy#1', next: { id: 'ask', runtimeStageId: 'ask#2' } };
+    expect(
+      timeTravel({ commitLog: history, executionTree: tree, subflowResults }).stops.map((s) => s.runtimeStageId),
+    ).toEqual(['', 'lazy#1', 'ask#2', '']);
+    expect(timeTravel({ commitLog: history, subflowResults }).stops.map((s) => s.runtimeStageId)).toEqual([
+      '',
+      'ask#2',
+      '',
+    ]);
   });
 
   it('a seed followed by a lost commit still opens start: the gap is a gap, not a reason to call the seed a mount', () => {

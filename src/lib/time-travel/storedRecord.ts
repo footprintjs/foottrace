@@ -40,13 +40,15 @@
  *   6. Bounded work (see {@link StoredRecordLimits}). Every walk is a loop over the input, never a
  *      recursion, and never through an input's own iterator except the input itself; the work per
  *      entry is bounded by the address limits; the rows a log holds are its stored commits plus gaps
- *      from ONE budget for the whole record, spent on the logs that need the fewest gaps first (so one
- *      corrupt log cannot starve the rest); and reading stops after `entries` entries. Whatever a
+ *      from ONE budget for the whole record, spent on the logs that need the fewest gaps first (so a
+ *      corrupt log asking for the most is the one cut); and reading stops after `entries` entries. Whatever a
  *      limit stops is listed in `unread` by name — never a hang, never a silent cut.
  *
- * Entries are data. An entry whose fields throw when read (a getter, a revoked proxy) is listed in
- * `unread`; deeper inside a bundle, a hostile getter or proxy is out of contract, as everywhere in the
- * record (README · "Compatibility").
+ * Entries are data. An entry whose fields throw while it is checked (a getter, a revoked proxy) is
+ * listed in `unread`, and what the reader computes with — the kind, a commit's index and bundle, a
+ * close's length — is taken once, as checked. An in-memory accessor that changes or throws on a later
+ * read is out of contract, as everywhere in the record (docs/extraction.md): parsed JSON and structured
+ * clones carry none.
  *
  * DAG position: memory ← time-travel; this file is a reader beside `timeTravel` and imports only
  * record files.
@@ -238,26 +240,34 @@ function metaRefusal(meta: unknown): string | undefined {
   return meta === undefined || isPlainish(meta) ? undefined : `meta is ${described(meta)}, not a plain object`;
 }
 
-/** Why the fields only one kind carries cannot be read, or `undefined`. */
-function payloadRefusal(row: Record<string, unknown>): string | undefined {
+/**
+ * What the reader keeps of the fields only one kind carries — each field it computes with read ONCE
+ * (a commit's bundle and index, a close's length) — or why they cannot be read.
+ */
+function payloadOf(
+  row: Record<string, unknown>,
+): { readonly count: number; readonly bundle?: Record<string, unknown> } | string {
   switch (row.kind) {
-    case 'opened':
+    case 'opened': {
       if (!isPlainish(row.initialState)) return `initialState is ${described(row.initialState)}, not a plain object`;
-      return metaRefusal(row.meta);
+      return metaRefusal(row.meta) ?? { count: 0 };
+    }
     case 'commit': {
-      const bundle = row.bundle;
+      const bundle: unknown = row.bundle;
       if (!isPlainish(bundle)) return `bundle is ${described(bundle)}, not an object`;
-      return isCount(bundle.idx) ? undefined : `bundle.idx is ${described(bundle.idx)}, not a commit index`;
+      const idx: unknown = bundle.idx;
+      return isCount(idx) ? { count: idx, bundle } : `bundle.idx is ${described(idx)}, not a commit index`;
     }
     case 'note':
       if (typeof row.note !== 'string') return `note is ${described(row.note)}, not a string`;
-      return isPlainish(row.data) ? undefined : `data is ${described(row.data)}, not a plain object`;
+      return isPlainish(row.data) ? { count: 0 } : `data is ${described(row.data)}, not a plain object`;
     default: {
       if (!LOG_OUTCOMES.includes(row.outcome as LogOutcome)) {
         return `outcome is ${described(row.outcome)}, not ${LOG_OUTCOMES.join(' | ')}`;
       }
-      if (!isCount(row.commits)) return `commits is ${described(row.commits)}, not a commit count`;
-      return metaRefusal(row.meta);
+      const commits: unknown = row.commits;
+      if (!isCount(commits)) return `commits is ${described(commits)}, not a commit count`;
+      return metaRefusal(row.meta) ?? { count: commits };
     }
   }
 }
@@ -266,13 +276,25 @@ function payloadRefusal(row: Record<string, unknown>): string | undefined {
 interface Placed {
   readonly entry: RecordEntry;
   readonly index: number;
-  readonly address: LogAddress;
+  /** The kind, as checked. */
+  readonly kind: RecordEntry['kind'];
+  /**
+   * The number the reader computes with, as checked — a commit's `bundle.idx`, a close's `commits` —
+   * taken once, so no later read of the entry can change what the gap budget spends.
+   */
+  readonly count: number;
+  /** A commit's bundle, as checked. */
+  readonly bundle?: unknown;
   /** A commit's bundle refusal, checked once while the entry was read; absent when it is readable. */
   readonly refusal?: string;
 }
 
-/** Read one stored entry, or say why not. Its address is the reader's own copy. */
-function readEntry(row: unknown, index: number, limits: Required<StoredRecordLimits>): Placed | string {
+/** Read one stored entry, or say why not: what the reader keeps of it, and its address (the reader's own copy). */
+function readEntry(
+  row: unknown,
+  index: number,
+  limits: Required<StoredRecordLimits>,
+): { readonly item: Placed; readonly address: LogAddress } | string {
   if (!isPlainish(row)) return `not an object (${row === null ? 'null' : Array.isArray(row) ? 'array' : typeof row})`;
   if (typeof row.kind !== 'string' || !KINDS.includes(row.kind)) {
     return `kind is ${described(row.kind)}, not ${KINDS.join(' | ')}`;
@@ -280,11 +302,16 @@ function readEntry(row: unknown, index: number, limits: Required<StoredRecordLim
   const address = readAddress(row.address, limits);
   if (typeof address === 'string') return address;
   if (typeof row.at !== 'number' || !Number.isFinite(row.at)) return `at is ${described(row.at)}, not a finite number`;
-  const payload = payloadRefusal(row);
-  if (payload !== undefined) return payload;
+  const payload = payloadOf(row);
+  if (typeof payload === 'string') return payload;
   const entry = row as RecordEntry;
-  const refusal = entry.kind === 'commit' ? bundleRefusal(entry.bundle) : undefined;
-  return refusal === undefined ? { entry, index, address } : { entry, index, address, refusal };
+  const kind = row.kind as RecordEntry['kind'];
+  const { count, bundle } = payload;
+  if (bundle === undefined) return { item: { entry, index, kind, count }, address };
+  const refusal = bundleRefusal(bundle);
+  const item: Placed =
+    refusal === undefined ? { entry, index, kind, count, bundle } : { entry, index, kind, count, bundle, refusal };
+  return { item, address };
 }
 
 /** The key a log is filed under: its address as a JSON array — one spelling per address, whatever the ids hold. */
@@ -304,8 +331,7 @@ interface Unread {
 function coveringClose(closes: readonly Placed[], last: number): Placed | undefined {
   let best: Placed | undefined;
   for (const close of closes) {
-    const { commits } = close.entry as Closed;
-    if (commits > last && (best === undefined || commits >= (best.entry as Closed).commits)) best = close;
+    if (close.count > last && (best === undefined || close.count >= best.count)) best = close;
   }
   return best;
 }
@@ -328,42 +354,52 @@ interface Grouped {
 }
 
 /** One place, one entry: the first readable commit for an index, the first opened. The rest is unread. */
-function groupOf(key: string, arrival: number, placed: readonly Placed[], unread: Unread[]): Grouped {
+function groupOf(
+  key: string,
+  address: LogAddress,
+  arrival: number,
+  placed: readonly Placed[],
+  unread: Unread[],
+): Grouped {
   let opened: Placed | undefined;
   const commits = new Map<number, Placed>();
   const closes: Placed[] = [];
   const dropped = new Set<Placed>();
   for (const item of placed) {
-    const { entry, index } = item;
-    if (entry.kind === 'opened') {
+    if (item.kind === 'opened') {
       if (opened === undefined) opened = item;
       else {
         dropped.add(item);
-        unread.push({ index, reason: `a second opened entry for this log — the one at ${opened.index} stands` });
+        unread.push({
+          index: item.index,
+          reason: `a second opened entry for this log — the one at ${opened.index} stands`,
+        });
       }
-    } else if (entry.kind === 'commit') {
-      const idx = entry.bundle.idx as number;
-      const held = commits.get(idx);
-      if (held === undefined) commits.set(idx, item);
+    } else if (item.kind === 'commit') {
+      const held = commits.get(item.count);
+      if (held === undefined) commits.set(item.count, item);
       else if (held.refusal !== undefined && item.refusal === undefined) {
         // A torn first delivery yields to a readable redelivery.
-        commits.set(idx, item);
+        commits.set(item.count, item);
         dropped.add(held);
-        unread.push({
-          index: held.index,
-          reason: `an unreadable commit entry for index ${idx} — the readable one at ${index} stands`,
-        });
-      } else {
-        dropped.add(item);
-        unread.push({ index, reason: `a second commit entry for index ${idx} — the one at ${held.index} stands` });
-      }
-    } else if (entry.kind === 'closed') closes.push(item);
+      } else dropped.add(item);
+    } else if (item.kind === 'closed') closes.push(item);
+  }
+  // Each commit entry not placed is named against the entry that holds its index in the end.
+  for (const item of dropped) {
+    if (item.kind !== 'commit') continue;
+    const holder = commits.get(item.count)!;
+    const reason =
+      item.refusal !== undefined && holder.refusal === undefined
+        ? `an unreadable commit entry for index ${item.count} — the readable one at ${holder.index} stands`
+        : `a second commit entry for index ${item.count} — the one at ${holder.index} stands`;
+    unread.push({ index: item.index, reason });
   }
   const present = [...commits.keys()].sort((a, b) => a - b);
   const last = present.length > 0 ? present[present.length - 1] : -1;
   const close = coveringClose(closes, last);
-  const wanted = close !== undefined ? (close.entry as Closed).commits : last + 1;
-  return { key, address: placed[0].address, arrival, placed, opened, commits, closes, dropped, present, wanted };
+  const wanted = close !== undefined ? close.count : last + 1;
+  return { key, address, arrival, placed, opened, commits, closes, dropped, present, wanted };
 }
 
 /**
@@ -411,7 +447,7 @@ function readGroup(
       unread.push({ index: item.index, reason: `bundle.idx is ${idx}, past ${limit}` });
     }
     for (const close of closes) {
-      const { commits: count } = close.entry as Closed;
+      const count = close.count;
       if (count <= fits) continue;
       past.add(close);
       unread.push({ index: close.index, reason: `commits is ${count}, past ${limit}` });
@@ -420,7 +456,7 @@ function readGroup(
   const stillPresent = past.size === 0 ? present : present.filter((idx) => idx < fits);
   const lastKept = stillPresent.length > 0 ? stillPresent[stillPresent.length - 1] : -1;
   const closing = coveringClose(past.size === 0 ? closes : closes.filter((close) => !past.has(close)), lastKept);
-  const length = closing !== undefined ? (closing.entry as Closed).commits : lastKept + 1;
+  const length = closing !== undefined ? closing.count : lastKept + 1;
   budget.missing -= length - stillPresent.length;
 
   const rows: unknown[] = [];
@@ -428,7 +464,7 @@ function readGroup(
     const item = commits.get(idx);
     if (item === undefined) rows.push(NO_COMMIT);
     else if (item.refusal !== undefined) rows.push(absentRow(item.refusal));
-    else rows.push((item.entry as Extract<RecordEntry, { kind: 'commit' }>).bundle);
+    else rows.push(item.bundle);
   }
   Object.freeze(rows);
   const { log, gaps } = readLog(rows);
@@ -502,7 +538,8 @@ function mountsOf(groups: readonly ReadGroup[]): Record<string, unknown> | undef
  * @param limits Raise a default to read a larger record ({@link StoredRecordLimits}).
  * @returns Every log by address, the run-leg roots, and every entry not read into a log.
  * @throws RangeError when a limit is not a non-negative integer or `Infinity`; TypeError when
- *   `entries` is not iterable; whatever the input's own iterator throws. Never for an entry.
+ *   `entries` is not iterable; whatever the input's own iterator throws. Never for an entry that is
+ *   data (parsed JSON, a structured clone).
  *
  * @example
  * ```typescript
@@ -519,7 +556,7 @@ function mountsOf(groups: readonly ReadGroup[]): Record<string, unknown> | undef
 export function readStoredRecord(entries: Iterable<unknown>, limits?: StoredRecordLimits): StoredRecord {
   const bounds = limitsOf(limits);
   const unread: Unread[] = [];
-  const byKey = new Map<string, Placed[]>();
+  const byKey = new Map<string, { address: LogAddress; placed: Placed[] }>();
   const seen = new Map<object, number>();
   let stopped = false;
   let index = 0;
@@ -529,7 +566,7 @@ export function readStoredRecord(entries: Iterable<unknown>, limits?: StoredReco
       unread.push({ index, reason: `entries from here on are past the reader's limit of ${bounds.entries}; not read` });
       break;
     }
-    let read: Placed | string;
+    let read: { readonly item: Placed; readonly address: LogAddress } | string;
     try {
       read = readEntry(row, index, bounds);
     } catch {
@@ -541,10 +578,11 @@ export function readStoredRecord(entries: Iterable<unknown>, limits?: StoredReco
       unread.push({ index, reason: `the same entry as at ${seen.get(row as object)}` });
     } else {
       seen.set(row as object, index);
+      // One address per log: an entry's own copy is kept only by the first entry of its log.
       const key = keyOf(read.address.logRunId, read.address.drillPath);
-      const placed = byKey.get(key);
-      if (placed === undefined) byKey.set(key, [read]);
-      else placed.push(read);
+      const log = byKey.get(key);
+      if (log === undefined) byKey.set(key, { address: read.address, placed: [read.item] });
+      else log.placed.push(read.item);
     }
     index++;
   }
@@ -552,7 +590,7 @@ export function readStoredRecord(entries: Iterable<unknown>, limits?: StoredReco
   // Group, then spend the gap budget on the logs that need the fewest gaps first.
   let arrival = 0;
   const grouped: Grouped[] = [];
-  for (const [key, placed] of byKey) grouped.push(groupOf(key, arrival++, placed, unread));
+  for (const [key, { address, placed }] of byKey) grouped.push(groupOf(key, address, arrival++, placed, unread));
   const byNeed = [...grouped].sort(
     (a, b) => a.wanted - a.present.length - (b.wanted - b.present.length) || a.arrival - b.arrival,
   );

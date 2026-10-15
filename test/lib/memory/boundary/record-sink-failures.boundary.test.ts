@@ -246,6 +246,27 @@ describe('Boundary: an onFailure that writes to the same failing log', () => {
     log.note('attempt', { n: 2 });
     expect([reports, log.sinkFailures]).toEqual([2, 4]);
   });
+
+  it('an async onFailure is one report deep too — until its promise settles', async () => {
+    let reports = 0;
+    let log!: EventLog;
+    const sink: RecordSink = {
+      ...memorySink(),
+      note: () => {
+        throw new Error('down');
+      },
+      onFailure: (async () => {
+        reports++;
+        await null;
+        log.note('failure', { reported: reports });
+      }) as unknown as RecordSink['onFailure'],
+    };
+    log = new EventLog({}, { sink, address: ROOT });
+    log.note('attempt', { n: 1 });
+    for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(reports).toBe(1);
+    expect(log.sinkFailures).toBe(2);
+  });
 });
 
 describe('Boundary: an entry the log refuses to send', () => {

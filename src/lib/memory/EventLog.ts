@@ -137,7 +137,7 @@ export class EventLog {
   private declare readonly sink?: RecordSink;
   /** Entries the sink did not take; set with the sink. */
   private declare lostEntries?: number;
-  /** True while `onFailure` runs: a loss it causes is counted, not reported again (no runaway). */
+  /** True while `onFailure` runs (until its promise settles): a loss it causes is counted, not reported again. */
   private declare reporting?: boolean;
 
   /**
@@ -322,20 +322,28 @@ export class EventLog {
 
   /**
    * Count a lost entry and tell the sink's `onFailure`, if it listens; a report that fails is ignored.
-   * A loss caused while `onFailure` runs (it wrote to this log again, through the same failing sink) is
-   * counted and not reported again — one report deep, never a runaway.
+   * A loss caused while `onFailure` runs — until the promise it returns settles, when it returns one —
+   * (it wrote to this log again, through the same failing sink) is counted and not reported again: one
+   * report deep, never a runaway.
    */
   private lost(sink: RecordSink, entry: RecordEntry, error: unknown): void {
     this.lostEntries = (this.lostEntries ?? 0) + 1;
     if (this.reporting === true) return;
     this.reporting = true;
+    let pending = false;
     try {
       const reported: unknown = sink.onFailure?.({ entry, error });
-      if (isThenable(reported)) new Promise((resolve) => resolve(reported)).then(undefined, ignore);
+      if (isThenable(reported)) {
+        pending = true;
+        const done = (): void => {
+          this.reporting = false;
+        };
+        new Promise((resolve) => resolve(reported)).then(done, done);
+      }
     } catch {
       ignore();
     } finally {
-      this.reporting = false;
+      if (!pending) this.reporting = false;
     }
   }
 

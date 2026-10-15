@@ -151,9 +151,10 @@ export function sendEntry(sink: RecordSink, entry: RecordEntry): unknown {
 /**
  * A sink that keeps every entry in memory, in arrival order — the reference adapter: what any adapter
  * must give back for `readStoredRecord` to read the same record. `entries` is a new array on each read.
- * What it keeps is frozen all the way down — the base, `meta` and a note's `data` are the copies a log
- * hands it, and the bundle is already frozen — so no reader of the stored record can rewrite it. (A
- * caller that hands it objects directly hands them over: they are frozen in place.)
+ * What it keeps is frozen as far as freezing reaches — the base, `meta` and a note's `data` are the
+ * copies a log hands it, and the bundle is already frozen — so no reader can rewrite its containers. A
+ * Date's time, a Map's or Set's entries and a buffer's bytes are not sealed by freezing (`deepFreeze`'s
+ * stated limit). A caller that hands it objects directly hands them over: they are frozen in place.
  *
  * @example
  * ```typescript

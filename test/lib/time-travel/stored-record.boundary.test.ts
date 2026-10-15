@@ -13,8 +13,8 @@
  *             the caller gives that is not a count is refused; a deep chain of nested logs at the depth
  *             limit reads in linear time, and a bundle nested 100,000 deep is never walked
  *             a cut or an early stop never adds or changes a claim (`complete`, `outcome`, `meta.closed`);
- *             the gap budget is spent on the logs that need the fewest first, so a corrupt log cannot starve
- *             the rest; 200,000 unread entries never overflow the stack
+ *             the gap budget is spent on the logs that need the fewest first, so a corrupt log asking for
+ *             the most is the one cut; 200,000 unread entries never overflow the stack
  *   security  an address is read by index, never through its own iterator (a lying or endless one); an
  *             entry whose fields throw is unread; a stored drill segment named `__proto__` is a key of the
  *             source's `subflowResults`, never its prototype; the reader never edits, freezes or copies the
@@ -216,7 +216,7 @@ describe('Limits: the reader’s work on untrusted input is bounded, and what a 
     expect(short.outcome).toBeUndefined();
   });
 
-  it('missingCommits: one budget for the record, spent on the logs that need the fewest gaps first — a corrupt log cannot starve the rest', () => {
+  it('missingCommits: one budget for the record, spent on the logs that need the fewest gaps first — a corrupt log asking for the most is the one cut', () => {
     const a: LogAddress = { logRunId: 'run-a', drillPath: [] };
     const b: LogAddress = { logRunId: 'run-b', drillPath: [] };
     // run-a arrives first and asks for 9 gaps (a corrupt index); run-b asks for 2.
@@ -361,6 +361,24 @@ describe('Security: entries are data — the reader never trusts an entry’s ow
       { index: 5, reason: 'the entry threw when it was read' },
     ]);
     expect(stored.root('run-1')!.complete).toBe(true);
+  });
+
+  it('what the reader computes with is taken once, as checked — an accessor that changes later cannot move the budget', () => {
+    let reads = 0;
+    const shifty = {
+      kind: 'commit',
+      address: ROOT,
+      at: 1,
+      get bundle() {
+        reads++;
+        return reads === 1 ? { ...bundle(0), idx: 0 } : { ...bundle(0), idx: 'later' };
+      },
+    };
+    const stored = readStoredRecord([shifty, { kind: 'closed', address: ROOT, at: 1, outcome: 'ok', commits: 1 }]);
+    expect(reads).toBe(1);
+    expect(stored.unread).toEqual([]);
+    expect(stored.root('run-1')!).toMatchObject({ complete: true, gaps: [] });
+    expect(stored.root('run-1')!.commitLog).toHaveLength(1);
   });
 
   it('a stored log’s commitLog is frozen, gaps or not — no reader can rewrite what every other reader sees', () => {

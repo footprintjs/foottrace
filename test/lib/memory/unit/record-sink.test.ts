@@ -133,7 +133,7 @@ describe('EventLog with a sink — what the sink may keep', () => {
     expect(log.getInitialState()).toEqual({ list: [1] });
   });
 
-  it('memorySink keeps every entry frozen all the way down — base, meta and note data included', () => {
+  it('memorySink keeps every entry frozen as far as freezing reaches — the containers of base, meta and note data', () => {
     const sink = memorySink();
     const log = new EventLog({ deep: { list: [1] } }, { sink, address: ROOT, meta: { chart: { id: 'pay' } } });
     log.note('attempt', { attempt: { outcome: 'failed' } });

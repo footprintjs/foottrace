@@ -487,9 +487,10 @@ export interface TimeTravel<TMeta = unknown> {
   /**
    * A cursor over the subflow mounted at `mountRuntimeStageId` — the same
    * interface, its own log, its own fold base. `undefined` when that mount is
-   * not in this run's subflow results, and when it is this cursor's own mount
-   * or one it was drilled out of (1.1.0: a stored or hand-built log can name
-   * one, and a viewer that opens every mount must not loop).
+   * not in this run's subflow results, and when it is this cursor's own mount,
+   * one it was drilled out of, or the log it already reads (1.1.0: a stored or
+   * hand-built log can name one, and a viewer that opens every mount must not
+   * loop).
    *
    * A stop inside a subflow is NOT a stop of this cursor: subflows run in
    * isolated runtimes and commit to their own log, so the outer axis holds

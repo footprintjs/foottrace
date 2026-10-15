@@ -278,6 +278,10 @@ class Cursor<TMeta> implements TimeTravel<TMeta> {
     }
     const tree = result?.treeContext;
     if (!results || !result || !tree || !Array.isArray(tree.history)) return undefined;
+    // … nor into the log this cursor already reads (a mount log opened on its own knows no mount id).
+    if (this.sources.some((source) => source.commitLog === tree.history || source.history === tree.history)) {
+      return undefined;
+    }
 
     // `path` is the subflow PATH — the same string for every iteration of a
     // mount inside a loop. `mountRuntimeStageId` is the iteration actually

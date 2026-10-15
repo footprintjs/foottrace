@@ -215,7 +215,7 @@ function seedCommits(
   }
   let next = 1;
   while (next < commitLog.length && commitLog[next].runtimeStageId === head) next++;
-  if (opensOwnMount(subflowResults, head, commitLog[0])) return next;
+  if (executionTree === undefined && opensOwnMount(subflowResults, head, commitLog[0])) return next;
   const address = stageIdOf(head);
   if (next >= commitLog.length) {
     const rootId = executionTree?.id;
