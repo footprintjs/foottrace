@@ -78,6 +78,9 @@ syntax: empty strings and historical string spellings remain accepted.
   - `updates is not a plain object` · `overwrite is not a plain object`
   - `trace[i].verb is missing | "<verb>", not set | merge | append | delete`
   - `trace[i].path is missing | null | an array | a <type>, not a string`
+  - only in a stored log read back by `readStoredRecord` (1.1.0), where no
+    single bundle can stand at the index: `no readable commit entry for this
+    index` · `commit entries for this index disagree`
 - **One saved-row boundary.** `isCommitBundle(row)` applies the same checks as
   replay. Causal readers still accept typed `CommitBundle[]`, not unknown input.
   A consumer preparing a causal query from stored rows must validate every row
@@ -154,7 +157,7 @@ a flowchart wrote, and it keeps the laws above by construction:
   (`test/fixtures/README.md`): a refactor never moves a byte. The classes also
   carry engine-facing members that are not part of it: `SharedMemory ·
   setValue` / `updateValue` (they write the heap with no bundle), `EventLog ·
-  clear` (wipes the history), `materialise` (deprecated: use `stateAt`),
+  clear` (wipes the history; refused on a log that writes to a sink), `materialise` (deprecated: use `stateAt`),
   `recorded` / `bindAddress` (internal), and `RecordFrame · useAddress` (only
   before a frame's first write, which the frame does not check).
 
@@ -187,6 +190,55 @@ timeTravel(record, { strategy: tagStops(['milestone:step']) }).stops; // start, 
 
 The standalone reader example is
 `examples/post-execution/time-travel/06-bring-your-own-record.ts`.
+
+## A stored record
+
+A log built with a sink (`new EventLog(base, { sink, address, meta? })`,
+1.1.0) hands every entry to a `RecordSink` as it lands, so a run that is killed
+still leaves its record. A sink stores each entry as a `RecordEntry`: the
+method's entry plus the method's name as `kind`.
+
+| `kind` | Written | Fields besides `address` (`{ logRunId, drillPath }`) and `at` (epoch ms) |
+|---|---|---|
+| `opened` | once, from the log's constructor | `initialState` (the fold base, the sink's own copy), `meta?` |
+| `commit` | per `record`, after the bundle is frozen and appended | `bundle` (the log's own, `idx` stamped) |
+| `note` | per `note(kind, data)` | `note` (the note's own kind), `data` |
+| `closed` | per `close(outcome, meta?)` | `outcome` (`ok` · `failed` · `paused`), `commits` (the log's length then), `meta?` |
+
+The laws:
+
+1. **A sink is told, never waited on.** The bundle is in the log before the
+   sink sees it, and nothing the sink does reaches the writer: a throw, a
+   rejected promise or an entry the log refuses to send is counted
+   (`sinkFailures`) and reported to `sink.onFailure`.
+2. **A sink moves no byte.** The log writes the same bundles with or without
+   one; notes never enter a bundle.
+3. **Opaque stays opaque.** `meta`, a note's kind and its data are the
+   writer's: stored and handed back, never read. The sink keeps its own copy.
+4. **The reader checks what storage gives back.** `readStoredRecord` takes
+   `Iterable<unknown>`, groups entries by address (each log in arrival order),
+   and lists an entry it cannot read in `unread` with its position and reason.
+5. **A commit sits at its own index.** A lost commit, two stored commits that
+   disagree and an unreadable bundle are gaps that keep their index — the same
+   reason in `StoredLog.gaps` and in the fold's `skipped`. `closed.commits`
+   makes a lost last commit a gap too.
+6. **Complete means the writer finished.** `complete` is `true` when a
+   `closed` entry covers every stored commit; its `outcome` and `meta` are the
+   log's. A run killed mid-flight reads `complete: false` and keeps its notes.
+
+```ts
+import { readStoredRecord, stateAt } from 'foottrace';
+
+const run = readStoredRecord(entries).root('run-1')!; // entries: what the sink stored, in write order
+run.complete; // false when no closing entry was stored
+run.notes; // [{ kind, at, data }] — in arrival order
+stateAt(run.source(), run.commitLog.length - 1); // the fold over what landed, gaps in `skipped`
+```
+
+Attempt IDs (`buildAttemptId` / `parseAttemptId`) address one attempt under a
+stage execution — `<runtimeStageId>@<n>`, and `<runtimeStageId>@<n>.<k>@<m>`
+for a call's attempt — parsed from the right, so no stage-ID character is
+newly reserved.
 
 ## Public helpers and their contracts
 
@@ -272,3 +324,13 @@ writer's `LOG_PLACEHOLDER` is the historical `'REDACTED'` record byte.
 - `test/architecture/public-door-state.test.ts` and
   `test/architecture/public-helper-contracts.test.ts` exercise the helper
   contracts, including shared freeze metadata through the built ESM and CJS doors.
+- `test/lib/memory/unit/record-sink.test.ts`,
+  `test/lib/memory/boundary/record-sink-failures.boundary.test.ts` and
+  `test/lib/memory/scenario/record-sink-same-bytes.test.ts` — the four entries
+  and their order, a failing sink never reaching the writer, and the pinned
+  hcifootprint bytes unchanged with a sink attached (in the log and read back).
+- `test/lib/time-travel/stored-record.test.ts`,
+  `stored-record.property.test.ts` and `stored-record.boundary.test.ts` — the
+  stored-record laws above, every unread reason verbatim, and the reader's
+  budget.
+- `test/lib/ids/attemptId.test.ts` — the attempt-ID round trip.

@@ -6,6 +6,8 @@ export {
   parseRuntimeStageId,
   splitStageId,
 } from './lib/ids/runtimeStageId.js';
+export type { AttemptId } from './lib/ids/attemptId.js';
+export { buildAttemptId, parseAttemptId } from './lib/ids/attemptId.js';
 export { UnknownVerbError } from './lib/memory/verbs.js';
 export type { CommitBundle, MemoryPatch, TraceEntry } from './lib/memory/types.js';
 export type { ExecutionTree } from './lib/memory/types.js';
@@ -44,6 +46,9 @@ export type {
   Stop,
   StopFilter,
   StopKind,
+  StoredLog,
+  StoredNote,
+  StoredRecord,
   TimeTravel,
   TimeTravelOptions,
   TimeTravelSource,
@@ -54,11 +59,13 @@ export {
   commitStopsStrategy,
   filterStops,
   isCommitBundle,
+  readStoredRecord,
   splitAxis,
   stateAt,
   tagStops,
   timeTravel,
 } from './lib/time-travel/index.js';
+export type { LogOutcome, Meta } from './lib/memory/sink.js';
 export type {
   CausalChainOptions,
   CausalEdge,

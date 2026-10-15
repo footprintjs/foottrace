@@ -10,8 +10,8 @@ Foottrace owns the record layer used by footprintjs 10. Older stored records rem
 
 | Import | Responsibility |
 | --- | --- |
-| `foottrace` | Record types, runtime IDs, replay, time-travel cursors, causal and variable slices, honesty codes |
-| `foottrace/write` | `SharedMemory`, `EventLog`, `RecordFrame`, encoding and write types, writer-owned freezing |
+| `foottrace` | Record types, runtime and attempt IDs, replay, time-travel cursors, causal and variable slices, honesty codes, the stored-record reader |
+| `foottrace/write` | `SharedMemory`, `EventLog`, `RecordFrame`, encoding and write types, writer-owned freezing, the record sink port and `memorySink` |
 | `foottrace/paths` | Record-path encoding/decoding, nested access and safe diagnostic writes |
 
 Every declaration has one public entry point. There are no public deep imports or `/testing` entry point. FootPrint's engine, observer channels, recorders and stores remain in `footprintjs`.
@@ -41,6 +41,45 @@ console.log(result.state); // { count: 1 }
 Writers record during execution. Readers query what was recorded; they do not reconstruct missing events or infer certainty from absent evidence. A slice can be conservative or incomplete: retain its honesty codes when presenting it to a person or a model.
 
 See the [record contract](docs/guides/record-contract.md), [time-travel contract](src/lib/time-travel/README.md), and [slice contract](src/lib/slice/README.md).
+
+## A record that survives the run
+
+A log can also hand every entry to a sink **as it lands**, so a run that is killed still leaves its record behind. The sink sees four entries — `opened` (the base), `commit` (each bundle, after it is frozen), `note` (anything the writer wants kept beside the log, as it happens) and `closed` (how the log ended) — and `memorySink` is the reference adapter. Write your own for a file, a bucket or a table by implementing those four methods.
+
+```ts
+import { readStoredRecord, timeTravel } from 'foottrace';
+import { EventLog, RecordFrame, SharedMemory, memorySink } from 'foottrace/write';
+
+const sink = memorySink();
+const state = new SharedMemory(undefined, { count: 0 });
+const log = new EventLog(state.getState(), { sink, address: { logRunId: 'run-1', drillPath: [] } });
+const frame = new RecordFrame(state, log);
+frame.write(frame.at([], 'count'), 1, 'set');
+frame.commit(() => ({ stage: 'Increment', stageId: 'increment', runtimeStageId: 'increment#0' }));
+log.note('attempt', { attempt: 1, outcome: 'timeout' });
+// … the process dies here: no log.close('ok') …
+
+const run = readStoredRecord(sink.entries).root('run-1')!;
+run.complete; // false — the log never closed
+run.notes; // [{ kind: 'attempt', at, data: { attempt: 1, outcome: 'timeout' } }]
+timeTravel(run.source()).last(); // the cursor over what landed
+```
+
+A failing sink never stops the writer: a throw or a rejected promise is counted (`log.sinkFailures`) and reported to `sink.onFailure`. The reader takes entries as storage gives them back (`Iterable<unknown>`) and checks each one: an entry it cannot read is listed in `unread`, and a commit sits at its own index, so a commit the store lost is a gap the fold reports by index — never a shifted log. A sink adds nothing to the log's bytes; `meta` and a note's data are opaque, stored and handed back, never read. See [time travel](src/lib/time-travel/README.md#6-a-stored-record-reads-back--even-a-run-that-never-ended-110) and the [record contract](docs/guides/record-contract.md#a-stored-record).
+
+## Attempt IDs
+
+An attempt under a stage execution has its own ID: `charge#4@2` is attempt 2 of `charge#4`, and `charge#4@2.1@3` is attempt 3 of the first call that stage attempt made. Counts start at 1.
+
+```ts
+import { buildAttemptId, parseAttemptId } from 'foottrace';
+
+buildAttemptId('charge#4', 2, { ordinal: 1, attempt: 3 }); // 'charge#4@2.1@3'
+parseAttemptId('charge#4@2'); // { runtimeStageId: 'charge#4', attempt: 2 }
+parseAttemptId('charge#4'); // undefined — a stage execution, not an attempt
+```
+
+The parser reads from the right, so a stage ID may contain `@` or `.` and no character is newly reserved. See [ids/](src/lib/ids/README.md#attempt-ids-110).
 
 ## Paths are not interchangeable
 

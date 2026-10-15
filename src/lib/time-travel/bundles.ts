@@ -46,6 +46,21 @@ export function isPlainish(value: unknown): value is Record<string, unknown> {
 }
 
 /**
+ * Rows that hold an index for a commit the record does not have (1.1.0) — what a STORED log could not
+ * supply at a position: no readable commit entry, or entries that disagree (`storedRecord.ts`). Each
+ * carries the reason every reader then reports for its index, so the fold, the cursor and the stored
+ * log say the same thing about it. Kept by identity (a JSON copy of one is an ordinary unreadable row).
+ */
+const ABSENT_ROWS = new WeakMap<object, string>();
+
+/** A row every reader refuses with `reason` — a gap that keeps its index. */
+export function absentRow(reason: string): object {
+  const row = Object.freeze({});
+  ABSENT_ROWS.set(row, reason);
+  return row;
+}
+
+/**
  * Read a source's `executionTree` as an {@link ExecutionTree}, or as absent.
  *
  * The tree is only ever WALKED for mount ids (`subflowId` + `runtimeStageId`
@@ -83,6 +98,8 @@ export function readTree(value: unknown): ExecutionTree | undefined {
  * compatibility break dressed up as validation.
  */
 export function bundleRefusal(row: unknown): string | undefined {
+  const absent = typeof row === 'object' && row !== null ? ABSENT_ROWS.get(row) : undefined;
+  if (absent !== undefined) return absent;
   if (!isPlainish(row)) {
     return `not an object (${row === null ? 'null' : Array.isArray(row) ? 'array' : typeof row})`;
   }

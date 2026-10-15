@@ -15,6 +15,11 @@
  * The step's encoding is two dials (`RecordEncoding`): `commitValues` (`'full'` | `'delta'`) and
  * `writeProvenance` (`'off'` | `'reads-prefix'`, `WriteProvenanceMode`).
  *
+ * A log can also hand every entry to a `RecordSink` AS IT LANDS (`new EventLog(base, { sink,
+ * address })`): `opened`, `commit`, `note`, `closed` — so a run that never ends still leaves its
+ * record. `memorySink` is the reference adapter; `readStoredRecord` (`foottrace`) reads the stored
+ * entries back. A failing sink never stops the writer (`EventLog · sinkFailures`).
+ *
  * Every type this door names is the record's own: nothing here loads or names the engine
  * (test/architecture/layering.test.ts). Its names and the bytes they write are promised under the
  * record fixtures' re-pin policy (test/fixtures/README.md): a refactor never moves a byte.
@@ -43,6 +48,10 @@
 // The heap and the log.
 export { EventLog } from './lib/memory/EventLog.js';
 export { SharedMemory } from './lib/memory/SharedMemory.js';
+
+// Where a log's entries go as they land (1.1.0): the port, the stored entry, the reference adapter.
+export type { RecordEntry, RecordSink } from './lib/memory/sink.js';
+export { memorySink } from './lib/memory/sink.js';
 
 // One step's frame, and what it takes: the dials, the verbs, a verdict's bytes, the names on its bundle.
 export type { CommitStamp } from './lib/memory/recordCommit.js';

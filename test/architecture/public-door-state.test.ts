@@ -22,6 +22,18 @@ const checks = `
   const servedBundle = reader.serveRecord(log.recorded()[0]);
   servedBundle.overwrite.when.setTime(99);
   assert.equal(log.list()[0].overwrite.when.getTime(), 7);
+  // 1.1.0: a log writing to a sink through /write, read back through the root — a lost commit is a gap
+  // the reader and the fold name alike, across the two doors.
+  const sink = writer.memorySink();
+  const sinkLog = new writer.EventLog({ n: 0 }, { sink, address: { logRunId: 'r', drillPath: [] } });
+  for (const n of [1, 2]) sinkLog.record({ stage: 'S', stageId: 's', runtimeStageId: 's#' + n, overwrite: { n }, updates: {}, trace: [{ path: 'n', verb: 'set' }], redactedPaths: [] });
+  sinkLog.note('attempt', { n: 1 });
+  const storedLog = reader.readStoredRecord(sink.entries.filter((e) => !(e.kind === 'commit' && e.bundle.idx === 0))).root('r');
+  assert.equal(storedLog.complete, false);
+  assert.deepEqual(storedLog.notes.map((note) => note.kind), ['attempt']);
+  assert.deepEqual(reader.stateAt(storedLog.source(), 1).skipped, [{ index: 0, reason: 'no readable commit entry for this index' }]);
+  assert.equal(sinkLog.sinkFailures, 0);
+  assert.equal(reader.parseAttemptId(reader.buildAttemptId('s#0', 2)).attempt, 2);
 `;
 
 describe('built package public doors share record state', () => {

@@ -64,10 +64,17 @@ export interface RecordRun {
   snapshot(): { commitLog: CommitBundle[]; initialState: Record<string, unknown>; executionTree?: ExecutionTree };
 }
 
-/** A run seeded with `seed` (its `initialContext`), written under `encoding` (default: `'full'`, no read prefix). */
-export function recordRun(seed: Record<string, unknown> = {}, encoding: Partial<RecordEncoding> = {}): RecordRun {
+/**
+ * A run seeded with `seed` (its `initialContext`), written under `encoding` (default: `'full'`, no read prefix).
+ * `logOptions` builds the log with a sink (1.1.0): every entry also goes to it as it lands.
+ */
+export function recordRun(
+  seed: Record<string, unknown> = {},
+  encoding: Partial<RecordEncoding> = {},
+  logOptions?: ConstructorParameters<typeof EventLog>[1],
+): RecordRun {
   const state = new SharedMemory(undefined, seed);
-  const log = new EventLog(state.getState());
+  const log = new EventLog(state.getState(), logOptions);
   const dials: RecordEncoding = { commitValues: 'full', writeProvenance: 'off', ...encoding };
   const nodes: ExecutionTree[] = [];
   const lastIdOf = new Map<string, string>();

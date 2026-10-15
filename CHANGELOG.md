@@ -1,5 +1,58 @@
 # Changelog
 
+## Unreleased — minor (1.1.0)
+
+### Added
+
+- **A record that survives the run.** `new EventLog(base, { sink, address, meta? })` (`foottrace/write`) hands every
+  entry to a `RecordSink` as it lands: `opened` from the constructor (the base, as the sink's own copy), `commit`
+  after each bundle is frozen and appended, `note` from the new `log.note(kind, data)`, and `closed` from the new
+  `log.close(outcome, meta?)` with the log's length (`commits`). A run that is killed still leaves its record, and
+  the evidence noted as it happened (an attempt that ended) survives without a closing entry. `memorySink()` is the
+  reference adapter; an app brings a file, a bucket or a table by implementing the four methods. Each stored entry
+  is a `RecordEntry` (the method's entry plus its name as `kind`; a note's own kind is stored as `note`).
+
+  ```ts
+  const sink = memorySink();
+  const log = new EventLog({ count: 0 }, { sink, address: { logRunId: 'run-1', drillPath: [] } });
+  log.note('attempt', { attempt: 1, outcome: 'timeout' });
+  // the process dies: no close
+  readStoredRecord(sink.entries).root('run-1')?.complete; // false — and the note is there
+  ```
+
+  **Why:** an in-memory log dies with its process, and the record of a run that never finished was exactly the one
+  missing. **The law (Q3):** a failing sink never stops the writer — a throw, a rejected promise, a missing method or
+  an entry the log refuses to send (note data that is not a plain object surviving `structuredClone`, an unknown
+  outcome) is counted in `log.sinkFailures` and reported to `sink.onFailure({ entry, error })`, never thrown.
+- **`readStoredRecord(entries)`** (root) reads a sink's entries back into a `StoredRecord`: `logs` by address,
+  `root(logRunId)`, `log(address)`, and `unread` — every entry it could not read, with its position and reason.
+  Each `StoredLog` has `initialState`, `commitLog`, `gaps`, `notes` (`StoredNote`, arrival order), `complete`,
+  `outcome`, `meta` (`{ opened?, closed? }`, never merged), its raw `entries`, and `source()` for `timeTravel` /
+  `stateAt` — where the logs stored under it are its `subflowResults`, so the cursor marks stored mounts and
+  `drill()` opens them. It takes `Iterable<unknown>` (storage gives entries back unvalidated). A commit sits at its
+  own `bundle.idx`: a commit the store lost, two that disagree or an unreadable bundle is a gap that keeps its index,
+  with the same reason in `gaps` and in the fold's `skipped`; `closed.commits` makes a lost last commit a gap too.
+  `complete` means a `closed` entry covers every stored commit. A stored log is read up to 2^24 commits (a budget,
+  so one corrupted index cannot make the reader allocate without bound).
+- **Attempt IDs** (root): `buildAttemptId(runtimeStageId, attempt, call?)`, `parseAttemptId(id)` and the type-only
+  brand `AttemptId` — `charge#4@2` (attempt 2 of `charge#4`) and `charge#4@2.1@3` (attempt 3 of the first call made
+  during it). Counts start at 1. Parsed from the right: no stage-ID character is newly reserved.
+- Types `Meta` and `LogOutcome` (root); `RecordSink`, `RecordEntry` (`/write`).
+- Honesty code `'unread-entry'` for `StoredRecord.unread` (the registry holds 22 codes). Two gap reasons, produced
+  only for a stored log read back by `readStoredRecord`: `no readable commit entry for this index` and
+  `commit entries for this index disagree`.
+
+### Changed
+
+- `EventLog.clear()` throws on a log built with a sink: a stored record cannot be wiped. The one-argument log is
+  unchanged.
+
+### Compatibility
+
+- Minor: no export removed or moved (pinned by `test/architecture/exports.test.ts`). The one-argument `EventLog`
+  behaves exactly as before; record bytes are unchanged with or without a sink (the hcifootprint 2.6.1 fixture is
+  replayed both ways). No runtime dependency added.
+
 ## 1.0.3
 
 ### Fixed
