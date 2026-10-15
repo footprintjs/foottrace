@@ -8,11 +8,12 @@
  *             `root` / `log` lookups; `complete`, `outcome` and `meta` from the covering close; notes in
  *             arrival order; a log with no `opened` has no base
  *   scenario  a run killed mid-flight reads `complete: false`, still returns its notes, and folds what
- *             landed; a lost commit, a lost LAST commit (seen through `closed.commits`), two stored commits
- *             that disagree and an unreadable bundle are gaps the fold reports with the same reason; a
- *             log closed and then gone on is not complete until it closes again; the cursor marks a stored
- *             mount and `drill` opens its own stored log, two deep; a paused leg and its resumed leg chain
- *             as one axis
+ *             landed; a lost commit, a lost LAST commit (seen through `closed.commits`) and an unreadable
+ *             bundle are gaps the fold reports with the same reason; a second commit (or opened) entry for
+ *             a place already held is not placed — the first stands and the second is listed by name, never
+ *             compared; a log closed and then gone on is not complete until it closes again; the cursor
+ *             marks a stored mount and `drill` opens its own stored log, two deep; a paused leg and its
+ *             resumed leg chain as one axis
  */
 import { describe, expect, it } from 'vitest';
 
@@ -174,17 +175,31 @@ describe('what the store lost — a gap at its own index, never a shifted log', 
     expect(log.gaps).toEqual([{ index: 2, reason: 'no readable commit entry for this index' }]);
   });
 
-  it('two stored commits that disagree about one index are a gap; a redelivered copy is not', () => {
-    const { sink } = writeRun();
+  it('a second commit entry for an index is not placed: the first stands, the second is listed — never compared', () => {
+    const { sink, run } = writeRun();
     const [first] = sink.entries.filter((e) => e.kind === 'commit') as Extract<RecordEntry, { kind: 'commit' }>[];
-    const redelivered = readStoredRecord([...sink.entries, ...throughJson([first])]).root('run-1')!;
-    expect(redelivered.gaps).toEqual([]);
-    expect(redelivered.complete).toBe(true);
-
     const forged = { ...first, bundle: { ...first.bundle, overwrite: { events: ['forged'] } } };
-    const disagreeing = readStoredRecord([...sink.entries, forged]).root('run-1')!;
-    expect(disagreeing.gaps).toEqual([{ index: 0, reason: 'commit entries for this index disagree' }]);
-    expect(stateAt(disagreeing.source(), 2).skipped).toEqual(disagreeing.gaps);
+    for (const second of [throughJson([first])[0], forged]) {
+      const stored = readStoredRecord([...sink.entries, second]);
+      const log = stored.root('run-1')!;
+      expect(stored.unread).toEqual([{ index: 7, reason: 'a second commit entry for index 0 — the one at 1 stands' }]);
+      expect(log.gaps).toEqual([]);
+      expect(log.complete).toBe(true);
+      expect(log.commitLog[0]).toBe(first.bundle);
+      expect(log.entries).toHaveLength(7);
+      expect(stateAt(log.source(), 2).state).toEqual(run.state.getState());
+    }
+    // The same entry object handed twice is one entry, not a second claim.
+    expect(readStoredRecord([...sink.entries, first]).unread).toEqual([]);
+  });
+
+  it('a second opened entry is listed too: the first base stands', () => {
+    const { sink } = writeRun();
+    const opened = sink.entries[0] as Extract<RecordEntry, { kind: 'opened' }>;
+    const stored = readStoredRecord([...sink.entries, { ...opened, initialState: { tenant: 'forged' } }]);
+    expect(stored.unread).toEqual([{ index: 7, reason: 'a second opened entry for this log — the one at 0 stands' }]);
+    expect(stored.root('run-1')!.initialState).toEqual({ tenant: 'T-1' });
+    expect(readStoredRecord([...sink.entries, opened]).unread).toEqual([]);
   });
 
   it('a bundle the reader cannot read keeps its index and its own reason, in the log and in the fold', () => {

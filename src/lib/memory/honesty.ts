@@ -102,7 +102,7 @@ export const HONESTY_CODES = /* @__PURE__ */ Object.freeze({
     'A row of the stored log could not be read as a commit bundle, so it keeps its index but contributes no state, and any fold that crosses it is missing whatever that row wrote.',
   // ── an entry a sink stored that no log could hold — `StoredRecord.unread` (1.1.0) ─
   'unread-entry':
-    'An entry a sink stored could not be read as an opened, commit, note or closed entry of one log, so no log holds it and whatever it said (a base, a commit, a note or how the log ended) is missing from the record read back.',
+    "An entry a sink stored was not read into any log (it could not be read as an opened, commit, note or closed entry, it lay past one of the reader's limits, or an earlier entry already held its place), so whatever it said (a base, a commit, a note or how the log ended) is not in the record read back.",
   // ── untracked reads a stage also consumed — `CausalNode.incompleteSources` ─
   'incomplete-sources':
     'The stage also consumed read paths that bypass read tracking (args, env or an unshadowed silent read), so a slice through it may be incomplete: those reads produce no read-to-write edge to follow.',

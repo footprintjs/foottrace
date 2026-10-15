@@ -1,13 +1,17 @@
 /**
  * Boundary and security: what `readStoredRecord` (1.1.0) does with entries it cannot read — and with
- * entries written to hurt it.
+ * entries written to hurt it. Stored entries are untrusted input.
  *
  *   boundary  nothing stored reads as no logs; every entry that cannot be read is listed in `unread` with
  *             its input position and its reason (verbatim — a reader branches on the code, prints the
  *             reason), and the rest of the record still reads; an unread commit leaves a gap in its log;
- *             a commit index or a close's `commits` past the reader's budget (2^24) is unread, so one
- *             corrupted number cannot make the reader allocate without bound; a bigint, a symbol or a
- *             megabyte of string in a field is described, never thrown on
+ *             a bigint, a symbol or a megabyte of string in a field is described, never thrown on
+ *   limits    each default is pinned (entries 2^24, missing commits 2^20, drill depth 1,024, address
+ *             length 65,536), each is enforced at its edge and refused BY NAME past it — an endless input
+ *             stops at `entries`, a corrupted index or close cannot make the reader allocate past the gap
+ *             budget (shared by every log of the record), a deep or long address is unread — and a limit
+ *             the caller gives that is not a count is refused; a deep chain of nested logs at the depth
+ *             limit reads in linear time, and a bundle nested 100,000 deep is never walked
  *   security  a stored drill segment named `__proto__` is a key of the source's `subflowResults`, never its
  *             prototype; the reader never edits, freezes or copies the entries it is handed
  */
@@ -15,6 +19,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { LogAddress } from '../../../src/index.js';
 import { HONESTY_CODES, readStoredRecord, timeTravel } from '../../../src/index.js';
+import { DEFAULT_LIMITS } from '../../../src/lib/time-travel/storedRecord.js';
 import type { RecordEntry } from '../../../src/write.js';
 import { EventLog, memorySink } from '../../../src/write.js';
 
@@ -33,13 +38,18 @@ function bundle(n: number) {
 }
 
 /** A clean record: opened, two commits, closed. */
-function clean(): RecordEntry[] {
+function clean(address: LogAddress = ROOT): RecordEntry[] {
   const sink = memorySink();
-  const log = new EventLog({ n: 0 }, { sink, address: ROOT });
+  const log = new EventLog({ n: 0 }, { sink, address });
   log.record(bundle(0));
   log.record(bundle(1));
   log.close('ok');
   return [...sink.entries];
+}
+
+/** A stored commit entry at `idx`, as storage gives it back. */
+function commitAt(idx: number, address: LogAddress = ROOT) {
+  return { kind: 'commit', address, at: 1, bundle: { ...bundle(idx), idx } };
 }
 
 describe('Boundary: nothing, or nothing readable', () => {
@@ -73,28 +83,24 @@ describe('Boundary: an entry that cannot be read is listed, with its position an
       { kind: 'opened', address: { logRunId: 'r', drillPath: ['a', 1] }, at, initialState: {} },
       'address.drillPath is not an array of strings',
     ],
+    [
+      // A hole in a sparse drill path is not a string either.
+      { kind: 'opened', address: { logRunId: 'r', drillPath: [, 'b'] }, at, initialState: {} },
+      'address.drillPath is not an array of strings',
+    ],
     [{ kind: 'opened', address, initialState: {} }, 'at is missing, not a finite number'],
     [{ kind: 'opened', address, at: '2026', initialState: {} }, 'at is "2026", not a finite number'],
     [{ kind: 'opened', address, at }, 'initialState is missing, not a plain object'],
     [{ kind: 'opened', address, at, initialState: {}, meta: [1] }, 'meta is an array, not a plain object'],
     [{ kind: 'commit', address, at }, 'bundle is missing, not an object'],
-    [
-      { kind: 'commit', address, at, bundle: { ...bundle(0) } },
-      'bundle.idx is missing, not a commit index below 16777216',
-    ],
-    [
-      { kind: 'commit', address, at, bundle: { ...bundle(0), idx: -1 } },
-      'bundle.idx is -1, not a commit index below 16777216',
-    ],
-    [
-      { kind: 'commit', address, at, bundle: { ...bundle(0), idx: 1.5 } },
-      'bundle.idx is 1.5, not a commit index below 16777216',
-    ],
+    [{ kind: 'commit', address, at, bundle: { ...bundle(0) } }, 'bundle.idx is missing, not a commit index'],
+    [{ kind: 'commit', address, at, bundle: { ...bundle(0), idx: -1 } }, 'bundle.idx is -1, not a commit index'],
+    [{ kind: 'commit', address, at, bundle: { ...bundle(0), idx: 1.5 } }, 'bundle.idx is 1.5, not a commit index'],
     [{ kind: 'note', address, at, data: {} }, 'note is missing, not a string'],
     [{ kind: 'note', address, at, note: 'attempt', data: 'x' }, 'data is "x", not a plain object'],
     [{ kind: 'closed', address, at, commits: 0 }, 'outcome is missing, not ok | failed | paused'],
     [{ kind: 'closed', address, at, outcome: 'done', commits: 0 }, 'outcome is "done", not ok | failed | paused'],
-    [{ kind: 'closed', address, at, outcome: 'ok' }, 'commits is missing, not a commit count up to 16777216'],
+    [{ kind: 'closed', address, at, outcome: 'ok' }, 'commits is missing, not a commit count'],
     [{ kind: 'closed', address, at, outcome: 'ok', commits: 0, meta: 'x' }, 'meta is "x", not a plain object'],
   ];
 
@@ -107,7 +113,7 @@ describe('Boundary: an entry that cannot be read is listed, with its position an
   });
 
   it('the signal is registered: a reader explains `unread` from the one vocabulary', () => {
-    expect(HONESTY_CODES['unread-entry']).toMatch(/^An entry a sink stored could not be read/);
+    expect(HONESTY_CODES['unread-entry']).toMatch(/^An entry a sink stored was not read into any log/);
   });
 
   it('an unread commit leaves a gap at its index in its log — the two signals agree', () => {
@@ -117,18 +123,6 @@ describe('Boundary: an entry that cannot be read is listed, with its position an
     const stored = readStoredRecord(entries);
     expect(stored.unread).toEqual([{ index: 1, reason: 'at is null, not a finite number' }]);
     expect(stored.root('run-1')!.gaps).toEqual([{ index: 0, reason: 'no readable commit entry for this index' }]);
-  });
-});
-
-describe('Boundary: the reader’s budget — one corrupted number cannot make it allocate without bound', () => {
-  it('a commit index or a close past 2^24 is unread, and the rest of the log still reads', () => {
-    const big = { kind: 'commit', address: ROOT, at: 1, bundle: { ...bundle(9), idx: 2 ** 24 } };
-    const huge = { kind: 'closed', address: ROOT, at: 1, outcome: 'ok', commits: Number.MAX_SAFE_INTEGER };
-    const stored = readStoredRecord([...clean(), big, huge]);
-    expect(stored.unread.map((u) => u.index)).toEqual([4, 5]);
-    const log = stored.root('run-1')!;
-    expect(log.commitLog).toHaveLength(2);
-    expect(log.complete).toBe(true);
   });
 
   it('a value of any type in a field is described, never thrown on — a bigint, a symbol, a long string', () => {
@@ -146,6 +140,136 @@ describe('Boundary: the reader’s budget — one corrupted number cannot make i
       `kind is ${JSON.stringify(`${'x'.repeat(40)}…`)}, not opened | commit | note | closed`,
       'data is a function, not a plain object',
     ]);
+  });
+});
+
+describe('Limits: the reader’s work on untrusted input is bounded, and what a limit stops is named', () => {
+  it('the defaults are pinned', () => {
+    expect(DEFAULT_LIMITS).toEqual({
+      entries: 2 ** 24,
+      missingCommits: 2 ** 20,
+      drillDepth: 1024,
+      addressLength: 65_536,
+    });
+    expect(Object.isFrozen(DEFAULT_LIMITS)).toBe(true);
+  });
+
+  it('entries: an endless input stops at the limit, says so by name, and closes the iterator', () => {
+    let closed = false;
+    function* endless() {
+      try {
+        for (const entry of clean()) yield entry;
+        for (;;) yield { kind: 'note', address: ROOT, at: 1, note: 'tick', data: {} };
+      } finally {
+        closed = true;
+      }
+    }
+    const stored = readStoredRecord(endless(), { entries: 10 });
+    expect(stored.unread).toEqual([
+      { index: 10, reason: "entries from here on are past the reader's limit of 10; not read" },
+    ]);
+    expect(closed).toBe(true);
+    expect(stored.root('run-1')!.notes).toHaveLength(6);
+    // Exactly at the limit, nothing is past it.
+    expect(readStoredRecord(clean(), { entries: 4 }).unread).toEqual([]);
+  });
+
+  it('missingCommits: a commit or a close that needs more gaps than the record holds is unread, by name', () => {
+    const limit = "past the reader's limit of 1048576 missing commits";
+    // The default, at its edge without allocating: a close for 2^20 + 1 commits over an empty log.
+    const overClosed = readStoredRecord([
+      { kind: 'closed', address: ROOT, at: 1, outcome: 'ok', commits: 2 ** 20 + 1 },
+    ]);
+    expect(overClosed.unread).toEqual([{ index: 0, reason: `commits is 1048577, ${limit}` }]);
+    expect(overClosed.root('run-1')!).toMatchObject({ complete: false, commitLog: [], gaps: [] });
+    // One corrupted index: past the gap budget, unread; the rest of the log reads as it was.
+    const corrupted = readStoredRecord([...clean(), commitAt(Number.MAX_SAFE_INTEGER)]);
+    expect(corrupted.unread).toEqual([{ index: 4, reason: `bundle.idx is ${Number.MAX_SAFE_INTEGER}, ${limit}` }]);
+    expect(corrupted.root('run-1')!).toMatchObject({ complete: true, gaps: [] });
+    expect(corrupted.root('run-1')!.commitLog).toHaveLength(2);
+  });
+
+  it('missingCommits: the budget is the record’s, spent log by log in arrival order — at the edge, it fits', () => {
+    const a: LogAddress = { logRunId: 'run-a', drillPath: [] };
+    const b: LogAddress = { logRunId: 'run-b', drillPath: [] };
+    // Each log has commit 0 and commit 3: two gaps each. A budget of 3 holds the first log whole.
+    const entries = [commitAt(0, a), commitAt(3, a), commitAt(0, b), commitAt(3, b)];
+    const stored = readStoredRecord(entries, { missingCommits: 3 });
+    expect(stored.root('run-a')!.gaps.map((g) => g.index)).toEqual([1, 2]);
+    // One gap is left: not enough to reach run-b's commit 3, so that commit is named and its log ends at 0.
+    expect(stored.root('run-b')!.gaps).toEqual([]);
+    expect(stored.root('run-b')!.commitLog).toHaveLength(1);
+    expect(stored.unread).toEqual([
+      { index: 3, reason: "bundle.idx is 3, past the reader's limit of 3 missing commits" },
+    ]);
+    expect(readStoredRecord(entries, { missingCommits: 4 }).unread).toEqual([]);
+    // No gaps allowed: a log reads up to its first missing commit, and names the rest.
+    const strict = readStoredRecord([commitAt(0), commitAt(1), commitAt(5)], { missingCommits: 0 });
+    expect(strict.root('run-1')!.commitLog).toHaveLength(2);
+    expect(strict.unread.map((u) => u.index)).toEqual([2]);
+  });
+
+  it('drillDepth and addressLength: past the default, an address is unread — at it, it reads', () => {
+    const deep = (n: number): LogAddress => ({
+      logRunId: 'run-1',
+      drillPath: Array.from({ length: n }, (_, i) => `m${i}#${i}`),
+    });
+    const long = (n: number): LogAddress => ({ logRunId: 'r'.repeat(n), drillPath: [] });
+    const stored = readStoredRecord([
+      ...clean(deep(1024)),
+      ...clean(deep(1025)).slice(0, 1),
+      ...clean(long(65_536)).slice(0, 1),
+      ...clean(long(65_537)).slice(0, 1),
+    ]);
+    expect(stored.unread).toEqual([
+      { index: 4, reason: "address.drillPath has 1025 segments, past the reader's limit of 1024" },
+      { index: 6, reason: "address is longer than the reader's limit of 65536 characters" },
+    ]);
+    expect(stored.log(deep(1024))!.complete).toBe(true);
+    expect(stored.root('r'.repeat(65_536))).toBeDefined();
+    expect(stored.log(deep(1025))).toBeUndefined();
+  });
+
+  it('a limit that is not a count is refused at the door; Infinity lifts one', () => {
+    for (const bad of [-1, 1.5, Number.NaN, '10', null]) {
+      expect(() => readStoredRecord([], { entries: bad as number })).toThrow(RangeError);
+      expect(() => readStoredRecord([], { drillDepth: bad as number })).toThrow(RangeError);
+    }
+    expect(readStoredRecord(clean(), { entries: Infinity, missingCommits: Infinity }).unread).toEqual([]);
+  });
+
+  it('a chain of 1,024 nested logs at the depth limit reads in linear time; every cursor drills', () => {
+    const sink = memorySink();
+    const path: string[] = [];
+    const logs: EventLog[] = [new EventLog({}, { sink, address: ROOT })];
+    for (let depth = 1; depth <= 1024; depth++) {
+      path.push(`${'sf/'.repeat(4)}m${depth}#${depth}`);
+      logs.push(new EventLog({}, { sink, address: { logRunId: 'run-1', drillPath: [...path] } }));
+    }
+    logs.forEach((log, i) => log.record(bundle(i)));
+    const stored = readStoredRecord(sink.entries);
+    expect(stored.logs.size).toBe(1025);
+    const sources = [...stored.logs.values()].map((log) => log.source());
+    // One flat map per run leg, shared by every cursor of the leg.
+    expect(new Set(sources.map((s) => s.subflowResults)).size).toBe(1);
+    expect(
+      timeTravel(sources[0])
+        .drill(path[1023])!
+        .stops.map((s) => s.runtimeStageId),
+    ).toEqual(['', 's1024#1024', '']);
+  });
+
+  it('a bundle nested 100,000 deep is never walked — a second entry for its index is listed, not compared', () => {
+    const deepValue = () => {
+      let value: Record<string, unknown> = {};
+      for (let i = 0; i < 100_000; i++) value = { value };
+      return value;
+    };
+    const deepCommit = () => ({ ...commitAt(0), bundle: { ...bundle(0), idx: 0, overwrite: { n: deepValue() } } });
+    const first = deepCommit();
+    const stored = readStoredRecord([first, deepCommit()]);
+    expect(stored.unread).toEqual([{ index: 1, reason: 'a second commit entry for index 0 — the one at 0 stands' }]);
+    expect(stored.root('run-1')!.commitLog[0]).toBe(first.bundle);
   });
 });
 
@@ -168,8 +292,9 @@ describe('Security: stored names are data', () => {
     ).toEqual(['', 's1#1', '']);
   });
 
-  it('the reader never edits, freezes or copies the entries it is handed', () => {
+  it('the reader never edits, freezes or copies the entries it is handed — not the base, not the meta', () => {
     const entries = JSON.parse(JSON.stringify(clean())) as Record<string, unknown>[];
+    (entries[0] as { meta?: unknown }).meta = { chart: 'pay' };
     const before = JSON.stringify(entries);
     const log = readStoredRecord(entries).root('run-1')!;
     expect(JSON.stringify(entries)).toBe(before);
@@ -177,5 +302,6 @@ describe('Security: stored names are data', () => {
     expect(log.entries[1]).toBe(entries[1]);
     expect(log.commitLog[0]).toBe(entries[1].bundle);
     expect(log.initialState).toBe(entries[0].initialState);
+    expect(log.meta.opened).toBe((entries[0] as { meta: unknown }).meta);
   });
 });

@@ -47,7 +47,7 @@ export function isPlainish(value: unknown): value is Record<string, unknown> {
 
 /**
  * Rows that hold an index for a commit the record does not have (1.1.0) — what a STORED log could not
- * supply at a position: no readable commit entry, or entries that disagree (`storedRecord.ts`). Each
+ * supply at a position: no readable commit entry (`storedRecord.ts`). Each
  * carries the reason every reader then reports for its index, so the fold, the cursor and the stored
  * log say the same thing about it. Kept by identity (a JSON copy of one is an ordinary unreadable row).
  */

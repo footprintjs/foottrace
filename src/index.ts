@@ -49,6 +49,7 @@ export type {
   StoredLog,
   StoredNote,
   StoredRecord,
+  StoredRecordLimits,
   TimeTravel,
   TimeTravelOptions,
   TimeTravelSource,

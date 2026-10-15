@@ -78,9 +78,9 @@ syntax: empty strings and historical string spellings remain accepted.
   - `updates is not a plain object` · `overwrite is not a plain object`
   - `trace[i].verb is missing | "<verb>", not set | merge | append | delete`
   - `trace[i].path is missing | null | an array | a <type>, not a string`
-  - only in a stored log read back by `readStoredRecord` (1.1.0), where no
-    single bundle can stand at the index: `no readable commit entry for this
-    index` · `commit entries for this index disagree`
+  - only in a stored log read back by `readStoredRecord` (1.1.0), where the
+    store holds no readable commit for the index: `no readable commit entry for
+    this index`
 - **One saved-row boundary.** `isCommitBundle(row)` applies the same checks as
   replay. Causal readers still accept typed `CommitBundle[]`, not unknown input.
   A consumer preparing a causal query from stored rows must validate every row
@@ -216,15 +216,24 @@ The laws:
 3. **Opaque stays opaque.** `meta`, a note's kind and its data are the
    writer's: stored and handed back, never read. The sink keeps its own copy.
 4. **The reader checks what storage gives back.** `readStoredRecord` takes
-   `Iterable<unknown>`, groups entries by address (each log in arrival order),
-   and lists an entry it cannot read in `unread` with its position and reason.
-5. **A commit sits at its own index.** A lost commit, two stored commits that
-   disagree and an unreadable bundle are gaps that keep their index — the same
-   reason in `StoredLog.gaps` and in the fold's `skipped`. `closed.commits`
-   makes a lost last commit a gap too.
+   `Iterable<unknown>` (stored entries are untrusted input), groups entries by
+   address (each log in arrival order), and lists an entry it does not read
+   into a log in `unread` with its position and reason.
+5. **A commit sits at its own index.** A lost commit and an unreadable bundle
+   are gaps that keep their index — the same reason in `StoredLog.gaps` and in
+   the fold's `skipped`. `closed.commits` makes a lost last commit a gap too.
+   The first commit entry read for an index stands; a later one for the same
+   index (a redelivery or a conflict) is listed in `unread`, never compared.
 6. **Complete means the writer finished.** `complete` is `true` when a
    `closed` entry covers every stored commit; its `outcome` and `meta` are the
    log's. A run killed mid-flight reads `complete: false` and keeps its notes.
+7. **Bounded work.** No recursion and no walk of a stored value; work per
+   entry bounded by the address limits. A record holds at most its stored
+   commits plus `missingCommits` gaps, and reading stops after `entries`
+   entries. Defaults (`StoredRecordLimits`, raised per call): `entries`
+   16,777,216 · `missingCommits` 1,048,576 · `drillDepth` 1,024 ·
+   `addressLength` 65,536 characters. Whatever a limit stops is listed in
+   `unread` by name: never a hang, never a silent cut.
 
 ```ts
 import { readStoredRecord, stateAt } from 'foottrace';
@@ -331,6 +340,6 @@ writer's `LOG_PLACEHOLDER` is the historical `'REDACTED'` record byte.
   hcifootprint bytes unchanged with a sink attached (in the log and read back).
 - `test/lib/time-travel/stored-record.test.ts`,
   `stored-record.property.test.ts` and `stored-record.boundary.test.ts` — the
-  stored-record laws above, every unread reason verbatim, and the reader's
-  budget.
+  stored-record laws above, every unread reason verbatim, and each limit pinned
+  at its default, at its edge and past it.
 - `test/lib/ids/attemptId.test.ts` — the attempt-ID round trip.

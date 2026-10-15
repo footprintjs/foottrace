@@ -24,23 +24,27 @@
   missing. **The law (Q3):** a failing sink never stops the writer — a throw, a rejected promise, a missing method or
   an entry the log refuses to send (note data that is not a plain object surviving `structuredClone`, an unknown
   outcome) is counted in `log.sinkFailures` and reported to `sink.onFailure({ entry, error })`, never thrown.
-- **`readStoredRecord(entries)`** (root) reads a sink's entries back into a `StoredRecord`: `logs` by address,
-  `root(logRunId)`, `log(address)`, and `unread` — every entry it could not read, with its position and reason.
-  Each `StoredLog` has `initialState`, `commitLog`, `gaps`, `notes` (`StoredNote`, arrival order), `complete`,
-  `outcome`, `meta` (`{ opened?, closed? }`, never merged), its raw `entries`, and `source()` for `timeTravel` /
-  `stateAt` — where the logs stored under it are its `subflowResults`, so the cursor marks stored mounts and
-  `drill()` opens them. It takes `Iterable<unknown>` (storage gives entries back unvalidated). A commit sits at its
-  own `bundle.idx`: a commit the store lost, two that disagree or an unreadable bundle is a gap that keeps its index,
-  with the same reason in `gaps` and in the fold's `skipped`; `closed.commits` makes a lost last commit a gap too.
-  `complete` means a `closed` entry covers every stored commit. A stored log is read up to 2^24 commits (a budget,
-  so one corrupted index cannot make the reader allocate without bound).
+- **`readStoredRecord(entries, limits?)`** (root) reads a sink's entries back into a `StoredRecord`: `logs` by
+  address, `root(logRunId)`, `log(address)`, and `unread` — every entry it did not read into a log, with its
+  position and reason. Each `StoredLog` has `initialState`, `commitLog`, `gaps`, `notes` (`StoredNote`, arrival
+  order), `complete`, `outcome`, `meta` (`{ opened?, closed? }`, never merged), its raw `entries`, and `source()` for
+  `timeTravel` / `stateAt` — where the run leg's stored mount logs are its `subflowResults` (one flat map per leg,
+  as a live snapshot's), so the cursor marks stored mounts and `drill()` opens them. It takes `Iterable<unknown>`
+  (stored entries are untrusted input). A commit sits at its own `bundle.idx`: a commit the store lost or an
+  unreadable bundle is a gap that keeps its index, with the same reason in `gaps` and in the fold's `skipped`;
+  `closed.commits` makes a lost last commit a gap too. The first commit (or opened) entry for a place stands; a
+  later one is listed in `unread`, never compared. `complete` means a `closed` entry covers every stored commit.
+- **Bounded work on untrusted input** (`StoredRecordLimits`, raised per call): no recursion, no walk of a stored
+  value, work per entry bounded by the address limits, at most `missingCommits` gap rows across the record, and at
+  most `entries` entries read. Defaults: `entries` 16,777,216 · `missingCommits` 1,048,576 · `drillDepth` 1,024 ·
+  `addressLength` 65,536 characters. Whatever a limit stops is named in `unread` — never a hang, never a silent
+  cut. A limit that is not a non-negative integer (or `Infinity`) is a `RangeError`.
 - **Attempt IDs** (root): `buildAttemptId(runtimeStageId, attempt, call?)`, `parseAttemptId(id)` and the type-only
   brand `AttemptId` — `charge#4@2` (attempt 2 of `charge#4`) and `charge#4@2.1@3` (attempt 3 of the first call made
   during it). Counts start at 1. Parsed from the right: no stage-ID character is newly reserved.
-- Types `Meta` and `LogOutcome` (root); `RecordSink`, `RecordEntry` (`/write`).
-- Honesty code `'unread-entry'` for `StoredRecord.unread` (the registry holds 22 codes). Two gap reasons, produced
-  only for a stored log read back by `readStoredRecord`: `no readable commit entry for this index` and
-  `commit entries for this index disagree`.
+- Types `Meta`, `LogOutcome` and `StoredRecordLimits` (root); `RecordSink`, `RecordEntry` (`/write`).
+- Honesty code `'unread-entry'` for `StoredRecord.unread` (the registry holds 22 codes). One gap reason, produced
+  only for a stored log read back by `readStoredRecord`: `no readable commit entry for this index`.
 
 ### Changed
 

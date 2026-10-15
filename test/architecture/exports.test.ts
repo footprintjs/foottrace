@@ -308,6 +308,7 @@ describe('a minor removes nothing', () => {
         'StoredRecord',
         'StoredLog',
         'StoredNote',
+        'StoredRecordLimits',
         'LogOutcome',
         'Meta',
       ],
@@ -323,6 +324,7 @@ describe('a minor removes nothing', () => {
       'readLog',
       'bundleRefusal',
       'isPlainish',
+      'DEFAULT_LIMITS',
     ];
     for (const exports of Object.values(exportsByDoor))
       for (const name of helpers) expect(exports.has(name), name).toBe(false);

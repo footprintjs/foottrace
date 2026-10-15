@@ -18,7 +18,7 @@ export { filterStops, splitAxis } from './axis.js';
 export { isCommitBundle } from './bundles.js';
 export { commitStops, commitStopsStrategy } from './commitStops.js';
 export { stateAt } from './stateAt.js';
-export type { StoredLog, StoredNote, StoredRecord } from './storedRecord.js';
+export type { StoredLog, StoredNote, StoredRecord, StoredRecordLimits } from './storedRecord.js';
 export { readStoredRecord } from './storedRecord.js';
 export { tagStops } from './tagStops.js';
 export { timeTravel } from './timeTravel.js';
