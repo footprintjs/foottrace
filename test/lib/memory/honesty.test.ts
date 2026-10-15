@@ -1,7 +1,7 @@
 /**
  * honesty.ts — the ONE vocabulary for what a reader cannot see (F4a).
  *
- *   unit      the registry is frozen and closed, holds exactly the twenty-one codes, and every explanation is
+ *   unit      the registry is frozen and closed, holds exactly the twenty-two codes, and every explanation is
  *             ONE sentence
  *   boundary  the TYPES, asked of the real compiler: a code the registry does not hold FAILS TO COMPILE; the
  *             six public unions are exactly the members they were (they did not widen); the sentences are
@@ -24,6 +24,10 @@
  * both emitters (a fold and a key's value basis); no runtime string the engine writes changed. `HonestyNoteCode`
  * gains `'redacted'` and `'from-initial-state'` (a backward slice's notes say them), and `'pre-run-origin'`'s
  * sentence says "absent or already there" (a causal node's `preRunReads` lists keys that never existed too).
+ *
+ * 1.1.0 added ONE code, `'unread-entry'` — a codeless signal, like `'log-gap'`: an entry a sink stored that
+ * `readStoredRecord` could not read (`StoredRecord.unread`). The registry holds TWENTY-TWO; no union widened and
+ * no runtime string the readers wrote before changed.
  */
 import { join, resolve } from 'path';
 import ts from 'typescript';
@@ -63,7 +67,7 @@ const ATTRIBUTION_BASES = ['append-verb', 'prefix-inference', 'whole-value'];
 const FOLD_BASES = ['initial+log', 'log-only'];
 /** F4b (9.33.0): the two codes only a key's value basis speaks (`ValueBasis` — the rest of it is shared). */
 const VALUE_BASES = ['deleted', 'from-initial-state'];
-const SIGNALS_WITHOUT_A_CODE_FIELD = ['log-gap', 'incomplete-sources', 'redacted'];
+const SIGNALS_WITHOUT_A_CODE_FIELD = ['log-gap', 'incomplete-sources', 'redacted', 'unread-entry'];
 
 // ════════════════════════════════════════════════════════════════════════════
 // unit — the registry
@@ -85,7 +89,7 @@ describe('HONESTY_CODES — unit', () => {
     }).toThrow(TypeError);
   });
 
-  it('holds exactly twenty-one codes — six slice notes, three missing reasons, two fed-edge and three birth bases, two fold bases, two value bases, three codeless signals', () => {
+  it('holds exactly twenty-two codes — six slice notes, three missing reasons, two fed-edge and three birth bases, two fold bases, two value bases, four codeless signals', () => {
     const all = [
       ...SLICE_CODES,
       ...MISSING_REASONS,
@@ -95,7 +99,7 @@ describe('HONESTY_CODES — unit', () => {
       ...VALUE_BASES,
       ...SIGNALS_WITHOUT_A_CODE_FIELD,
     ];
-    expect(all).toHaveLength(21);
+    expect(all).toHaveLength(22);
     expect(Object.keys(HONESTY_CODES).sort()).toEqual(all.sort());
   });
 
@@ -141,10 +145,10 @@ const HEADER = [
   "type TodayAttribution = 'append-verb' | 'prefix-inference' | 'whole-value';",
   "type TodayValue = 'never-written' | 'deleted' | 'nested-rows' | 'from-initial-state' | 'redacted';",
   "type TodayWriter = 'never-written' | 'nested-rows' | 'redacted';",
-  // every declared vocabulary, plus the three codes a field carries instead of a `code` value
+  // every declared vocabulary, plus the four codes a field carries instead of a `code` value
   'type Declared = HonestyNoteCode | MissingSliceReason | MissingProvenanceReason | FedBasis | AttributionBasis | FoldBasis | ' +
     'ValueBasis | WriterBasis | ' +
-    "'log-gap' | 'incomplete-sources' | 'redacted';",
+    "'log-gap' | 'incomplete-sources' | 'redacted' | 'unread-entry';",
 ];
 
 const CASES: Record<string, string> = {

@@ -23,10 +23,11 @@
  *     alias of `foottrace` that is a union of string literals: each one is inside the
  *     registry or is named, with its reason, as not an honesty vocabulary.
  *
- * NO OBJECT GAINS A FIELD from being registered. Three signals carry no code of their own — a
- * `LogGap` (`'log-gap'`), `CausalNode.incompleteSources` (`'incomplete-sources'`) and
- * `FoldedState.redacted` / `redactedPaths` (`'redacted'`) — and a `truncated: { byDepth, byNodes }`
- * field means `'truncated'`; they are registered so a reader explains them from the same place.
+ * NO OBJECT GAINS A FIELD from being registered. Four signals carry no code of their own — a
+ * `LogGap` (`'log-gap'`), `CausalNode.incompleteSources` (`'incomplete-sources'`),
+ * `FoldedState.redacted` / `redactedPaths` (`'redacted'`) and an entry of `StoredRecord.unread`
+ * (`'unread-entry'`, 1.1.0) — and a `truncated: { byDepth, byNodes }` field means `'truncated'`; they
+ * are registered so a reader explains them from the same place.
  *
  * NOT HERE: the two strings a redaction leaves where a value was. The engine writes those on every
  * redacted run; the log's lives in its own leaf, `memory/placeholders.ts` (the scope channel's with
@@ -99,6 +100,9 @@ export const HONESTY_CODES = /* @__PURE__ */ Object.freeze({
   // ── a row of a stored log that is not a commit bundle — `LogGap` ──────────
   'log-gap':
     'A row of the stored log could not be read as a commit bundle, so it keeps its index but contributes no state, and any fold that crosses it is missing whatever that row wrote.',
+  // ── an entry a sink stored that no log could hold — `StoredRecord.unread` (1.1.0) ─
+  'unread-entry':
+    "An entry a sink stored was not read into any log (it could not be read as an opened, commit, note or closed entry, it lay past one of the reader's limits, or another entry holds its place), so whatever it said (a base, a commit, a note or how the log ended) is not in the record read back.",
   // ── untracked reads a stage also consumed — `CausalNode.incompleteSources` ─
   'incomplete-sources':
     'The stage also consumed read paths that bypass read tracking (args, env or an unshadowed silent read), so a slice through it may be incomplete: those reads produce no read-to-write edge to follow.',

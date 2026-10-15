@@ -37,6 +37,8 @@ const NOT_HONESTY: Record<string, string> = {
   CommitValuesMode: 'how a record encodes committed values (full / delta) — encoding, not missing evidence',
   CommitPhase:
     'which continuation of a stage a bundle is (exit / repeat, F8) — structure of the record, not a gap in it',
+  LogOutcome:
+    "how a log's writer said it ended (ok / failed / paused, on its closed entry) — a fact the writer stated, not a gap in the recording",
   MoveRefusal: 'why a cursor move did not happen (clamped, miss, empty) — navigation, not a gap in the recording',
   StopKind: 'what a time-travel stop is (its place on the axis) — structure, not what a reader cannot see',
   UntrackedSource:

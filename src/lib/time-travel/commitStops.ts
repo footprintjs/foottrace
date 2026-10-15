@@ -12,6 +12,7 @@
 import { isExecutionKey, isWithinSubflow, parseRuntimeStageId, stageIdOf } from '../ids/runtimeStageId.js';
 import { buildCommitIndex, inferLegacyPhases, recordsPhases } from '../memory/commitLogUtils.js';
 import type { CommitBundle, CommitPhase, ExecutionTree } from '../memory/types.js';
+import { isPlainish } from './bundles.js';
 import type { Stop, TimeTravelStrategy } from './types.js';
 
 /**
@@ -95,7 +96,7 @@ export function commitStops(
   // the MOUNT's commit, made before any of them ran. It gets no stop of its
   // own; it belongs to the `'start'` bookend, which is where a reader looks
   // for "the input this chart began with" anyway. See {@link seedCommits}.
-  const seeds = seedCommits(commitLog, executionTree);
+  const seeds = seedCommits(commitLog, executionTree, subflowResults);
   const firsts: number[] = [];
   for (const [id, i] of buildCommitIndex(commitLog)) if (id && i >= seeds) firsts.push(i);
   const exits = new Set<string>();
@@ -164,6 +165,21 @@ function phasesOf(commitLog: readonly CommitBundle[], haveTree: boolean): readon
   return haveTree ? [] : inferLegacyPhases(commitLog);
 }
 
+/**
+ * True when the results map's entry for `head` IS this log — its history opens with this very bundle.
+ * The log is then that mount's own, and its head run is the mount's seed (R13: a seed carries its
+ * mount's runtimeStageId). This is what a TREE-LESS cursor over a mount log reads in place of the
+ * tree's root — a stored log read back by `readStoredRecord`, or a log whose stage after the seed was
+ * lost — so the seed opens `start` instead of standing as a stop (marked as its own mount).
+ */
+function opensOwnMount(subflowResults: unknown, head: string, first: CommitBundle): boolean {
+  if (!isPlainish(subflowResults)) return false;
+  const result = subflowResults[head];
+  if (!isPlainish(result) || !isPlainish(result.treeContext)) return false;
+  const history = result.treeContext.history;
+  return Array.isArray(history) && history[0] === first;
+}
+
 /** `commitStops` as a {@link TimeTravelStrategy} — the default for `timeTravel`. */
 export const commitStopsStrategy: TimeTravelStrategy = { stopsFor: commitStops };
 
@@ -185,7 +201,11 @@ export const commitStopsStrategy: TimeTravelStrategy = { stopsFor: commitStops }
  * whose id carries the same subflow path. Without a tree such a log reads as
  * one stop.
  */
-function seedCommits(commitLog: readonly CommitBundle[], executionTree?: ExecutionTree): number {
+function seedCommits(
+  commitLog: readonly CommitBundle[],
+  executionTree?: ExecutionTree,
+  subflowResults?: unknown,
+): number {
   const head = commitLog[0]?.runtimeStageId;
   if (head === undefined) return 0;
   if (head === '') {
@@ -195,6 +215,7 @@ function seedCommits(commitLog: readonly CommitBundle[], executionTree?: Executi
   }
   let next = 1;
   while (next < commitLog.length && commitLog[next].runtimeStageId === head) next++;
+  if (executionTree === undefined && opensOwnMount(subflowResults, head, commitLog[0])) return next;
   const address = stageIdOf(head);
   if (next >= commitLog.length) {
     const rootId = executionTree?.id;

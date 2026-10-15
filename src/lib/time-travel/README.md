@@ -547,6 +547,65 @@ stateAt(stored, 2).skipped;                      // undefined on a clean log —
 
 Run `examples/post-execution/time-travel/05-a-stored-recording-needs-no-cast.ts`.
 
+### 6. A stored record reads back — even a run that never ended (1.1.0)
+
+A log built with a sink (`new EventLog(base, { sink, address })`, `foottrace/write`)
+hands every entry to it as it lands: `opened` (the base), `commit` (each bundle,
+after it is frozen), `note` and `closed`. `readStoredRecord(entries)` turns
+those entries back into logs, and says what each one is before any fold:
+
+- **Grouped by address.** Entries of many logs may arrive interleaved; each
+  `StoredLog` keeps its own in arrival order. `root(logRunId)` is a run leg's
+  root log, `log(address)` any log.
+- **`complete` means the writer finished — and the reader read it all.** A
+  `closed` entry that covers every stored commit (`closed.commits` past the last
+  index) makes the log complete; of covering closes that disagree, the largest
+  length speaks, with its `outcome`. A run killed mid-flight never wrote one:
+  `complete: false`, and its `notes` — written as they happened — are still
+  there. A log a limit cut, and every log once reading stopped at the `entries`
+  limit, is not complete either: what was not read could have gone on.
+- **A commit sits at its own index** (`bundle.idx`, stamped before the sink saw
+  it). A commit the store lost, or a bundle that is not readable, leaves a gap
+  that keeps its index — in `StoredLog.gaps` and in the fold's `skipped`, with
+  the same reason. A lost last commit is seen too, through `closed.commits`.
+  One place, one entry: the first READABLE commit entry for an index stands (a
+  torn first delivery yields to a readable redelivery), the first `opened`
+  stands, and every other entry for a held place — a redelivery, a conflict, the
+  same object again — is listed in `unread`, never compared.
+- **`source()` is what the cursor reads**: `{ commitLog, initialState?,
+  subflowResults? }`. `subflowResults` is one flat map per run leg, as a live
+  snapshot's: every stored mount log of the leg, keyed by its mount's
+  runtimeStageId — so the cursor marks those stops as mounts and `drill()` opens
+  a mount's own stored log. A mount log's head commit stamped with its own mount
+  id is its seed, so it opens `start` even with no stage after it (a subflow
+  killed in its first stage); and no cursor drills back into its own mount or
+  one it was opened from.
+- **Nothing is dropped in silence.** An entry the reader does not read into a
+  log is listed in `StoredRecord.unread` with its position and reason
+  (registered as `'unread-entry'`).
+- **Bounded on untrusted input.** No recursion, no walk of a stored value, an
+  address read by index (never through its own iterator), and four limits
+  (`StoredRecordLimits`, raised per call): `entries` read (16,777,216), gap rows
+  for the whole record — `missingCommits` (1,048,576), spent on the logs that
+  need the fewest first, so a corrupt log asking for the most is the one cut — and an
+  address's `drillDepth` (1,024) and `addressLength` (65,536 characters). Past a
+  limit, the entry is named in `unread`: never a hang, never a silent cut. An
+  entry whose fields throw when read is named there too.
+
+```ts
+import { readStoredRecord, stateAt, timeTravel } from 'foottrace';
+
+const stored = readStoredRecord(JSON.parse(text) as unknown[]); // entries read back from storage
+const run = stored.root('run-7')!;
+run.complete;                                   // false — no closing entry
+run.notes.map((n) => n.data);                   // the attempts, as each one ended
+timeTravel(run.source()).last();                // the cursor over what landed
+stateAt(run.source(), 1).skipped;               // had the store lost commit 0:
+                                                //   [{ index: 0, reason: 'no readable commit entry for this index' }]
+```
+
+Run `examples/post-execution/time-travel/07-a-stored-record.ts`.
+
 ## Declared vs derived tags (9.21.0)
 
 "Filter stops by tag — is a tag commit-based or state-based?" Both exist, as
@@ -735,6 +794,7 @@ const namedStart: TimeTravelStrategy = {
 ## Examples
 
 - [Standalone writer and replay](../../../examples/post-execution/time-travel/06-bring-your-own-record.ts), with no engine installed.
+- [A stored record](../../../examples/post-execution/time-travel/07-a-stored-record.ts): a run that never finished, read back from a sink's entries.
 - [FootPrint integration examples](https://github.com/footprintjs/footPrint/tree/main/examples/post-execution/time-travel): reader cursors, stored recordings, composed strategies and pause/resume chains. Engine integrations require FootPrint separately; it is not a dependency of foottrace.
 
 **How the fold got fast** — the inherited algorithm and optimisation history, with the original measurements: [FootPrint 9.48.1 design notes](https://github.com/footprintjs/footPrint/blob/0ada790ae38c16a58caa72cb9af279efb658035d/docs/guides/the-fold-and-how-it-got-fast.md).

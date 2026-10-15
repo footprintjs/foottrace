@@ -1,5 +1,77 @@
 # Changelog
 
+## Unreleased — minor (1.1.0)
+
+### Added
+
+- **A record that survives the run.** `new EventLog(base, { sink, address, meta? })` (`foottrace/write`) hands every
+  entry to a `RecordSink` as it lands: `opened` from the constructor (the base, as the sink's own copy), `commit`
+  after each bundle is frozen and appended, `note` from the new `log.note(kind, data)`, and `closed` from the new
+  `log.close(outcome, meta?)` with the log's length (`commits`). A run that is killed still leaves its record, and
+  the evidence noted as it happened (an attempt that ended) survives without a closing entry. `memorySink()` is the
+  reference adapter; an app brings a file, a bucket or a table by implementing the four methods. Each stored entry
+  is a `RecordEntry` (the method's entry plus its name as `kind`; a note's own kind is stored as `note`).
+
+  ```ts
+  const sink = memorySink();
+  const log = new EventLog({ count: 0 }, { sink, address: { logRunId: 'run-1', drillPath: [] } });
+  log.note('attempt', { attempt: 1, outcome: 'timeout' });
+  // the process dies: no close
+  readStoredRecord(sink.entries).root('run-1')?.complete; // false — and the note is there
+  ```
+
+  **Why:** an in-memory log dies with its process, and the record of a run that never finished was exactly the one
+  missing. **The law (Q3):** a failing sink never stops the writer — a throw, a rejected promise (watched once,
+  through the real `then`), a missing method or an entry the log refuses to send (note data that is not a plain
+  object surviving `structuredClone`, an unknown outcome) is counted in `log.sinkFailures` and reported to
+  `sink.onFailure({ entry, error })`, never thrown. A `meta` that will not copy is lost on its own and its entry
+  still goes. The writer's door refuses what the reader would: a base that is not a plain object, an address with a
+  hole or a non-string segment. `memorySink` keeps its entries frozen as far as freezing reaches.
+- **`readStoredRecord(entries, limits?)`** (root) reads a sink's entries back into a `StoredRecord`: `logs` by
+  address, `root(logRunId)`, `log(address)`, and `unread` — every entry it did not read into a log, with its
+  position and reason. Each `StoredLog` has `initialState`, `commitLog`, `gaps`, `notes` (`StoredNote`, arrival
+  order), `complete`, `outcome`, `meta` (`{ opened?, closed? }`, never merged), its raw `entries`, and `source()` for
+  `timeTravel` / `stateAt` — where the run leg's stored mount logs are its `subflowResults` (one flat map per leg,
+  as a live snapshot's), so the cursor marks stored mounts and `drill()` opens them. It takes `Iterable<unknown>`
+  (stored entries are untrusted input). A commit sits at its own `bundle.idx`: a commit the store lost or an
+  unreadable bundle is a gap that keeps its index, with the same reason in `gaps` and in the fold's `skipped`;
+  `closed.commits` makes a lost last commit a gap too. One place, one entry: the first readable commit for an index
+  stands, the first `opened` stands, and every other entry for a held place (a redelivery, a conflict, the same
+  object again) is listed in `unread`, never compared. `complete` means a `closed` entry covers every stored commit
+  (of covering closes, the largest length speaks) AND the reader read the log whole: a log a limit cut, or any log
+  once reading stopped at the `entries` limit, is not complete. A mount log's head commit stamped with its own
+  mount id is its seed, so a subflow killed in its first stage reads `[start, end]`, as on a live cursor.
+- **Bounded work on untrusted input** (`StoredRecordLimits`, raised per call): no recursion, no walk of a stored
+  value, an address read by index (never through its own iterator), work per entry bounded by the address limits,
+  at most `missingCommits` gap rows for the whole record (spent on the logs that need the fewest first, so a
+  corrupt log asking for the most is the one cut), and at most `entries` entries read. Defaults: `entries` 16,777,216 ·
+  `missingCommits` 1,048,576 · `drillDepth` 1,024 · `addressLength` 65,536 characters. Whatever a limit stops is
+  named in `unread` — never a hang, never a silent cut; so is an entry whose fields throw when read. A limit that
+  is not a non-negative integer (or `Infinity`) is a `RangeError`.
+- **Attempt IDs** (root): `buildAttemptId(runtimeStageId, attempt, call?)`, `parseAttemptId(id)` and the type-only
+  brand `AttemptId` — `charge#4@2` (attempt 2 of `charge#4`) and `charge#4@2.1@3` (attempt 3 of the first call made
+  during it). Counts start at 1. Parsed from the right: no stage-ID character is newly reserved.
+- Types `Meta`, `LogOutcome` and `StoredRecordLimits` (root); `RecordSink`, `RecordEntry` (`/write`).
+- Honesty code `'unread-entry'` for `StoredRecord.unread` (the registry holds 22 codes). One gap reason, produced
+  only for a stored log read back by `readStoredRecord`: `no readable commit entry for this index`.
+
+### Changed
+
+- `EventLog.clear()` throws on a log built with a sink: a stored record cannot be wiped. The one-argument log is
+  unchanged — the same bytes and the same own fields as 1.0.3.
+- `TimeTravel.drill(id)` returns `undefined` for the cursor's own mount, one it was drilled out of, or the log it
+  already reads, so a viewer that opens every mount cannot loop on a stored or hand-built log that names one. A
+  live, sound run never asks it.
+- `commitStops`, without an execution tree, reads a head commit stamped with the log's own mount id as the seed
+  when the subflow results say this log is that mount's: the seed opens `start` instead of standing as a stop.
+  Logs with a tree, and every other tree-less log, read as before.
+
+### Compatibility
+
+- Minor: no export removed or moved (pinned by `test/architecture/exports.test.ts`). The one-argument `EventLog`
+  behaves exactly as before; record bytes are unchanged with or without a sink (the hcifootprint 2.6.1 fixture is
+  replayed both ways). No runtime dependency added.
+
 ## 1.0.3
 
 ### Fixed
