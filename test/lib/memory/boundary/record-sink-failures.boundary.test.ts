@@ -6,7 +6,9 @@
  * The law: the log's own record is complete whatever the sink does (the bundle is appended before the sink
  * is told), every entry the sink did not take is counted (`sinkFailures`) and reported to `onFailure` with
  * the entry and the error, and no call the writer makes — `new EventLog`, `record`, `note`, `close` — throws
- * because of the sink.
+ * because of the sink. A promise is watched through the real `then` and counted once; a `meta` that will not
+ * clone is lost on its own while its entry still goes; what the reader would refuse (a path with a hole, a base
+ * that is not a plain object) is refused at the writer's door instead.
  */
 import { describe, expect, it } from 'vitest';
 
@@ -136,6 +138,51 @@ describe('Boundary: a sink that answers with a promise', () => {
     expect(log.sinkFailures).toBe(0);
   });
 
+  it('a native promise is watched through the real `then`: an own `then` that hides or repeats the rejection is not trusted', async () => {
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      const hidden = () => {
+        const p = Promise.reject(new Error('hidden'));
+        Object.defineProperty(p, 'then', { value: () => undefined });
+        return p;
+      };
+      const twice = () => {
+        const p = Promise.reject(new Error('twice'));
+        Object.defineProperty(p, 'then', {
+          value: (_: unknown, onRejected: (e: unknown) => void) => {
+            onRejected(new Error('one'));
+            onRejected(new Error('two'));
+            throw new Error('and a throw');
+          },
+        });
+        return p;
+      };
+      for (const answer of [hidden, twice]) {
+        const { sink } = failingSink('closed', answer);
+        const log = new EventLog({}, { sink, address: ROOT });
+        log.close('ok');
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        expect(log.sinkFailures, answer.name).toBe(1);
+      }
+      // A thenable that settles twice is adopted once.
+      const { sink } = failingSink('closed', () => ({
+        then: (_: unknown, onRejected: (e: unknown) => void) => {
+          onRejected(new Error('a'));
+          onRejected(new Error('b'));
+        },
+      }));
+      const log = new EventLog({}, { sink, address: ROOT });
+      log.close('ok');
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(log.sinkFailures).toBe(1);
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
+  });
+
   it('a thenable whose `then` throws is a failure, counted once', async () => {
     const hostile = {
       then() {
@@ -177,6 +224,30 @@ describe('Boundary: the failure report itself fails', () => {
   });
 });
 
+describe('Boundary: an onFailure that writes to the same failing log', () => {
+  it('is reported once, not again for the loss it causes — no runaway, and every loss is counted', () => {
+    let reports = 0;
+    let log!: EventLog;
+    const sink: RecordSink = {
+      ...memorySink(),
+      note: () => {
+        throw new Error('down');
+      },
+      onFailure: () => {
+        reports++;
+        log.note('failure', { reported: reports });
+      },
+    };
+    log = new EventLog({}, { sink, address: ROOT });
+    expect(() => log.note('attempt', { n: 1 })).not.toThrow();
+    expect(reports).toBe(1);
+    expect(log.sinkFailures).toBe(2);
+    // The next loss is reported again: the guard lasts one report, not the log's life.
+    log.note('attempt', { n: 2 });
+    expect([reports, log.sinkFailures]).toEqual([2, 4]);
+  });
+});
+
 describe('Boundary: an entry the log refuses to send', () => {
   it('note data that is not a plain object, or will not clone, is a lost entry — never a throw', () => {
     const { sink, failures } = failingSink('commit', () => undefined);
@@ -197,28 +268,54 @@ describe('Boundary: an entry the log refuses to send', () => {
     expect(sink.entries.map((e) => e.kind)).toEqual(['opened']);
   });
 
-  it('an unknown outcome or a meta that will not clone is a lost close — never a throw', () => {
+  it('an unknown outcome is a lost close — never a throw', () => {
     const { sink, failures } = failingSink('commit', () => undefined);
     const log = new EventLog({}, { sink, address: ROOT });
     expect(() => log.close('done' as never)).not.toThrow();
-    expect(() => log.close('ok', { fn: () => 1 })).not.toThrow();
-    expect(log.sinkFailures).toBe(2);
-    expect(failures.map((f) => f.entry.kind)).toEqual(['closed', 'closed']);
+    expect(log.sinkFailures).toBe(1);
+    expect(failures.map((f) => (f.error as Error).name)).toEqual(['TypeError']);
     expect(sink.entries.map((e) => e.kind)).toEqual(['opened']);
   });
 
-  it('an opened meta that will not clone loses the opened entry, not the log', () => {
+  it('a meta that will not clone is lost on its own: the close still goes — outcome and length kept', () => {
+    const { sink, failures } = failingSink('commit', () => undefined);
+    const log = new EventLog({}, { sink, address: ROOT });
+    expect(() => log.close('ok', { fn: () => 1 })).not.toThrow();
+    expect(log.sinkFailures).toBe(1);
+    expect(failures.map((f) => [f.entry.kind, (f.error as Error).name])).toEqual([['closed', 'DataCloneError']]);
+    expect(sink.entries.map((e) => e.kind)).toEqual(['opened', 'closed']);
+    expect(sink.entries[1]).not.toHaveProperty('meta');
+    const read = readStoredRecord(sink.entries).root('run-1')!;
+    expect([read.complete, read.outcome]).toEqual([true, 'ok']);
+  });
+
+  it('an opened meta that will not clone is lost on its own: the base still goes, and the fold has it', () => {
     const sink = memorySink();
     const log = new EventLog({ n: 0 }, { sink, address: ROOT, meta: { fn: () => 1 } });
     log.record(bundle('a', 1));
     expect(log.sinkFailures).toBe(1);
-    expect(sink.entries.map((e) => e.kind)).toEqual(['commit']);
-    // Read back, the log has no base: its fold says so.
-    expect(stateAt(readStoredRecord(sink.entries).root('run-1')!.source(), 0).basis).toBe('log-only');
+    expect(sink.entries.map((e) => e.kind)).toEqual(['opened', 'commit']);
+    const read = readStoredRecord(sink.entries).root('run-1')!;
+    expect(read.initialState).toEqual({ n: 0 });
+    expect(read.meta).toEqual({});
+    expect(stateAt(read.source(), 0).basis).toBe('initial+log');
   });
 });
 
 describe('Boundary: what the writer gets wrong is refused at the door', () => {
+  it('a drill path with a hole, or a base that is not a plain object, is refused at the door — never sent for the reader to refuse', () => {
+    const sink = memorySink();
+    // eslint-disable-next-line no-sparse-arrays
+    const sparse = ['a#1', , 'b#2'] as unknown as string[];
+    expect(() => new EventLog({}, { sink, address: { logRunId: 'r', drillPath: sparse } })).toThrow(TypeError);
+    for (const base of [[1, 2], null, 'text', 7]) {
+      expect(() => new EventLog(base, { sink, address: ROOT }), JSON.stringify(base)).toThrow(TypeError);
+    }
+    // No base at all is the empty state, as for the one-argument log.
+    expect(() => new EventLog(undefined, { sink, address: ROOT })).not.toThrow();
+    expect(sink.entries.map((e) => e.kind)).toEqual(['opened']);
+  });
+
   it('a malformed address or a missing sink throws a TypeError from the constructor', () => {
     const sink = memorySink();
     for (const address of [

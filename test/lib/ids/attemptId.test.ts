@@ -93,13 +93,21 @@ describe('attempt ids — property', () => {
   });
 
   it('build(parse(id)) = id for every string parse accepts — one spelling per attempt', () => {
+    // Strings near the grammar: its alphabet, so the parser meets accepted ids, near misses (a 0, a
+    // leading zero, a missing part, a doubled delimiter) and stage ids that hold `@` and `.` alike.
+    const near = fc.stringMatching(/^[a-z@.~\/]{0,6}#[0-9]{1,3}(@[0-9]{1,3}(\.[0-9]{1,3}@[0-9]{1,3})?)?[@.0-9]{0,2}$/);
+    let accepted = 0;
     fc.assert(
-      fc.property(fc.string(), (id) => {
+      fc.property(near, (id) => {
         const parsed = parseAttemptId(id);
         if (parsed === undefined) return;
+        accepted++;
         expect(buildAttemptId(parsed.runtimeStageId, parsed.attempt, parsed.call)).toBe(id);
       }),
+      { numRuns: 2000 },
     );
+    // The property must have met accepted ids — a vacuous run proves nothing.
+    expect(accepted).toBeGreaterThan(200);
   });
 
   it('two different attempts never share an id', () => {

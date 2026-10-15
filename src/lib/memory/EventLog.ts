@@ -32,8 +32,9 @@
  * bundle is in `steps` before the sink sees it, and nothing the sink does reaches the writer — a
  * throw, a rejected promise or an entry the log refuses to send (a `note` whose data is not a plain
  * object that survives `structuredClone`) is counted (`sinkFailures`) and reported to
- * `sink.onFailure`, and the writer goes on. Without a sink, nothing here runs: the one-argument log
- * writes the same bytes it always did.
+ * `sink.onFailure`, and the writer goes on; a `meta` that will not copy is lost on its own and its
+ * entry still goes. Without a sink, nothing here runs: the one-argument log writes the same bytes,
+ * and has the same own fields, it always did.
  */
 
 import { freezeRecord, serveRecord } from '../capture/freeze.js';
@@ -59,13 +60,21 @@ function isThenable(value: unknown): value is PromiseLike<unknown> {
   );
 }
 
-/** The address, copied and frozen — the log's identity cannot be edited through the caller's object. */
+/**
+ * The address, copied segment by segment and frozen — the log's identity cannot be edited through the
+ * caller's object, and a path with a hole or a non-string segment is refused rather than copied as one.
+ */
 function frozenAddress(address: LogAddress): LogAddress {
   const { logRunId, drillPath } = (address ?? {}) as Partial<LogAddress>;
-  if (typeof logRunId !== 'string' || !Array.isArray(drillPath) || !drillPath.every((s) => typeof s === 'string')) {
-    throw new TypeError('EventLog: a sink needs an address — { logRunId: string, drillPath: string[] }');
+  const refused = () => new TypeError('EventLog: a sink needs an address — { logRunId: string, drillPath: string[] }');
+  if (typeof logRunId !== 'string' || !Array.isArray(drillPath)) throw refused();
+  const segments: string[] = [];
+  for (let i = 0; i < drillPath.length; i++) {
+    const segment: unknown = drillPath[i];
+    if (typeof segment !== 'string') throw refused();
+    segments.push(segment);
   }
-  return Object.freeze({ logRunId, drillPath: Object.freeze([...drillPath]) });
+  return Object.freeze({ logRunId, drillPath: Object.freeze(segments) });
 }
 
 /** A writer's payload as the sink keeps it: a plain object, copied — or a `TypeError` naming `field`. */
@@ -75,23 +84,38 @@ function copiedPayload(value: Meta, field: string): Meta {
 }
 
 /**
- * The entry as the sink may keep it: a payload checked and copied (the writer keeps its own object),
- * the bundle served. Throws on what cannot be sent; the caller counts it as a lost entry.
+ * The entry with its `meta` copied — or, when `meta` cannot be copied, the entry WITHOUT it and the
+ * error: the structural facts (the base, how the log ended, its length) still go; only `meta` is lost.
  */
-function detached(entry: RecordEntry): RecordEntry {
+function withCopiedMeta<E extends Extract<RecordEntry, { meta?: Meta }>>(entry: E): { ready: E; dropped?: unknown } {
+  if (entry.meta === undefined) return { ready: entry };
+  try {
+    return { ready: { ...entry, meta: copiedPayload(entry.meta, 'meta') } };
+  } catch (error) {
+    const { meta: _dropped, ...rest } = entry;
+    return { ready: rest as E, dropped: error };
+  }
+}
+
+/**
+ * The entry as the sink may keep it: a payload checked and copied (the writer keeps its own object),
+ * the bundle served. `dropped` is a `meta` that could not be copied (the entry goes without it). Throws
+ * when the entry itself cannot be sent; the caller counts it as a lost entry.
+ */
+function detached(entry: RecordEntry): { ready: RecordEntry; dropped?: unknown } {
   switch (entry.kind) {
     case 'opened':
-      return entry.meta === undefined ? entry : { ...entry, meta: copiedPayload(entry.meta, 'meta') };
+      return withCopiedMeta(entry);
     case 'commit':
-      return { ...entry, bundle: serveRecord(entry.bundle) };
+      return { ready: { ...entry, bundle: serveRecord(entry.bundle) } };
     case 'note':
       if (typeof entry.note !== 'string') throw new TypeError('EventLog.note: kind must be a string');
-      return { ...entry, data: copiedPayload(entry.data, 'note data') };
+      return { ready: { ...entry, data: copiedPayload(entry.data, 'note data') } };
     case 'closed':
       if (!LOG_OUTCOMES.includes(entry.outcome)) {
         throw new TypeError(`EventLog.close: outcome must be ${LOG_OUTCOMES.join(', ')}`);
       }
-      return entry.meta === undefined ? entry : { ...entry, meta: copiedPayload(entry.meta, 'meta') };
+      return withCopiedMeta(entry);
   }
 }
 
@@ -107,18 +131,23 @@ export class EventLog {
   private steps: CommitBundle[] = [];
   private sourceAddress?: LogAddress;
   private sourceAddressRetired = false;
+  // The sink's two fields are DECLARED, not initialised, and set only with a sink: the one-argument
+  // log keeps 1.0.3's own fields exactly (its `Object.keys`, its JSON).
   /** Where entries go as they land; absent for the one-argument log. */
-  private readonly sink?: RecordSink;
-  /** Entries the sink did not take. */
-  private lostEntries = 0;
+  private declare readonly sink?: RecordSink;
+  /** Entries the sink did not take; set with the sink. */
+  private declare lostEntries?: number;
+  /** True while `onFailure` runs: a loss it causes is counted, not reported again (no runaway). */
+  private declare reporting?: boolean;
 
   /**
    * @param initialMemory The fold base — the state before the first commit (copied).
    * @param options With a `sink`: every entry goes to it as it lands, under `address` — which also
    *   becomes this log's {@link address} — and `meta` rides the `opened` entry. The sink is told
    *   `opened` before the constructor returns.
-   * @throws TypeError when `options` names no sink or a malformed address — a writer's mistake, refused
-   *   at the door. Nothing the sink itself does is ever thrown.
+   * @throws TypeError when `options` names no sink, a malformed address, or a base that is not a plain
+   *   object (the `opened` entry carries it) — a writer's mistake, refused at the door. Nothing the sink
+   *   itself does is ever thrown.
    */
   constructor(
     initialMemory: any,
@@ -131,9 +160,15 @@ export class EventLog {
     this.base = initialMemory === undefined ? {} : structuredClone(initialMemory);
     if (options === undefined) return;
     if (!isEntryObject(options.sink)) throw new TypeError('EventLog: options.sink must be a RecordSink');
+    if (!isEntryObject(this.base)) {
+      throw new TypeError(
+        'EventLog: a log that writes to a sink needs a plain-object base — its opened entry carries it',
+      );
+    }
     const address = frozenAddress(options.address);
     this.sourceAddress = address;
     this.sink = options.sink;
+    this.lostEntries = 0;
     this.send({
       kind: 'opened',
       address,
@@ -241,36 +276,66 @@ export class EventLog {
 
   /**
    * How many entries the sink did not take: a sink method that threw or whose promise rejected, and an
-   * entry the log refused to send. Counted as each happens (a rejection, when it settles); 0 without a
-   * sink. The stored record says the same from its side: a missing commit is a gap.
+   * entry the log refused to send — plus each `meta` the log could not copy (that entry went without
+   * it). Counted as each happens (a rejection, when it settles); 0 without a sink. The stored record
+   * says the same from its side: a missing commit is a gap.
    */
   get sinkFailures(): number {
-    return this.lostEntries;
+    return this.lostEntries ?? 0;
   }
 
-  /** One entry to the sink. Nothing here reaches the writer: a refusal, a throw or a rejection is a lost entry. */
+  /**
+   * One entry to the sink. Nothing here reaches the writer: a refusal, a throw or a rejection is a lost
+   * entry; a `meta` that cannot be copied is lost on its own — counted and reported — and the entry goes
+   * without it.
+   */
   private send(entry: RecordEntry): void {
     const sink = this.sink;
     if (sink === undefined) return;
     let sent = entry;
     try {
-      sent = Object.freeze(detached(entry));
+      const { ready, dropped } = detached(entry);
+      sent = Object.freeze(ready);
+      if (dropped !== undefined) this.lost(sink, entry, dropped);
       const returned = sendEntry(sink, sent);
-      if (isThenable(returned))
-        Promise.resolve(returned).then(undefined, (error: unknown) => this.lost(sink, sent, error));
+      if (isThenable(returned)) this.watch(sink, sent, returned);
     } catch (error) {
       this.lost(sink, sent, error);
     }
   }
 
-  /** Count a lost entry and tell the sink's `onFailure`, if it listens; a report that fails is ignored. */
+  /**
+   * Count the rejection of an adapter's promise once. A native promise is watched through the real
+   * `Promise.prototype.then` (an own `then` on it is not trusted); any other thenable is adopted into a
+   * fresh promise first, whose settling functions run once. Either way the rejection is handled.
+   */
+  private watch(sink: RecordSink, entry: RecordEntry, returned: PromiseLike<unknown>): void {
+    let counted = false;
+    const onRejected = (error: unknown): void => {
+      if (counted) return;
+      counted = true;
+      this.lost(sink, entry, error);
+    };
+    if (returned instanceof Promise) Promise.prototype.then.call(returned, undefined, onRejected);
+    else new Promise((resolve) => resolve(returned)).then(undefined, onRejected);
+  }
+
+  /**
+   * Count a lost entry and tell the sink's `onFailure`, if it listens; a report that fails is ignored.
+   * A loss caused while `onFailure` runs (it wrote to this log again, through the same failing sink) is
+   * counted and not reported again — one report deep, never a runaway.
+   */
   private lost(sink: RecordSink, entry: RecordEntry, error: unknown): void {
-    this.lostEntries += 1;
+    this.lostEntries = (this.lostEntries ?? 0) + 1;
+    if (this.reporting === true) return;
+    this.reporting = true;
     try {
       const reported: unknown = sink.onFailure?.({ entry, error });
-      if (isThenable(reported)) Promise.resolve(reported).then(undefined, ignore);
+      if (isThenable(reported)) new Promise((resolve) => resolve(reported)).then(undefined, ignore);
     } catch {
       ignore();
+    } finally {
+      this.reporting = false;
     }
   }
 

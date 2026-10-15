@@ -124,12 +124,34 @@ describe('EventLog with a sink — the entries, in order', () => {
 });
 
 describe('EventLog with a sink — what the sink may keep', () => {
-  it('the base is the sink’s own copy: editing it touches neither the log nor a later read', () => {
+  it('the base is the sink’s own copy, kept frozen: no reader of the store can rewrite it, nor reach the log', () => {
     const sink = memorySink();
     const log = new EventLog({ list: [1] }, { sink, address: ROOT });
     const opened = sink.entries[0] as Extract<RecordEntry, { kind: 'opened' }>;
-    (opened.initialState.list as number[]).push(99);
+    expect(opened.initialState).not.toBe(log.getInitialState());
+    expect(() => (opened.initialState.list as number[]).push(99)).toThrow(TypeError);
     expect(log.getInitialState()).toEqual({ list: [1] });
+  });
+
+  it('memorySink keeps every entry frozen all the way down — base, meta and note data included', () => {
+    const sink = memorySink();
+    const log = new EventLog({ deep: { list: [1] } }, { sink, address: ROOT, meta: { chart: { id: 'pay' } } });
+    log.note('attempt', { attempt: { outcome: 'failed' } });
+    log.close('ok', { reason: { code: 1 } });
+    const [opened, note, closed] = sink.entries as [
+      Extract<RecordEntry, { kind: 'opened' }>,
+      Extract<RecordEntry, { kind: 'note' }>,
+      Extract<RecordEntry, { kind: 'closed' }>,
+    ];
+    for (const held of [
+      opened.initialState.deep,
+      (opened.initialState.deep as { list: unknown }).list,
+      opened.meta!.chart,
+      note.data.attempt,
+      closed.meta!.reason,
+    ]) {
+      expect(Object.isFrozen(held)).toBe(true);
+    }
   });
 
   it('meta and note data are copied when sent: a later edit by the writer does not rewrite the stored entry', () => {
@@ -185,6 +207,21 @@ describe('EventLog with a sink — what the sink may keep', () => {
 });
 
 describe('the one-argument log — unchanged', () => {
+  it('keeps 1.0.3’s own fields: no sink field, no counter — the same keys, the same JSON', () => {
+    const log = new EventLog({ a: 1 });
+    expect(Object.keys(log)).toEqual(['base', 'steps', 'sourceAddress', 'sourceAddressRetired']);
+    expect(JSON.stringify(log)).toBe('{"base":{"a":1},"steps":[],"sourceAddressRetired":false}');
+    const withSink = new EventLog({ a: 1 }, { sink: memorySink(), address: ROOT });
+    expect(Object.keys(withSink)).toEqual([
+      'base',
+      'steps',
+      'sourceAddress',
+      'sourceAddressRetired',
+      'sink',
+      'lostEntries',
+    ]);
+  });
+
   it('has no address, calls no sink, and close / note / sinkFailures are inert', () => {
     const log = new EventLog({ a: 1 });
     log.record(bundle('a', { a: 2 }));

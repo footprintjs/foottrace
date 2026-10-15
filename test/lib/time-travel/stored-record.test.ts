@@ -10,10 +10,12 @@
  *   scenario  a run killed mid-flight reads `complete: false`, still returns its notes, and folds what
  *             landed; a lost commit, a lost LAST commit (seen through `closed.commits`) and an unreadable
  *             bundle are gaps the fold reports with the same reason; a second commit (or opened) entry for
- *             a place already held is not placed — the first stands and the second is listed by name, never
- *             compared; a log closed and then gone on is not complete until it closes again; the cursor
- *             marks a stored mount and `drill` opens its own stored log, two deep; a paused leg and its
- *             resumed leg chain as one axis
+ *             a place already held is not placed — the first READABLE one stands and the rest are listed by
+ *             name, never compared, the very same object included; of closes that disagree the largest
+ *             length speaks; a log closed and then gone on is not complete until it closes again; the
+ *             cursor marks a stored mount and `drill` opens its own stored log, two deep; a mount that
+ *             stored only its seed (or lost the commit after it) opens `start` with it, and no cursor drills
+ *             back into its own mount; a paused leg and its resumed leg chain as one axis
  */
 import { describe, expect, it } from 'vitest';
 
@@ -189,8 +191,50 @@ describe('what the store lost — a gap at its own index, never a shifted log', 
       expect(log.entries).toHaveLength(7);
       expect(stateAt(log.source(), 2).state).toEqual(run.state.getState());
     }
-    // The same entry object handed twice is one entry, not a second claim.
-    expect(readStoredRecord([...sink.entries, first]).unread).toEqual([]);
+    // The very same entry object handed again is named too — nothing is dropped in silence.
+    expect(readStoredRecord([...sink.entries, first]).unread).toEqual([{ index: 7, reason: 'the same entry as at 1' }]);
+  });
+
+  it('every entry handed twice is named — notes and closes too, so nothing doubles', () => {
+    const { sink } = writeRun();
+    const stored = readStoredRecord([...sink.entries, ...sink.entries]);
+    expect(stored.unread.map((u) => u.reason)).toEqual(sink.entries.map((_, i) => `the same entry as at ${i}`));
+    const log = stored.root('run-1')!;
+    expect(log.notes).toHaveLength(2);
+    expect(log.entries).toEqual(sink.entries);
+    expect(log.complete).toBe(true);
+  });
+
+  it('a torn first delivery yields to a readable redelivery — the first READABLE commit stands', () => {
+    const { sink, run } = writeRun();
+    const entries = throughJson(sink.entries) as { kind: string; bundle?: { idx: number; trace?: unknown } }[];
+    const torn = JSON.parse(JSON.stringify(entries.find((e) => e.kind === 'commit' && e.bundle!.idx === 0)));
+    delete torn.bundle.trace;
+    const stored = readStoredRecord([torn, ...entries]);
+    expect(stored.unread).toEqual([
+      { index: 0, reason: 'an unreadable commit entry for index 0 — the readable one at 2 stands' },
+    ]);
+    const log = stored.root('run-1')!;
+    expect(log.gaps).toEqual([]);
+    expect(stateAt(log.source(), 2).state).toEqual(run.state.getState());
+    // The other way round: the readable one stood first, the torn one is the second entry.
+    expect(readStoredRecord([...entries, torn]).unread).toEqual([
+      { index: 7, reason: 'a second commit entry for index 0 — the one at 1 stands' },
+    ]);
+  });
+
+  it('closes that disagree: the covering close with the largest length speaks — a lost commit cannot hide behind a later, shorter close', () => {
+    const sink = memorySink();
+    const run = recordRun({}, {}, { sink, address: ROOT });
+    run.step('a', (s) => s.set('n', 1));
+    run.step('b', (s) => s.set('n', 2));
+    run.step('c', (s) => s.set('n', 3));
+    run.log.close('ok');
+    const [opened, c0, c1, , closed] = sink.entries;
+    const shorter = { ...closed, outcome: 'paused', commits: 2 } as RecordEntry;
+    const log = readStoredRecord([opened, c0, c1, closed, shorter]).root('run-1')!;
+    expect([log.complete, log.outcome]).toEqual([true, 'ok']);
+    expect(log.gaps).toEqual([{ index: 2, reason: 'no readable commit entry for this index' }]);
   });
 
   it('a second opened entry is listed too: the first base stands', () => {
@@ -199,7 +243,9 @@ describe('what the store lost — a gap at its own index, never a shifted log', 
     const stored = readStoredRecord([...sink.entries, { ...opened, initialState: { tenant: 'forged' } }]);
     expect(stored.unread).toEqual([{ index: 7, reason: 'a second opened entry for this log — the one at 0 stands' }]);
     expect(stored.root('run-1')!.initialState).toEqual({ tenant: 'T-1' });
-    expect(readStoredRecord([...sink.entries, opened]).unread).toEqual([]);
+    expect(readStoredRecord([...sink.entries, opened]).unread).toEqual([
+      { index: 7, reason: 'the same entry as at 0' },
+    ]);
   });
 
   it('a bundle the reader cannot read keeps its index and its own reason, in the log and in the fold', () => {
@@ -257,6 +303,61 @@ describe('stored mounts — the cursor and drill read the stored structure', () 
       expect(inner.stateAt().state).toEqual({ doubled: 42, ok: true });
       expect(cursor.drill('nope#9')).toBeUndefined();
     }
+  });
+
+  it('a mount killed in its first stage stored only its seed: the seed opens start, as on a live cursor — no self-mount', () => {
+    const sink = memorySink();
+    const mount: LogAddress = { logRunId: 'run-1', drillPath: ['sf#1'] };
+    const root = recordRun({}, {}, { sink, address: ROOT });
+    root.step('seed', (s) => s.set('given', 21));
+    const inner = recordRun({}, {}, { sink, address: mount });
+    inner.step('sf', (s) => s.set('given', 21), { runtimeStageId: 'sf#1' });
+    // … killed here: no stage of the subflow, no merge-back, no close.
+    const stored = readStoredRecord(sink.entries);
+    // Opened on its own …
+    expect(timeTravel(stored.log(mount)!.source()).stops.map((s) => s.kind)).toEqual(['start', 'end']);
+    // … and drilled into from the run's cursor.
+    const drilled = timeTravel(stored.root('run-1')!.source()).drill('sf#1')!;
+    expect(drilled.stops.map((s) => [s.kind, s.runtimeStageId])).toEqual([
+      ['start', ''],
+      ['end', ''],
+    ]);
+    drilled.last();
+    expect(drilled.stateAt().state).toEqual({ given: 21 });
+    // A cursor never drills back into its own mount.
+    expect(drilled.drill('sf#1')).toBeUndefined();
+  });
+
+  it('a seed followed by a lost commit still opens start: the gap is a gap, not a reason to call the seed a mount', () => {
+    const sink = memorySink();
+    const mount: LogAddress = { logRunId: 'run-1', drillPath: ['sf#1'] };
+    const inner = recordRun({}, {}, { sink, address: mount });
+    inner.step('sf', (s) => s.set('given', 21), { runtimeStageId: 'sf#1' });
+    inner.step('sf/a', (s) => s.set('a', 1), { runtimeStageId: 'sf/a#2' });
+    inner.step('sf/b', (s) => s.set('b', 2), { runtimeStageId: 'sf/b#3' });
+    const lost = sink.entries.filter((e) => !(e.kind === 'commit' && e.bundle.idx === 1));
+    const log = readStoredRecord(lost).log(mount)!;
+    expect(log.gaps.map((g) => g.index)).toEqual([1]);
+    expect(timeTravel(log.source()).stops.map((s) => [s.kind, s.runtimeStageId])).toEqual([
+      ['start', ''],
+      ['commit', 'sf/b#3'],
+      ['end', ''],
+    ]);
+  });
+
+  it('two stored logs claiming one mount id: the first stored holds it in subflowResults; both stay in `logs`', () => {
+    const sink = memorySink();
+    const first: LogAddress = { logRunId: 'run-1', drillPath: ['a#1', 'x#5'] };
+    const second: LogAddress = { logRunId: 'run-1', drillPath: ['b#2', 'x#5'] };
+    new EventLog({ from: 'first' }, { sink, address: first }).close('ok');
+    new EventLog({ from: 'second' }, { sink, address: second }).close('ok');
+    const stored = readStoredRecord(sink.entries);
+    const results = stored.log(first)!.source().subflowResults as Record<
+      string,
+      { treeContext: { initialState: unknown } }
+    >;
+    expect(results['x#5'].treeContext.initialState).toEqual({ from: 'first' });
+    expect(stored.log(second)!.initialState).toEqual({ from: 'second' });
   });
 
   it('a log with nothing stored under it carries no subflowResults', () => {

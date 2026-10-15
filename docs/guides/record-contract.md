@@ -210,7 +210,9 @@ The laws:
 1. **A sink is told, never waited on.** The bundle is in the log before the
    sink sees it, and nothing the sink does reaches the writer: a throw, a
    rejected promise or an entry the log refuses to send is counted
-   (`sinkFailures`) and reported to `sink.onFailure`.
+   (`sinkFailures`) and reported to `sink.onFailure`. A `meta` the log cannot
+   copy is lost on its own; its entry still goes. A log that writes to a sink
+   needs a plain-object base and an address of string segments.
 2. **A sink moves no byte.** The log writes the same bundles with or without
    one; notes never enter a bundle.
 3. **Opaque stays opaque.** `meta`, a note's kind and its data are the
@@ -222,15 +224,18 @@ The laws:
 5. **A commit sits at its own index.** A lost commit and an unreadable bundle
    are gaps that keep their index — the same reason in `StoredLog.gaps` and in
    the fold's `skipped`. `closed.commits` makes a lost last commit a gap too.
-   The first commit entry read for an index stands; a later one for the same
-   index (a redelivery or a conflict) is listed in `unread`, never compared.
-6. **Complete means the writer finished.** `complete` is `true` when a
-   `closed` entry covers every stored commit; its `outcome` and `meta` are the
-   log's. A run killed mid-flight reads `complete: false` and keeps its notes.
-7. **Bounded work.** No recursion and no walk of a stored value; work per
-   entry bounded by the address limits. A record holds at most its stored
-   commits plus `missingCommits` gaps, and reading stops after `entries`
-   entries. Defaults (`StoredRecordLimits`, raised per call): `entries`
+   One place, one entry: the first readable commit for an index stands, the
+   first `opened` stands, and every other entry for a held place (a redelivery,
+   a conflict, the same object again) is listed in `unread`, never compared.
+6. **Complete means the writer finished, and the reader read it all.**
+   `complete` is `true` when a `closed` entry covers every stored commit (of
+   covering closes, the largest length speaks; its `outcome` and `meta` are the
+   log's) and no limit cut the log or stopped the read. A run killed
+   mid-flight reads `complete: false` and keeps its notes.
+7. **Bounded work.** No recursion, no walk of a stored value, an address read
+   by index; work per entry bounded by the address limits. A record holds at
+   most its stored commits plus `missingCommits` gaps (spent on the logs that
+   need the fewest first), and reading stops after `entries` entries. Defaults (`StoredRecordLimits`, raised per call): `entries`
    16,777,216 · `missingCommits` 1,048,576 · `drillDepth` 1,024 ·
    `addressLength` 65,536 characters. Whatever a limit stops is listed in
    `unread` by name: never a hang, never a silent cut.

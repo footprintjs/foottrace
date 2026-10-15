@@ -1,7 +1,9 @@
 /**
  * Scenario: a sink moves no byte (1.1.0) — the hcifootprint 2.6.1 sessions (test/fixtures/hcifootprint/), replayed
  * through `foottrace/write` with a `memorySink` attached and notes written between the steps, give the PINNED
- * bytes: the log's, and the stored record's read back through `readStoredRecord` (live and through JSON).
+ * bytes: the log's, and the stored record's read back through `readStoredRecord` from the sink's own entries.
+ * (Not through JSON: these sessions hold Date / Map / Set values, which JSON does not keep — a JSON round trip
+ * of stored entries is covered by the stored-record tests over JSON-safe runs.)
  *
  * The pinned file itself is untouched; its own test (hcifootprint-2.6.1.test.ts) still replays the one-argument
  * log. Both encodings, a redacted write, Date / Map / Set and a commit out of mint order are in the sessions.
@@ -12,7 +14,7 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
-import { readStoredRecord, stateAt } from '../../../../src/index.js';
+import { readStoredRecord, serveRecord, stateAt } from '../../../../src/index.js';
 import type { RecordEntry, RecordEncoding, WriteScrub } from '../../../../src/write.js';
 import { EventLog, memorySink, RecordFrame, SharedMemory } from '../../../../src/write.js';
 import { pinnedText, revive } from '../../../fixtures/bytes.js';
@@ -79,9 +81,27 @@ describe('a sink moves no byte — the hcifootprint 2.6.1 sessions', () => {
   });
 
   it('the commit entries are the log’s own bundles, in order — the sink holds no second copy of a sealed one', () => {
-    const { log, entries } = replayWithSink(sessions[0]);
-    const commits = entries.filter((e): e is Extract<RecordEntry, { kind: 'commit' }> => e.kind === 'commit');
-    expect(commits.map((c) => c.bundle.idx)).toEqual(log.recorded().map((b) => b.idx));
-    commits.forEach((c, i) => expect(c.bundle).toEqual(log.recorded()[i]));
+    let sealed = 0;
+    let open = 0;
+    for (const session of sessions) {
+      const { log, entries } = replayWithSink(session);
+      const commits = entries.filter((e): e is Extract<RecordEntry, { kind: 'commit' }> => e.kind === 'commit');
+      expect(commits.map((c) => c.bundle.idx)).toEqual(log.recorded().map((b) => b.idx));
+      commits.forEach((c, i) => {
+        const own = log.recorded()[i];
+        if (serveRecord(own) === own) {
+          // Sealed whole: the very same frozen object, shared — not a copy.
+          sealed++;
+          expect(c.bundle).toBe(own);
+        } else {
+          // Holding a Date, Map or Set: a served copy of its open paths — equal, and not the log's object.
+          open++;
+          expect(c.bundle).not.toBe(own);
+          expect(c.bundle).toEqual(own);
+        }
+      });
+    }
+    expect(sealed).toBeGreaterThan(0);
+    expect(open).toBeGreaterThan(0);
   });
 });

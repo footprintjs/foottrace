@@ -31,6 +31,7 @@
  * ```
  */
 
+import { deepFreeze } from '../capture/freeze.js';
 import type { LogAddress } from './eventPosition.js';
 import type { CommitBundle } from './types.js';
 
@@ -149,8 +150,10 @@ export function sendEntry(sink: RecordSink, entry: RecordEntry): unknown {
 
 /**
  * A sink that keeps every entry in memory, in arrival order — the reference adapter: what any adapter
- * must give back for `readStoredRecord` to read the same record. `entries` is a new array on each read;
- * each entry is frozen.
+ * must give back for `readStoredRecord` to read the same record. `entries` is a new array on each read.
+ * What it keeps is frozen all the way down — the base, `meta` and a note's `data` are the copies a log
+ * hands it, and the bundle is already frozen — so no reader of the stored record can rewrite it. (A
+ * caller that hands it objects directly hands them over: they are frozen in place.)
  *
  * @example
  * ```typescript
@@ -163,7 +166,7 @@ export function sendEntry(sink: RecordSink, entry: RecordEntry): unknown {
 export function memorySink(): RecordSink & { readonly entries: readonly RecordEntry[] } {
   const stored: RecordEntry[] = [];
   const keep = (entry: RecordEntry): void => {
-    stored.push(Object.freeze(entry));
+    stored.push(deepFreeze(entry));
   };
   return {
     get entries(): readonly RecordEntry[] {

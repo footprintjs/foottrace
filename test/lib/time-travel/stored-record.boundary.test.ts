@@ -12,8 +12,13 @@
  *             budget (shared by every log of the record), a deep or long address is unread — and a limit
  *             the caller gives that is not a count is refused; a deep chain of nested logs at the depth
  *             limit reads in linear time, and a bundle nested 100,000 deep is never walked
- *   security  a stored drill segment named `__proto__` is a key of the source's `subflowResults`, never its
- *             prototype; the reader never edits, freezes or copies the entries it is handed
+ *             a cut or an early stop never adds or changes a claim (`complete`, `outcome`, `meta.closed`);
+ *             the gap budget is spent on the logs that need the fewest first, so a corrupt log cannot starve
+ *             the rest; 200,000 unread entries never overflow the stack
+ *   security  an address is read by index, never through its own iterator (a lying or endless one); an
+ *             entry whose fields throw is unread; a stored drill segment named `__proto__` is a key of the
+ *             source's `subflowResults`, never its prototype; the reader never edits, freezes or copies the
+ *             entries it is handed, and what it hands out (`commitLog`, `gaps`, `entries`) is frozen
  */
 import { describe, expect, it } from 'vitest';
 
@@ -174,39 +179,86 @@ describe('Limits: the reader’s work on untrusted input is bounded, and what a 
     expect(readStoredRecord(clean(), { entries: 4 }).unread).toEqual([]);
   });
 
-  it('missingCommits: a commit or a close that needs more gaps than the record holds is unread, by name', () => {
-    const limit = "past the reader's limit of 1048576 missing commits";
+  it('missingCommits: a commit or a close that needs more gaps than the record holds is unread, by name — and the log is not complete', () => {
+    const limit = (left: number) =>
+      `past the reader's limit of 1048576 missing commits for the record (${left} were left for this log)`;
     // The default, at its edge without allocating: a close for 2^20 + 1 commits over an empty log.
     const overClosed = readStoredRecord([
       { kind: 'closed', address: ROOT, at: 1, outcome: 'ok', commits: 2 ** 20 + 1 },
     ]);
-    expect(overClosed.unread).toEqual([{ index: 0, reason: `commits is 1048577, ${limit}` }]);
+    expect(overClosed.unread).toEqual([{ index: 0, reason: `commits is 1048577, ${limit(1048576)}` }]);
     expect(overClosed.root('run-1')!).toMatchObject({ complete: false, commitLog: [], gaps: [] });
-    // One corrupted index: past the gap budget, unread; the rest of the log reads as it was.
+    // One corrupted index: past the gap budget, unread. The rest still reads — and the log is not
+    // complete, because the reader did not read it whole.
     const corrupted = readStoredRecord([...clean(), commitAt(Number.MAX_SAFE_INTEGER)]);
-    expect(corrupted.unread).toEqual([{ index: 4, reason: `bundle.idx is ${Number.MAX_SAFE_INTEGER}, ${limit}` }]);
-    expect(corrupted.root('run-1')!).toMatchObject({ complete: true, gaps: [] });
+    expect(corrupted.unread).toEqual([
+      { index: 4, reason: `bundle.idx is ${Number.MAX_SAFE_INTEGER}, ${limit(1048576)}` },
+    ]);
+    expect(corrupted.root('run-1')!).toMatchObject({ complete: false, gaps: [], meta: {} });
+    expect(corrupted.root('run-1')!.outcome).toBeUndefined();
     expect(corrupted.root('run-1')!.commitLog).toHaveLength(2);
   });
 
-  it('missingCommits: the budget is the record’s, spent log by log in arrival order — at the edge, it fits', () => {
+  it('a cut never adds or changes a claim: the smallest case, and an earlier close cannot speak for a cut one', () => {
+    const closedEmpty = { kind: 'closed', address: ROOT, at: 1, outcome: 'ok', commits: 0 };
+    expect(readStoredRecord([closedEmpty, commitAt(1)], { missingCommits: 1 }).root('run-1')!.complete).toBe(false);
+    const cut = readStoredRecord([closedEmpty, commitAt(1)], { missingCommits: 0 });
+    expect(cut.root('run-1')!).toMatchObject({ complete: false, commitLog: [] });
+    expect(cut.unread.map((u) => u.index)).toEqual([1]);
+    const paused = { kind: 'closed', address: ROOT, at: 1, outcome: 'paused', commits: 0 };
+    const failed = { kind: 'closed', address: ROOT, at: 1, outcome: 'failed', commits: 3 };
+    expect(readStoredRecord([paused, failed], { missingCommits: 3 }).root('run-1')).toMatchObject({
+      complete: true,
+      outcome: 'failed',
+    });
+    const short = readStoredRecord([paused, failed], { missingCommits: 2 }).root('run-1')!;
+    expect(short.complete).toBe(false);
+    expect(short.outcome).toBeUndefined();
+  });
+
+  it('missingCommits: one budget for the record, spent on the logs that need the fewest gaps first — a corrupt log cannot starve the rest', () => {
     const a: LogAddress = { logRunId: 'run-a', drillPath: [] };
     const b: LogAddress = { logRunId: 'run-b', drillPath: [] };
-    // Each log has commit 0 and commit 3: two gaps each. A budget of 3 holds the first log whole.
-    const entries = [commitAt(0, a), commitAt(3, a), commitAt(0, b), commitAt(3, b)];
-    const stored = readStoredRecord(entries, { missingCommits: 3 });
-    expect(stored.root('run-a')!.gaps.map((g) => g.index)).toEqual([1, 2]);
-    // One gap is left: not enough to reach run-b's commit 3, so that commit is named and its log ends at 0.
-    expect(stored.root('run-b')!.gaps).toEqual([]);
-    expect(stored.root('run-b')!.commitLog).toHaveLength(1);
+    // run-a arrives first and asks for 9 gaps (a corrupt index); run-b asks for 2.
+    const entries = [commitAt(0, a), commitAt(10, a), commitAt(0, b), commitAt(3, b)];
+    const stored = readStoredRecord(entries, { missingCommits: 5 });
+    expect(stored.root('run-b')!.gaps.map((g) => g.index)).toEqual([1, 2]);
+    // run-a gets the 3 that are left: not enough to reach its index 10, which is named, with what was left.
+    expect(stored.root('run-a')!.commitLog).toHaveLength(1);
     expect(stored.unread).toEqual([
-      { index: 3, reason: "bundle.idx is 3, past the reader's limit of 3 missing commits" },
+      {
+        index: 1,
+        reason:
+          "bundle.idx is 10, past the reader's limit of 5 missing commits for the record (3 were left for this log)",
+      },
     ]);
-    expect(readStoredRecord(entries, { missingCommits: 4 }).unread).toEqual([]);
+    // At the edge, both fit.
+    expect(readStoredRecord(entries, { missingCommits: 11 }).unread).toEqual([]);
     // No gaps allowed: a log reads up to its first missing commit, and names the rest.
     const strict = readStoredRecord([commitAt(0), commitAt(1), commitAt(5)], { missingCommits: 0 });
     expect(strict.root('run-1')!.commitLog).toHaveLength(2);
     expect(strict.unread.map((u) => u.index)).toEqual([2]);
+  });
+
+  it('entries: once reading stops, no log reads complete — what was not read could have gone on', () => {
+    const stored = readStoredRecord([...clean(), { kind: 'note', address: ROOT, at: 1, note: 'tick', data: {} }], {
+      entries: 4,
+    });
+    expect(stored.unread).toEqual([
+      { index: 4, reason: "entries from here on are past the reader's limit of 4; not read" },
+    ]);
+    expect(stored.root('run-1')!).toMatchObject({ complete: false, meta: {} });
+    expect(stored.root('run-1')!.outcome).toBeUndefined();
+  });
+
+  it('a large unread list never overflows the stack — 200,000 second commit entries for one log', () => {
+    const entries: unknown[] = clean();
+    const second = { ...commitAt(0) };
+    for (let i = 0; i < 200_000; i++) entries.push({ ...second });
+    const stored = readStoredRecord(entries);
+    expect(stored.unread).toHaveLength(200_000);
+    expect(stored.unread[0]).toEqual({ index: 4, reason: 'a second commit entry for index 0 — the one at 1 stands' });
+    expect(stored.root('run-1')!.complete).toBe(true);
   });
 
   it('drillDepth and addressLength: past the default, an address is unread — at it, it reads', () => {
@@ -270,6 +322,56 @@ describe('Limits: the reader’s work on untrusted input is bounded, and what a 
     const stored = readStoredRecord([first, deepCommit()]);
     expect(stored.unread).toEqual([{ index: 1, reason: 'a second commit entry for index 0 — the one at 0 stands' }]);
     expect(stored.root('run-1')!.commitLog[0]).toBe(first.bundle);
+  });
+});
+
+describe('Security: entries are data — the reader never trusts an entry’s own behaviour', () => {
+  it('an address is read by index, never through its own iterator: a lying or endless iterator neither bypasses the limits nor hangs', () => {
+    const lying = Object.assign(['m#1'], {
+      *[Symbol.iterator]() {
+        for (let i = 0; i < 5000; i++) yield `forged#${i}`;
+      },
+    });
+    const endless = Object.assign(['m#2'], {
+      *[Symbol.iterator]() {
+        for (;;) yield 'forever#0';
+      },
+    });
+    const stored = readStoredRecord([
+      { kind: 'note', address: { logRunId: 'run-1', drillPath: lying }, at: 1, note: 'n', data: {} },
+      { kind: 'note', address: { logRunId: 'run-1', drillPath: endless }, at: 1, note: 'n', data: {} },
+    ]);
+    expect(stored.unread).toEqual([]);
+    expect([...stored.logs.keys()]).toEqual(['["run-1","m#1"]', '["run-1","m#2"]']);
+    expect(stored.log({ logRunId: 'run-1', drillPath: ['m#1'] })!.address.drillPath).toEqual(['m#1']);
+  });
+
+  it('an entry whose fields throw when read is unread, by name — the rest of the record still reads', () => {
+    const throwing = Object.defineProperty({ address: ROOT, at: 1 }, 'kind', {
+      enumerable: true,
+      get() {
+        throw new Error('hostile getter');
+      },
+    });
+    const revoked = Proxy.revocable({}, {});
+    revoked.revoke();
+    const stored = readStoredRecord([...clean(), throwing, revoked.proxy]);
+    expect(stored.unread).toEqual([
+      { index: 4, reason: 'the entry threw when it was read' },
+      { index: 5, reason: 'the entry threw when it was read' },
+    ]);
+    expect(stored.root('run-1')!.complete).toBe(true);
+  });
+
+  it('a stored log’s commitLog is frozen, gaps or not — no reader can rewrite what every other reader sees', () => {
+    const whole = readStoredRecord(clean()).root('run-1')!;
+    const gapped = readStoredRecord(clean().filter((e) => !(e.kind === 'commit' && e.bundle.idx === 0))).root('run-1')!;
+    expect(gapped.gaps.map((g) => g.index)).toEqual([0]);
+    for (const log of [whole, gapped]) {
+      expect(Object.isFrozen(log.commitLog)).toBe(true);
+      expect(Object.isFrozen(log.gaps)).toBe(true);
+      expect(Object.isFrozen(log.entries)).toBe(true);
+    }
   });
 });
 

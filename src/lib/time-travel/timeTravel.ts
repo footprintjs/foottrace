@@ -253,6 +253,12 @@ class Cursor<TMeta> implements TimeTravel<TMeta> {
   // ── Drilling (law 1: a separate cursor, not a second position) ───────────
 
   drill(mountRuntimeStageId: string): TimeTravel<TMeta> | undefined {
+    // Never back into the mount this cursor is, or one it was drilled out of: a stored or hand-built
+    // log can name one (a mount id is unique in a sound run), and a viewer that opens every mount
+    // would loop. The walk is as deep as the drill.
+    for (let at: TimeTravel<TMeta> | undefined = this; at !== undefined; at = at.parent) {
+      if (at.mountRuntimeStageId === mountRuntimeStageId) return undefined;
+    }
     // On a chain, the mount is looked for in every leg — a subflow that ran
     // before the pause is in the first snapshot's results, one that ran after
     // is in the second's. Ids are unique across a sound chain (chain.ts
