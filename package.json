@@ -1,6 +1,6 @@
 {
   "name": "foottrace",
-  "version": "1.0.3",
+  "version": "1.1.0",
   "type": "commonjs",
   "description": "Execution records, replay, time travel and honest attribution — independent of the engine that produced them",
   "license": "MIT",
