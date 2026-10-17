@@ -133,3 +133,6 @@ export {
 } from './lib/ids/runtimeStageId.js';
 export { deepEqual } from './lib/memory/equality.js';
 export { serveRecord } from './lib/capture/freeze.js';
+
+/** Record attention types are shared with producers; the optional cause reader has its own door. */
+export type { Attention, AttentionKind } from './lib/cause/types.js';

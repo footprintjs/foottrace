@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.2.0 — unpublished candidate
+
+### Added
+
+- Optional ESM-only `foottrace/cause` reader: bounded `explain` and `attentionList`, pluggable `largestDrop` / `mostAffected` ranking, plus in-memory and lazy stored-record graph adapters. Findings contain attention, evidence references, recorded backward paths, tied alternatives, downstream impact and explicit coverage gaps. The default chooses the earliest marked ancestor by dependency order, never by timestamp or ID.
+- Producer-facing `Attention` / `AttentionKind` are type-only root exports, owned by foottrace. A mark carries a fixed reason and evidence references; business rules and future engine stamping remain with producers.
+- Shared per-query limits, cancellation and timeout, cycle-safe traversal and untrusted-record projection. Missing evidence yields incomplete findings; no missing evidence is manufactured. No storage vendor, business rerun or model call is built in.
+- Public-door, strict layer-boundary and actual ESM unused-import bundle tests; esbuild is a pinned development-only test dependency.
+
+### Compatibility
+
+- Existing root, `/write` and `/paths` runtime/type exports and record bytes remain unchanged. `/cause` adds no CommonJS `require` door; CommonJS applications can use dynamic `import('foottrace/cause')`.
+- This candidate does not publish, upgrade consumer apps, stamp engine attention marks, add viewer UI or expose agent tools. Cross-run/service causal links remain deferred.
+
 ## 1.1.0
 
 ### Added

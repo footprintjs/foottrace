@@ -2,10 +2,12 @@
  * types.ts — the record's types: a bundle, its rows, its patches, its encoding, and the
  * execution tree as the record's readers read it.
  *
- * Imports nothing. The standalone record names nothing outside itself: the engine's frame
+ * Imports only the record's leaf attention type. The record names nothing outside itself: the engine's frame
  * types — the stage snapshot, flow messages and retention dials — remain in FootPrint's
  * `frameTypes.ts`. The closed record graph is enforced by scripts/check-layering.mjs.
  */
+
+import type { Attention } from '../cause/types.js';
 
 // ── Patch & Trace ──────────────────────────────────────────────────────────
 
@@ -206,6 +208,8 @@ export type CommitValuesMode = 'full' | 'delta';
  * ```
  */
 export interface ExecutionTree {
+  /** Optional recorded business attention; absence does not assert health. */
+  readonly attention?: readonly Attention[];
   /** The stage's id (prefixed inside a subflow). `commitStops` reads the root's to place a subflow's seed. */
   readonly id?: string;
   /** `[subflowPath/]stageId#executionIndex` — what a reader keys on. A node without one is not a stage. */
