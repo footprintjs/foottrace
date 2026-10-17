@@ -1,10 +1,19 @@
 # Changelog
 
-## Unreleased
+## 1.4.0 — 2026-10-17
 
 ### Added
 
 - CommonJS `require('foottrace/cause')` support with matching typed exports, alongside the existing ESM import. All public entrypoints now use one strict package-resolution check. Cause algorithms, query limits, record bytes and existing root, `/write` and `/paths` compatibility are unchanged.
+
+### Documentation
+
+- Move the detailed cause contract into a dedicated recipe covering per-write capture, authorized saved records, bounded queries and honest findings, with npm-safe links from the README.
+- Explain coded refusal handling across CommonJS/ESM copies, structural record/graph contracts, and the same-format registration required by `freezeRecord` and `serveRecord`.
+
+### Development
+
+- Compile strict public `.cts` and `.mts` consumers once in the required package check, outside coverage instrumentation. Runtime, browser and resolution checks remain covered; no test timeout or coverage setting is relaxed.
 
 ## 1.3.0 — 2026-10-17
 
