@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- CommonJS `require('foottrace/cause')` support with matching typed exports, alongside the existing ESM import. All public entrypoints now use one strict package-resolution check. Cause algorithms, query limits, record bytes and existing root, `/write` and `/paths` compatibility are unchanged.
+
 ## 1.3.0 — 2026-10-17
 
 ### Added

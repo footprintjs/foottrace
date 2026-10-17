@@ -59,6 +59,10 @@
       "import": {
         "types": "./dist/esm/cause.d.ts",
         "default": "./dist/esm/cause.js"
+      },
+      "require": {
+        "types": "./dist/types/cause.d.ts",
+        "default": "./dist/cause.js"
       }
     }
   },
@@ -71,7 +75,7 @@
         "dist/types/paths.d.ts"
       ],
       "cause": [
-        "dist/esm/cause.d.ts"
+        "dist/types/cause.d.ts"
       ]
     }
   },
@@ -81,7 +85,7 @@
     "test:coverage": "vitest run --coverage",
     "typecheck": "tsc -p tsconfig.test.json",
     "check:layering": "node scripts/check-layering.mjs",
-    "check:package": "publint && attw --pack --exclude-entrypoints cause --profile strict && attw --pack --entrypoints cause --profile esm-only",
+    "check:package": "publint && attw --pack --profile strict",
     "lint": "eslint 'src/**/*.ts'",
     "format": "prettier --check 'src/**/*.ts' 'test/**/*.ts'",
     "test:examples": "tsc -p examples/tsconfig.json",

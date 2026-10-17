@@ -1,7 +1,7 @@
 /** Synthetic saved-record investigation: zero engine reruns, providers or model calls. */
 import type { CommitBundle } from 'foottrace';
 
-/** The /cause door is ESM; dynamic import also works from a CommonJS host. */
+/** The optional reader can be loaded lazily from an ESM or CommonJS host. */
 export async function causeRecordExample() {
   const { createRecordGraph, createStoredRecordGraph, explain } = await import('foottrace/cause');
   const address = { logRunId: 'example-run', drillPath: [] };

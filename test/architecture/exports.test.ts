@@ -51,7 +51,7 @@ function duplicates(doors: typeof exportsByDoor): string[][] {
 }
 
 describe('foottrace public ownership', () => {
-  it('has four code doors, with the optional cause reader ESM-only', () => {
+  it('has four code doors with matching public ESM and CommonJS targets', () => {
     expect(
       Object.keys(pkg.exports)
         .filter((key) => key !== './package.json')
@@ -59,13 +59,8 @@ describe('foottrace public ownership', () => {
     ).toEqual(Object.keys(entries).sort());
     for (const [door, name] of Object.entries(entries)) {
       expect(pkg.exports[door].import).toEqual({ types: `./dist/esm/${name}.d.ts`, default: `./dist/esm/${name}.js` });
-      if (door === './cause') {
-        expect(pkg.exports[door].require).toBeUndefined();
-        expect(pkg.typesVersions['*'].cause).toEqual(['dist/esm/cause.d.ts']);
-      } else {
-        expect(pkg.exports[door].require).toEqual({ types: `./dist/types/${name}.d.ts`, default: `./dist/${name}.js` });
-        if (door !== '.') expect(pkg.typesVersions['*'][door.slice(2)]).toEqual([`dist/types/${name}.d.ts`]);
-      }
+      expect(pkg.exports[door].require).toEqual({ types: `./dist/types/${name}.d.ts`, default: `./dist/${name}.js` });
+      if (door !== '.') expect(pkg.typesVersions['*'][door.slice(2)]).toEqual([`dist/types/${name}.d.ts`]);
     }
   });
 

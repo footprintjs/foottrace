@@ -4,7 +4,7 @@
 
 ## Module compatibility
 
-**Module compatibility:** `/cause` has an `import` export condition only. CommonJS consumers must use native `import('foottrace/cause')`; `require('foottrace/cause')` is not exported, even on Node versions that support requiring ESM. Preserve native `import()` in the compiled CommonJS loader: compilers that rewrite it to `require()` need a dedicated import-preserving bridge. Existing root, `/write` and `/paths` CommonJS imports remain supported.
+**Module compatibility:** `/cause` provides typed `import` and `require` export conditions, matching the existing root, `/write` and `/paths` doors. ESM consumers can use `import { explain } from 'foottrace/cause'`; CommonJS consumers can use `const { explain } = require('foottrace/cause')`. Native `import('foottrace/cause')` remains available for lazy loading from either format. Use one module format consistently in an application: CommonJS and ESM have separate module instances and do not share module-local state.
 
 ## 1. Record per-write provenance
 
@@ -96,8 +96,8 @@ Foundations: [Weiser, *Program slicing* (1981)](https://dl.acm.org/doi/10.5555/8
 | Loading only queried graph nodes/scopes | **Demand-driven, or lazy, graph traversal** |
 | Default candidate selection | **Root-cause localisation on a dependency DAG**, using the earliest anomalous ancestor |
 
-These names describe the techniques, not a claim of complete language-level instrumentation. Findings are bounded by the dependencies the producer recorded. Cause queries share one deadline and node/edge/call budget across reverse traversal, ranking and forward impact; limits, cancellation and unavailable reads become gaps. Output carries references and fixed codes, never a serialized DAG or business payload. `/cause` is ESM-only and `sideEffects: false`; its unused-import browser bundle is tested to match a bundle without the import. The package has no runtime dependencies. The cause reader shipped in 1.2.0; later engine stamping, viewer integration and agent tools are separate changes.
+These names describe the techniques, not a claim of complete language-level instrumentation. Findings are bounded by the dependencies the producer recorded. Cause queries share one deadline and node/edge/call budget across reverse traversal, ranking and forward impact; limits, cancellation and unavailable reads become gaps. Output carries references and fixed codes, never a serialized DAG or business payload. `/cause` supports ESM and CommonJS and remains `sideEffects: false`; its unused ESM import is tested to produce the same browser bundle as no import. The package has no runtime dependencies. The cause reader shipped in 1.2.0; later engine stamping, viewer integration and agent tools are separate changes.
 
-Package verification retains strict automatic entrypoint discovery for every door except `/cause`, then checks only `/cause` with Are the Types Wrong’s `esm-only` profile. No resolution error is ignored globally; the regression test fixes that exception to this one ESM-only subpath.
+Package verification uses strict automatic entrypoint discovery for every door with Are the Types Wrong’s `strict` profile. No entrypoint is excluded and no resolution error is ignored.
 
 The complete synthetic [record example](../examples/cause-record.ts) demonstrates both in-memory and stored adapters. The [record contract](guides/record-contract.md) describes the producer and writer laws.
