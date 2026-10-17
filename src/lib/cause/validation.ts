@@ -29,17 +29,17 @@ export function observePromise(
 }
 const refuseGraph = (code?: GapCode): AdmissionError => new AdmissionError(code);
 const graphDescriptors = { translateTrapErrors: false, requireOwnValue: false };
-export function own(value: unknown, key: string): unknown {
+export function graphOwn(value: unknown, key: string): unknown {
   return ownData(value, key, refuseGraph, graphDescriptors);
 }
 export function plain(value: unknown): void {
   if (!value || typeof value !== 'object' || ![Object.prototype, null].includes(Object.getPrototypeOf(value)))
     throw new AdmissionError();
 }
-export function name(value: unknown, maximum = 2048): string {
+export function graphName(value: unknown, maximum = 2048): string {
   return boundedName(value, maximum, refuseGraph);
 }
-export function list<T>(
+export function graphList<T>(
   value: unknown,
   maximum: number,
   read: (item: unknown) => T,
@@ -81,12 +81,12 @@ const codes = new Set([
   'truncated',
   'strategy-failed',
 ]);
-export const refs = (value: unknown): readonly string[] => list(value, 16, (item) => name(item, 512));
+export const refs = (value: unknown): readonly string[] => graphList(value, 16, (item) => graphName(item, 512));
 export function attention(value: unknown): readonly Attention[] {
-  return list(value, 32, (item) => {
+  return graphList(value, 32, (item) => {
     plain(item);
-    const kind = own(item, 'kind'),
-      reason = own(item, 'reason');
+    const kind = graphOwn(item, 'kind'),
+      reason = graphOwn(item, 'reason');
     if (
       typeof kind !== 'string' ||
       !/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(kind) ||
@@ -94,36 +94,36 @@ export function attention(value: unknown): readonly Attention[] {
       !reasons.has(reason)
     )
       throw new AdmissionError();
-    const evidence = refs(own(item, 'evidence'));
+    const evidence = refs(graphOwn(item, 'evidence'));
     if (kind !== 'not-collected' && evidence.length === 0) throw new AdmissionError();
     return Object.freeze({ kind, reason: reason as Attention['reason'], evidence });
   });
 }
 export function gaps(value: unknown): readonly Gap[] {
-  return list(value, 32, (item) => {
+  return graphList(value, 32, (item) => {
     plain(item);
-    const code = own(item, 'code'),
-      nodeId = own(item, 'nodeId');
+    const code = graphOwn(item, 'code'),
+      nodeId = graphOwn(item, 'nodeId');
     if (typeof code !== 'string' || !codes.has(code)) throw new AdmissionError();
     return Object.freeze({
       code: code as GapCode,
-      ...(nodeId === undefined ? {} : { nodeId: name(nodeId) }),
-      evidence: refs(own(item, 'evidence')),
+      ...(nodeId === undefined ? {} : { nodeId: graphName(nodeId) }),
+      evidence: refs(graphOwn(item, 'evidence')),
     });
   });
 }
 export function adjacency(value: unknown, maximum: number): Adjacency {
   plain(value);
-  const complete = own(value, 'complete');
+  const complete = graphOwn(value, 'complete');
   if (typeof complete !== 'boolean') throw new AdmissionError();
-  const edges = list(
-    own(value, 'edges'),
+  const edges = graphList(
+    graphOwn(value, 'edges'),
     maximum,
     (item) => {
       plain(item);
-      const nodeId = name(own(item, 'nodeId')),
-        kind = own(item, 'kind'),
-        attribution = own(item, 'attribution');
+      const nodeId = graphName(graphOwn(item, 'nodeId')),
+        kind = graphOwn(item, 'kind'),
+        attribution = graphOwn(item, 'attribution');
       if (
         (kind !== 'data' && kind !== 'control') ||
         (attribution !== 'per-write' && attribution !== 'stage' && attribution !== 'recorded-control') ||
@@ -131,14 +131,14 @@ export function adjacency(value: unknown, maximum: number): Adjacency {
         (kind === 'data' && attribution === 'recorded-control')
       )
         throw new AdmissionError();
-      return Object.freeze({ nodeId, kind, attribution, evidence: refs(own(item, 'evidence')) }) as GraphEdge;
+      return Object.freeze({ nodeId, kind, attribution, evidence: refs(graphOwn(item, 'evidence')) }) as GraphEdge;
     },
     'edge-limit',
   );
   return Object.freeze({ edges, complete });
 }
 export const nodeIds = (value: unknown, max: number): readonly NodeId[] =>
-  list(value, max, (item) => name(item), 'node-limit');
+  graphList(value, max, (item) => graphName(item), 'node-limit');
 export const gap = (code: GapCode, nodeId?: NodeId): Gap =>
   Object.freeze({ code, ...(nodeId === undefined ? {} : { nodeId }), evidence: Object.freeze([]) });
 export function uniqueGaps(items: readonly Gap[]): readonly Gap[] {

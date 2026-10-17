@@ -15,16 +15,16 @@ export class RecordRefusal extends EvidenceRefusal {
 }
 const refuseRecord = (code?: GapCode): RecordRefusal => new RecordRefusal(code);
 const recordDescriptors = { translateTrapErrors: true, requireOwnValue: true };
-export function own(value: unknown, key: string): unknown {
+export function recordOwn(value: unknown, key: string): unknown {
   return ownData(value, key, refuseRecord, recordDescriptors);
 }
 export function names(value: unknown, maximum = 128, path = false): string[] {
-  return list(value, maximum).map((item) => name(item, path));
+  return recordList(value, maximum).map((item) => recordName(item, path));
 }
-export function name(value: unknown, path = false): string {
+export function recordName(value: unknown, path = false): string {
   return boundedName(value, 1024, refuseRecord, path);
 }
-export function list(value: unknown, maximum: number): readonly unknown[] {
+export function recordList(value: unknown, maximum: number): readonly unknown[] {
   return boundedList(value, maximum, (item) => item, {
     refuse: refuseRecord,
     overflow: 'node-limit',
@@ -33,8 +33,8 @@ export function list(value: unknown, maximum: number): readonly unknown[] {
   });
 }
 export function addressOf(value: unknown): LogAddress {
-  const logRunId = name(own(value, 'logRunId')),
-    drillPath = names(own(value, 'drillPath'), 16);
+  const logRunId = recordName(recordOwn(value, 'logRunId')),
+    drillPath = names(recordOwn(value, 'drillPath'), 16);
   if (logRunId.length + drillPath.reduce((n, s) => n + s.length, 0) > 1536) throw new RecordRefusal();
   return Object.freeze({ logRunId, drillPath: Object.freeze(drillPath) });
 }
@@ -61,7 +61,7 @@ export function dataCopy(value: unknown, budget: { left: number }): unknown {
     }
     if (!Array.isArray(v) && p !== Object.prototype && p !== null) throw new RecordRefusal();
     if (Array.isArray(v)) {
-      const length = own(v, 'length');
+      const length = recordOwn(v, 'length');
       if (typeof length !== 'number' || !Number.isSafeInteger(length) || length < 0) throw new RecordRefusal();
       spend(budget, length);
       const array: unknown[] = [];
@@ -84,7 +84,7 @@ export function dataCopy(value: unknown, budget: { left: number }): unknown {
     if (keys.length > budget.left) throw new RecordRefusal('node-limit');
     for (const key of keys) {
       if (key.length > 1024) throw new RecordRefusal('node-limit');
-      const v = own(from, key);
+      const v = recordOwn(from, key);
       check(v);
       let copy = v;
       if (!leaf(v)) {
@@ -99,19 +99,19 @@ export function dataCopy(value: unknown, budget: { left: number }): unknown {
   return root;
 }
 export function bundleOf(value: unknown, idx: number, budget: { left: number }): CommitBundle {
-  const runtimeStageId = name(own(value, 'runtimeStageId')),
-    stageId = name(own(value, 'stageId'));
-  const trace = list(own(value, 'trace'), 128).map((_, i) => {
-    const t = own(own(value, 'trace'), String(i)),
-      path = name(own(t, 'path'), true),
-      verb = own(t, 'verb');
+  const runtimeStageId = recordName(recordOwn(value, 'runtimeStageId')),
+    stageId = recordName(recordOwn(value, 'stageId'));
+  const trace = recordList(recordOwn(value, 'trace'), 128).map((_, i) => {
+    const t = recordOwn(recordOwn(value, 'trace'), String(i)),
+      path = recordName(recordOwn(t, 'path'), true),
+      verb = recordOwn(t, 'verb');
     if (!['set', 'merge', 'append', 'delete'].includes(verb as string)) throw new RecordRefusal();
-    const readKeys = own(t, 'readKeys');
+    const readKeys = recordOwn(t, 'readKeys');
     return { path, verb: verb as 'set', ...(readKeys === undefined ? {} : { readKeys: names(readKeys, 128, true) }) };
   });
   spend(budget, trace.length + trace.reduce((n, t) => n + (t.readKeys?.length ?? 0), 0) + 1);
-  const overwrite = dataCopy(own(value, 'overwrite'), budget),
-    updates = dataCopy(own(value, 'updates'), budget);
+  const overwrite = dataCopy(recordOwn(value, 'overwrite'), budget),
+    updates = dataCopy(recordOwn(value, 'updates'), budget);
   if (
     !overwrite ||
     typeof overwrite !== 'object' ||
@@ -121,10 +121,10 @@ export function bundleOf(value: unknown, idx: number, budget: { left: number }):
     Array.isArray(updates)
   )
     throw new RecordRefusal();
-  const redactedPaths = names(own(value, 'redactedPaths') ?? [], 128, true);
-  const untracked = own(value, 'untrackedSources'),
-    phase = own(value, 'phase');
-  spend(budget, redactedPaths.length + (untracked === undefined ? 0 : list(untracked, 128).length));
+  const redactedPaths = names(recordOwn(value, 'redactedPaths') ?? [], 128, true);
+  const untracked = recordOwn(value, 'untrackedSources'),
+    phase = recordOwn(value, 'phase');
+  spend(budget, redactedPaths.length + (untracked === undefined ? 0 : recordList(untracked, 128).length));
   return {
     idx,
     stage: stageId,
@@ -168,7 +168,7 @@ export function mapOf<T>(
   }
   if (keys.length > limit) throw new RecordRefusal('node-limit');
   if (budget) spend(budget, keys.length);
-  return new Map(keys.map((k) => [name(k), read(own(value, k))]));
+  return new Map(keys.map((k) => [recordName(k), read(recordOwn(value, k))]));
 }
 
 /** Observe native promises by intrinsic without assimilating a data object's then accessor. */

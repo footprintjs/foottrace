@@ -1,5 +1,6 @@
 import type { CauseGraph, ExplainOptions, Gap, GraphContext, NodeId, WalkLimits } from './types.js';
-import { AdmissionError, gap, name, observePromise, own, plain } from './validation.js';
+import { AdmissionError, gap, graphName, observePromise, graphOwn, plain } from './validation.js';
+import { beginQueryMemo, endQueryMemo } from './queryMemo.js';
 
 export interface Read<T> {
   readonly value?: T;
@@ -29,7 +30,7 @@ export class Session {
       plain(options);
       const limits = { ...defaults };
       for (const key of Object.keys(defaults) as (keyof WalkLimits)[]) {
-        const value = own(options, key);
+        const value = graphOwn(options, key);
         if (value !== undefined) {
           if (
             typeof value !== 'number' ||
@@ -42,11 +43,11 @@ export class Session {
         }
       }
       this.limits = Object.freeze(limits);
-      const rank = own(options, 'rankRoots');
+      const rank = graphOwn(options, 'rankRoots');
       if (rank !== undefined && typeof rank !== 'function') throw new TypeError();
-      const impactRank = own(options, 'rankImpact');
+      const impactRank = graphOwn(options, 'rankImpact');
       if (impactRank !== undefined && typeof impactRank !== 'function') throw new TypeError();
-      const signal = own(options, 'signal');
+      const signal = graphOwn(options, 'signal');
       if (signal !== undefined && !(signal instanceof AbortSignal)) throw new TypeError();
       this.external = signal as AbortSignal | undefined;
       for (const key of ['parents', 'children', 'attention', 'gaps', 'roots'] as Method[]) {
@@ -78,8 +79,10 @@ export class Session {
       this.timedOut = true;
       this.controller.abort();
     }, this.limits.timeoutMs);
+    beginQueryMemo(this.context, this.limits.maxNodes);
   }
   dispose(): void {
+    endQueryMemo(this.context);
     clearTimeout(this.timer);
     this.external?.removeEventListener('abort', this.onAbort);
   }
@@ -92,7 +95,7 @@ export class Session {
     return this.controller.signal.aborted ? gap(this.timedOut ? 'timeout' : 'cancelled', id) : undefined;
   }
   admit(id: NodeId): Gap | undefined {
-    name(id);
+    graphName(id);
     if (this.nodes.has(id)) return undefined;
     if (this.nodes.size >= this.limits.maxNodes) return gap('node-limit', id);
     this.nodes.add(id);

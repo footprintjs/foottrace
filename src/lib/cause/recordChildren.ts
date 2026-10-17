@@ -3,10 +3,9 @@ import type { ForwardNode } from '../slice/types.js';
 import { appendControlChildren } from './recordControl.js';
 import { allStageReadsCollected, writtenKeysForNode } from './recordCoverage.js';
 import { nodeIdFor } from './recordIdentity.js';
-import { inspectRecordNode } from './recordParents.js';
 import { readKeysForStage } from './recordScope.js';
-import type { PreparedRecordScope, RecordIdentity, ResolvedRecordNode } from './recordTypes.js';
-import type { Adjacency, Gap, GraphEdge } from './types.js';
+import type { PreparedRecordScope, RecordIdentity, RecordInspection, ResolvedRecordNode } from './recordTypes.js';
+import type { Adjacency, GraphEdge } from './types.js';
 
 /** Keep per-write and conservative fed edges distinct while retaining existing cap and deduplication order. */
 function appendFedChildren(
@@ -95,12 +94,11 @@ function appendDataChildren(
 export function childrenForRecordNode(
   node: ResolvedRecordNode,
   maximumEdges: number,
-  extraGapCodes: readonly Gap['code'][] | undefined,
+  inspection: RecordInspection,
 ): Adjacency {
   const { scope, identity, commitIndex } = node;
-  const base = inspectRecordNode(node, maximumEdges, extraGapCodes),
-    edges: GraphEdge[] = [];
-  let complete = base.gaps.length === 0;
+  const edges: GraphEdge[] = [];
+  let complete = inspection.gaps.length === 0;
   if (!allStageReadsCollected(scope)) complete = false;
   complete = appendDataChildren(scope, identity, commitIndex, maximumEdges, edges) && complete;
   complete = appendControlChildren(scope, identity, commitIndex, maximumEdges, edges) && complete;

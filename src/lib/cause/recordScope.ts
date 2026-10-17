@@ -4,12 +4,12 @@ import {
   addressKey,
   addressOf,
   bundleOf,
-  list,
+  recordList,
   mapOf,
   marksOf,
-  name,
+  recordName,
   names,
-  own,
+  recordOwn,
   RecordRefusal,
   spend,
 } from './recordValidation.js';
@@ -33,11 +33,11 @@ export function recordOptions(options: RecordGraphOptions): Required<RecordGraph
     const prototype = Object.getPrototypeOf(options);
     if (prototype !== Object.prototype && prototype !== null) throw new TypeError();
     return Object.freeze({
-      maxCommits: boundedOption(own(options, 'maxCommits'), 256, 4096),
-      maxFields: boundedOption(own(options, 'maxFields'), 20000, 1000000),
-      maxEdges: boundedOption(own(options, 'maxEdges'), 64, 256),
-      maxScopes: boundedOption(own(options, 'maxScopes'), 32, 256),
-      loadTimeoutMs: boundedOption(own(options, 'loadTimeoutMs'), 1000, 30000),
+      maxCommits: boundedOption(recordOwn(options, 'maxCommits'), 256, 4096),
+      maxFields: boundedOption(recordOwn(options, 'maxFields'), 20000, 1000000),
+      maxEdges: boundedOption(recordOwn(options, 'maxEdges'), 64, 256),
+      maxScopes: boundedOption(recordOwn(options, 'maxScopes'), 32, 256),
+      loadTimeoutMs: boundedOption(recordOwn(options, 'loadTimeoutMs'), 1000, 30000),
     });
   } catch {
     throw new TypeError('cause: invalid record configuration');
@@ -51,12 +51,12 @@ export function prepareRecordScope(
   maximumCommits: number,
   maximumFields: number,
 ): PreparedRecordScope {
-  if (addressKey(addressOf(own(value, 'address'))) !== addressKey(address)) throw new RecordRefusal();
-  const rawLog = list(own(value, 'commitLog'), maximumCommits),
+  if (addressKey(addressOf(recordOwn(value, 'address'))) !== addressKey(address)) throw new RecordRefusal();
+  const rawLog = recordList(recordOwn(value, 'commitLog'), maximumCommits),
     budget = { left: maximumFields };
-  const log = rawLog.map((_, commitIndex) => bundleOf(own(rawLog, String(commitIndex)), commitIndex, budget));
+  const log = rawLog.map((_, commitIndex) => bundleOf(recordOwn(rawLog, String(commitIndex)), commitIndex, budget));
   const reads = mapOf(
-    own(value, 'reads'),
+    recordOwn(value, 'reads'),
     maximumCommits,
     (value) => {
       const readKeys = names(value, 128, true);
@@ -66,13 +66,13 @@ export function prepareRecordScope(
     budget,
   );
   const control = mapOf(
-    own(value, 'controlDeps'),
+    recordOwn(value, 'controlDeps'),
     maximumCommits,
-    (value) => ({ deciderId: name(own(value, 'deciderId')) }),
+    (value) => ({ deciderId: recordName(recordOwn(value, 'deciderId')) }),
     budget,
   );
   const marks = mapOf(
-    own(value, 'attention'),
+    recordOwn(value, 'attention'),
     maximumCommits,
     (value) => {
       const attention = marksOf(value);
@@ -81,7 +81,7 @@ export function prepareRecordScope(
     },
     budget,
   );
-  return { address, log, reads, control, marks, complete: own(value, 'complete') === true };
+  return { address, log, reads, control, marks, complete: recordOwn(value, 'complete') === true };
 }
 
 /** Preserve both stage reads and stronger per-write prefixes, including their original encounter order. */

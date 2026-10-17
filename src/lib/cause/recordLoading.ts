@@ -13,7 +13,7 @@ import type {
   RecordScopeHost,
   RecordScopeLoader,
 } from './recordTypes.js';
-import { addressKey, addressOf, list, own, projectLoaded, RecordRefusal } from './recordValidation.js';
+import { addressKey, addressOf, recordList, recordOwn, projectLoaded, RecordRefusal } from './recordValidation.js';
 import type { Gap } from './types.js';
 
 interface ScopeLoadState {
@@ -43,12 +43,12 @@ function admitLoadedScope(
   let prepared: PreparedRecordScope;
   try {
     prepared = prepareRecordScope(
-      own(result, 'scope') as RecordScope,
+      recordOwn(result, 'scope') as RecordScope,
       request.address,
       limits.maxCommits,
       limits.maxFields,
     );
-    const extra = list(own(result, 'gaps') ?? [], 32);
+    const extra = recordList(recordOwn(result, 'gaps') ?? [], 32);
     // Coverage belongs to this admitted object, so cached scopes retain the same gap ordering and ownership.
     state.extraGaps.set(
       prepared,

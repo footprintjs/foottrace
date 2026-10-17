@@ -12,8 +12,8 @@ import {
   addressOf,
   bundleOf,
   dataCopy,
-  list,
-  own,
+  recordList,
+  recordOwn,
   projectLoaded,
   RecordRefusal,
 } from './recordValidation.js';
@@ -34,26 +34,32 @@ export function createStoredRecordGraph(host: StoredRecordHost, options: RecordG
         (loaded) => {
           const max = limits.maxCommits,
             budget = { left: limits.maxFields };
-          const raw = list(own(loaded, 'entries'), max * 4 + 16),
+          const raw = recordList(recordOwn(loaded, 'entries'), max * 4 + 16),
             entries: unknown[] = [];
           for (let i = 0; i < raw.length; i++) {
             if (context.signal.aborted) throw new RecordRefusal('cancelled');
-            const entry = own(raw, String(i)),
-              a = addressOf(own(entry, 'address'));
+            const entry = recordOwn(raw, String(i)),
+              a = addressOf(recordOwn(entry, 'address'));
             if (addressKey(a) !== addressKey(address)) throw new RecordRefusal();
-            const kind = own(entry, 'kind'),
-              at = own(entry, 'at');
+            const kind = recordOwn(entry, 'kind'),
+              at = recordOwn(entry, 'at');
             if (typeof at !== 'number' || !Number.isFinite(at)) throw new RecordRefusal();
             if (kind === 'commit') {
-              const b = own(entry, 'bundle'),
-                idx = own(b, 'idx');
+              const b = recordOwn(entry, 'bundle'),
+                idx = recordOwn(b, 'idx');
               if (!Number.isSafeInteger(idx) || (idx as number) < 0 || (idx as number) >= max)
                 throw new RecordRefusal('node-limit');
               entries.push({ kind, address: a, at, bundle: bundleOf(b, idx as number, budget) });
             } else if (kind === 'opened')
-              entries.push({ kind, address: a, at, initialState: dataCopy(own(entry, 'initialState'), budget) });
+              entries.push({ kind, address: a, at, initialState: dataCopy(recordOwn(entry, 'initialState'), budget) });
             else if (kind === 'closed')
-              entries.push({ kind, address: a, at, outcome: own(entry, 'outcome'), commits: own(entry, 'commits') });
+              entries.push({
+                kind,
+                address: a,
+                at,
+                outcome: recordOwn(entry, 'outcome'),
+                commits: recordOwn(entry, 'commits'),
+              });
             else if (kind === 'note') {
               /* opaque note bodies never enter dependency projection */
             } else throw new RecordRefusal();
@@ -71,9 +77,9 @@ export function createStoredRecordGraph(host: StoredRecordHost, options: RecordG
             scope: {
               address,
               commitLog: log.commitLog,
-              reads: own(loaded, 'reads') as RecordScope['reads'],
-              controlDeps: own(loaded, 'controlDeps') as RecordScope['controlDeps'],
-              attention: own(loaded, 'attention') as RecordScope['attention'],
+              reads: recordOwn(loaded, 'reads') as RecordScope['reads'],
+              controlDeps: recordOwn(loaded, 'controlDeps') as RecordScope['controlDeps'],
+              attention: recordOwn(loaded, 'attention') as RecordScope['attention'],
               complete: log.complete,
             },
             gaps: record.unread.length || log.gaps.length ? ['not-collected' as const] : [],
