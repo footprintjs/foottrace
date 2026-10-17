@@ -43,6 +43,26 @@ Writers record during execution. Readers query what was recorded; they do not re
 
 See the [record contract](docs/guides/record-contract.md), [time-travel contract](src/lib/time-travel/README.md), and [slice contract](src/lib/slice/README.md).
 
+## Evidence requirements — unreleased
+
+`RequirementResult` and `readRequirementResults(unknown)` on the root door carry
+one producer-issued requirement result per finding/window, the claims it
+`affects`, explicit unresolved `GapCode` reasons, check/evidence/attempt
+references and available action references. Domain details are namespaced IDs;
+raw subjects, payloads, credentials and executable actions do not enter this
+contract. The bounded reader rejects malformed or oversized batches atomically
+and returns detached frozen records. It works through the root ESM and CommonJS
+doors without loading the optional cause reader.
+
+Structural admission never authenticates a producer or establishes that a
+`satisfied` assertion is true. The host verifies current query, run, caller scope,
+artifact provenance and domain validity before rendering each claim. An unresolved
+requirement blocks only its affected conclusions; independently supported facts
+can remain. Valid-time and learned-time references are separate, and missing
+validity is unknown. Action references resolve through a host-owned closed
+registry, with permissions checked again at execution. See the [contract and
+limits](src/lib/evidence/README.md) and [reference-only example](examples/post-execution/time-travel/08-evidence-requirements.ts).
+
 ## A record that survives the run
 
 A log can also hand every entry to a sink **as it lands**, so a run that is killed still leaves its record behind. The sink sees four entries — `opened` (the base), `commit` (each bundle, after it is frozen), `note` (anything the writer wants kept beside the log, as it happens) and `closed` (how the log ended) — and `memorySink` is the reference adapter. Write your own for a file, a bucket or a table by implementing those four methods.

@@ -1,6 +1,7 @@
 import type { Adjacency, Attention, Gap, GapCode, GraphEdge, NodeId } from './types.js';
 
-import { boundedList, boundedName, EvidenceRefusal, ownData } from './admission.js';
+import { boundedList, boundedName, EvidenceRefusal, ownData } from '../evidence/admission.js';
+import { isGapCode } from '../evidence/codes.js';
 
 /** Graph-port refusals carry their code through Session; loader refusals are handled at the record boundary. */
 export class AdmissionError extends EvidenceRefusal {
@@ -63,24 +64,6 @@ const reasons = new Set([
   'OUTLIER_RECORDED',
   'BUSINESS_RULE_MATCHED',
 ]);
-const codes = new Set([
-  'not-collected',
-  'untracked-input',
-  'redacted',
-  'conservative',
-  'scope-boundary',
-  'invalid-data',
-  'unavailable',
-  'timeout',
-  'cancelled',
-  'cycle',
-  'node-limit',
-  'depth-limit',
-  'edge-limit',
-  'call-limit',
-  'truncated',
-  'strategy-failed',
-]);
 export const refs = (value: unknown): readonly string[] => graphList(value, 16, (item) => graphName(item, 512));
 export function attention(value: unknown): readonly Attention[] {
   return graphList(value, 32, (item) => {
@@ -104,7 +87,7 @@ export function gaps(value: unknown): readonly Gap[] {
     plain(item);
     const code = graphOwn(item, 'code'),
       nodeId = graphOwn(item, 'nodeId');
-    if (typeof code !== 'string' || !codes.has(code)) throw new AdmissionError();
+    if (!isGapCode(code)) throw new AdmissionError();
     return Object.freeze({
       code: code as GapCode,
       ...(nodeId === undefined ? {} : { nodeId: graphName(nodeId) }),

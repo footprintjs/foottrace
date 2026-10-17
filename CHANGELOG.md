@@ -1,6 +1,13 @@
 # Changelog
 
-## 1.2.0 — unpublished candidate
+## Unreleased
+
+### Added
+
+- Reference-only `RequirementResult`, `RequirementCheck` and shared check dispositions, plus `readRequirementResults`, fixed admission limits and typed non-echoing refusals on the root door. A result binds a requirement definition to a finding/window and its affected claims, with check/evidence/attempt/action references and separate source-valid/learned-time references. Structural admission never verifies domain truth, source authority or caller permission; a host enforces those facts before factual rendering. Empty check/action lists remain honest absence rather than invented attempts.
+- One canonical gap-code registry shared by requirements and cause readers, adding `not-checked`, `no-match`, `ambiguous`, `stale`, `incompatible`, `unsupported` and `not-permitted`. Adapter-specific detail remains a namespaced identifier. An unissued subject is not a searched absence; a lookup with no match in its scope is not proof a physical relationship does not exist. Existing honesty diagnostics and record bytes are unchanged.
+
+## 1.2.0 — 2026-10-17
 
 ### Added
 

@@ -1,3 +1,6 @@
+import type { GapCode } from '../evidence/codes.js';
+export type { GapCode } from '../evidence/codes.js';
+
 /** Names and evidence references only. No state values, messages, credentials or business payloads. */
 export type NodeId = string;
 export type AttentionKind =
@@ -26,23 +29,6 @@ export interface Attention {
   readonly evidence: readonly string[];
 }
 export type Confidence = 'complete' | 'incomplete';
-export type GapCode =
-  | 'not-collected'
-  | 'untracked-input'
-  | 'redacted'
-  | 'conservative'
-  | 'scope-boundary'
-  | 'invalid-data'
-  | 'unavailable'
-  | 'timeout'
-  | 'cancelled'
-  | 'cycle'
-  | 'node-limit'
-  | 'depth-limit'
-  | 'edge-limit'
-  | 'call-limit'
-  | 'truncated'
-  | 'strategy-failed';
 export interface Gap {
   readonly code: GapCode;
   readonly nodeId?: NodeId;

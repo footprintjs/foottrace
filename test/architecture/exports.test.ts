@@ -367,3 +367,24 @@ describe('cause reader public ownership', () => {
     expect(attentionExport && ts.isExportDeclaration(attentionExport) && attentionExport.isTypeOnly).toBe(true);
   });
 });
+
+describe('reference-only evidence requirements', () => {
+  it('keeps producer contracts and their structural reader at the root, with one named gap-code owner', () => {
+    for (const name of [
+      'RequirementResult',
+      'RequirementCheck',
+      'RequirementCheckDisposition',
+      'readRequirementResults',
+      'RequirementValidationError',
+      'REQUIREMENT_RESULT_LIMITS',
+    ]) {
+      expect(exportsByDoor['.'].has(name), name).toBe(true);
+      expect(exportsByDoor['./cause'].has(name), name).toBe(false);
+    }
+    expect(exportsByDoor['./cause'].has('GapCode')).toBe(true);
+    expect(exportsByDoor['.'].has('GapCode')).toBe(false);
+    for (const exports of Object.values(exportsByDoor))
+      for (const name of ['GAP_CODES', 'isGapCode', 'EvidenceRefusal', 'ownData', 'boundedList'])
+        expect(exports.has(name), name).toBe(false);
+  });
+});

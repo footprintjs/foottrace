@@ -136,3 +136,15 @@ export { serveRecord } from './lib/capture/freeze.js';
 
 /** Record attention types are shared with producers; the optional cause reader has its own door. */
 export type { Attention, AttentionKind } from './lib/cause/types.js';
+
+/** Reference-only requirement records: structural admission never grants authority or verifies domain truth. */
+export type {
+  RequirementCheck,
+  RequirementCheckDisposition,
+  RequirementResult,
+} from './lib/evidence/requirementTypes.js';
+export {
+  readRequirementResults,
+  RequirementValidationError,
+  REQUIREMENT_RESULT_LIMITS,
+} from './lib/evidence/requirements.js';
