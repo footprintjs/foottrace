@@ -89,3 +89,31 @@ describe('the record fence', () => {
     ).toContain('process');
   });
 });
+
+describe('the optional cause reader uses the same closed fence', () => {
+  it('accepts type-only record contracts without a runtime upward edge', () => {
+    expect(
+      probe(
+        {
+          'src/lib/cause/types.ts': 'export interface Attention { kind: string; }',
+          'src/lib/memory/types.ts':
+            "import type { Attention } from '../cause/types.js'; export interface Tree { attention?: readonly Attention[]; }",
+        },
+        { 'src/lib/cause/types.ts': 0, 'src/lib/memory/types.ts': 0 },
+      ).problems,
+    ).toEqual([]);
+  });
+
+  it('refuses an engine import in a cause adapter and a facade dependency in a guard', () => {
+    const result = probe(
+      {
+        'src/lib/cause/validation.ts': "import { value } from './explain.js'; export { value };",
+        'src/lib/cause/explain.ts': 'export const value = 1;',
+        'src/lib/cause/recordAdapter.ts': "export const load = () => import('footprintjs');",
+      },
+      { 'src/lib/cause/validation.ts': 0, 'src/lib/cause/explain.ts': 3, 'src/lib/cause/recordAdapter.ts': 3 },
+    );
+    expect(result.problems).toContain('src/lib/cause/validation.ts L0 -> src/lib/cause/explain.ts L3');
+    expect(result.problems).toContain('src/lib/cause/recordAdapter.ts: external dependency footprintjs');
+  });
+});

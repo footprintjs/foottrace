@@ -1,45 +1,99 @@
 {
   "name": "foottrace",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "type": "commonjs",
-  "description": "Execution records, replay, time travel and honest attribution — independent of the engine that produced them",
+  "description": "Execution records, replay, time travel and honest attribution \u2014 independent of the engine that produced them",
   "license": "MIT",
   "author": "Sanjay Krishna Anbalagan <sanjay@footprintjs.dev>",
-  "repository": { "type": "git", "url": "git+https://github.com/footprintjs/foottrace.git" },
-  "bugs": { "url": "https://github.com/footprintjs/foottrace/issues" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/footprintjs/foottrace.git"
+  },
+  "bugs": {
+    "url": "https://github.com/footprintjs/foottrace/issues"
+  },
   "homepage": "https://github.com/footprintjs/foottrace#readme",
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "sideEffects": false,
   "main": "./dist/index.js",
   "module": "./dist/esm/index.js",
   "types": "./dist/types/index.d.ts",
-  "files": ["dist/"],
+  "files": [
+    "dist/"
+  ],
   "exports": {
-    ".": { "import": { "types": "./dist/esm/index.d.ts", "default": "./dist/esm/index.js" }, "require": { "types": "./dist/types/index.d.ts", "default": "./dist/index.js" } },
-    "./write": { "import": { "types": "./dist/esm/write.d.ts", "default": "./dist/esm/write.js" }, "require": { "types": "./dist/types/write.d.ts", "default": "./dist/write.js" } },
-    "./paths": { "import": { "types": "./dist/esm/paths.d.ts", "default": "./dist/esm/paths.js" }, "require": { "types": "./dist/types/paths.d.ts", "default": "./dist/paths.js" } },
-    "./package.json": "./package.json"
+    ".": {
+      "import": {
+        "types": "./dist/esm/index.d.ts",
+        "default": "./dist/esm/index.js"
+      },
+      "require": {
+        "types": "./dist/types/index.d.ts",
+        "default": "./dist/index.js"
+      }
+    },
+    "./write": {
+      "import": {
+        "types": "./dist/esm/write.d.ts",
+        "default": "./dist/esm/write.js"
+      },
+      "require": {
+        "types": "./dist/types/write.d.ts",
+        "default": "./dist/write.js"
+      }
+    },
+    "./paths": {
+      "import": {
+        "types": "./dist/esm/paths.d.ts",
+        "default": "./dist/esm/paths.js"
+      },
+      "require": {
+        "types": "./dist/types/paths.d.ts",
+        "default": "./dist/paths.js"
+      }
+    },
+    "./package.json": "./package.json",
+    "./cause": {
+      "import": {
+        "types": "./dist/esm/cause.d.ts",
+        "default": "./dist/esm/cause.js"
+      }
+    }
   },
-  "typesVersions": { "*": { "write": ["dist/types/write.d.ts"], "paths": ["dist/types/paths.d.ts"] } },
+  "typesVersions": {
+    "*": {
+      "write": [
+        "dist/types/write.d.ts"
+      ],
+      "paths": [
+        "dist/types/paths.d.ts"
+      ],
+      "cause": [
+        "dist/esm/cause.d.ts"
+      ]
+    }
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json && tsc -p tsconfig.esm.json && node scripts/postbuild-esm.mjs",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "typecheck": "tsc -p tsconfig.test.json",
     "check:layering": "node scripts/check-layering.mjs",
-    "check:package": "publint && attw --pack",
+    "check:package": "publint && attw --pack --exclude-entrypoints cause --profile strict && attw --pack --entrypoints cause --profile esm-only",
     "lint": "eslint 'src/**/*.ts'",
     "format": "prettier --check 'src/**/*.ts' 'test/**/*.ts'",
     "test:examples": "tsc -p examples/tsconfig.json",
     "check": "npm run build && npm run typecheck && npm test && npm run check:layering && npm run lint && npm run format && npm run check:package && npm run test:examples"
   },
-  "dependencies": {},
   "devDependencies": {
     "@arethetypeswrong/cli": "^0.18.1",
     "@types/node": "^22.0.0",
     "@typescript-eslint/eslint-plugin": "^8.71.1",
     "@typescript-eslint/parser": "^8.71.1",
     "@vitest/coverage-v8": "4.1.11",
+    "esbuild": "0.28.2",
     "eslint": "^8.57.1",
     "fast-check": "^4.4.0",
     "prettier": "^2.8.1",

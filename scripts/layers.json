@@ -49,5 +49,15 @@
   "src/lib/time-travel/types.ts": 3,
   "src/index.ts": 4,
   "src/write.ts": 4,
-  "src/paths.ts": 4
+  "src/paths.ts": 4,
+  "src/lib/cause/types.ts": 0,
+  "src/lib/cause/validation.ts": 0,
+  "src/lib/cause/session.ts": 1,
+  "src/lib/cause/walk.ts": 2,
+  "src/lib/cause/strategies.ts": 2,
+  "src/lib/cause/explain.ts": 3,
+  "src/lib/cause/recordAdapter.ts": 3,
+  "src/lib/cause/storedRecordAdapter.ts": 3,
+  "src/cause.ts": 4,
+  "src/lib/cause/recordValidation.ts": 3
 }

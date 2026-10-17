@@ -1,4 +1,4 @@
-/** Three doors, one public name per declaration, no engine dependency. */
+/** Four doors, one public name per declaration, no engine dependency. */
 import { createRequire } from 'node:module';
 import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 
 const root = resolve(__dirname, '../..');
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
-const entries = { '.': 'index', './write': 'write', './paths': 'paths' } as const;
+const entries = { '.': 'index', './write': 'write', './paths': 'paths', './cause': 'cause' } as const;
 const config = ts.parseJsonConfigFileContent(
   ts.readConfigFile(join(root, 'tsconfig.json'), ts.sys.readFile).config,
   ts.sys,
@@ -51,7 +51,7 @@ function duplicates(doors: typeof exportsByDoor): string[][] {
 }
 
 describe('foottrace public ownership', () => {
-  it('has exactly three code doors, with matching type and runtime entry points', () => {
+  it('has four code doors, with the optional cause reader ESM-only', () => {
     expect(
       Object.keys(pkg.exports)
         .filter((key) => key !== './package.json')
@@ -59,8 +59,13 @@ describe('foottrace public ownership', () => {
     ).toEqual(Object.keys(entries).sort());
     for (const [door, name] of Object.entries(entries)) {
       expect(pkg.exports[door].import).toEqual({ types: `./dist/esm/${name}.d.ts`, default: `./dist/esm/${name}.js` });
-      expect(pkg.exports[door].require).toEqual({ types: `./dist/types/${name}.d.ts`, default: `./dist/${name}.js` });
-      if (door !== '.') expect(pkg.typesVersions['*'][door.slice(2)]).toEqual([`dist/types/${name}.d.ts`]);
+      if (door === './cause') {
+        expect(pkg.exports[door].require).toBeUndefined();
+        expect(pkg.typesVersions['*'].cause).toEqual(['dist/esm/cause.d.ts']);
+      } else {
+        expect(pkg.exports[door].require).toEqual({ types: `./dist/types/${name}.d.ts`, default: `./dist/${name}.js` });
+        if (door !== '.') expect(pkg.typesVersions['*'][door.slice(2)]).toEqual([`dist/types/${name}.d.ts`]);
+      }
     }
   });
 
@@ -127,7 +132,7 @@ describe('foottrace public ownership', () => {
   });
 
   it('has no runtime dependencies and neither installs nor loads footprintjs', () => {
-    expect(pkg.dependencies).toEqual({});
+    expect(pkg.dependencies ?? {}).toEqual({});
     expect(
       Object.keys({ ...pkg.dependencies, ...pkg.devDependencies, ...pkg.peerDependencies }).filter((name) =>
         name.startsWith('footprintjs'),
@@ -144,7 +149,7 @@ describe('foottrace public ownership', () => {
  * Every public name foottrace 1.0.3 shipped, by door — read off `main` at 1.0.3 with this file's own checker.
  * A minor keeps every one on the same door (1.1.0 only adds); only a major may drop or move one.
  */
-const SHIPPED_1_0_3: Record<keyof typeof entries, readonly string[]> = {
+const SHIPPED_1_0_3: Record<Exclude<keyof typeof entries, './cause'>, readonly string[]> = {
   '.': [
     'ArrayProvenance',
     'AttributionBasis',
@@ -328,5 +333,37 @@ describe('a minor removes nothing', () => {
     ];
     for (const exports of Object.values(exportsByDoor))
       for (const name of helpers) expect(exports.has(name), name).toBe(false);
+  });
+});
+
+describe('cause reader public ownership', () => {
+  it('keeps producer attention types at the root and reader algorithms on their optional door', () => {
+    for (const name of ['Attention', 'AttentionKind']) {
+      expect(exportsByDoor['.'].has(name), name).toBe(true);
+      expect(exportsByDoor['./cause'].has(name), name).toBe(false);
+    }
+    for (const name of [
+      'explain',
+      'attentionList',
+      'largestDrop',
+      'mostAffected',
+      'createRecordGraph',
+      'createStoredRecordGraph',
+    ]) {
+      expect(exportsByDoor['./cause'].has(name), name).toBe(true);
+      expect(exportsByDoor['.'].has(name), name).toBe(false);
+    }
+    for (const name of ['Session', 'walk', 'projectAttention', 'readOwn', 'DEFAULT_LIMITS']) {
+      for (const exports of Object.values(exportsByDoor)) expect(exports.has(name), name).toBe(false);
+    }
+    const rootSource = program.getSourceFile(join(root, 'src/index.ts'))!;
+    const attentionExport = rootSource.statements.find(
+      (node) =>
+        ts.isExportDeclaration(node) &&
+        node.moduleSpecifier &&
+        ts.isStringLiteral(node.moduleSpecifier) &&
+        node.moduleSpecifier.text === './lib/cause/types.js',
+    );
+    expect(attentionExport && ts.isExportDeclaration(attentionExport) && attentionExport.isTypeOnly).toBe(true);
   });
 });
