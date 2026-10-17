@@ -1,4 +1,4 @@
-import type { GapCode } from './codes.js';
+import type { RequirementReason } from './codes.js';
 
 /**
  * Existing check wire words; a disposition records a producer assertion, not authorization.
@@ -10,7 +10,7 @@ export type RequirementCheckDisposition = 'checked-pass' | 'checked-fail' | 'unr
 export interface RequirementCheck {
   readonly checkRef: string;
   readonly disposition: RequirementCheckDisposition;
-  readonly reason?: GapCode;
+  readonly reason?: RequirementReason;
   /** A namespaced adapter detail ID, never a message, subject or payload. */
   readonly detail?: string;
   readonly evidenceRefs: readonly string[];
@@ -43,5 +43,5 @@ interface RequirementBinding {
 export type RequirementResult = RequirementBinding &
   (
     | { readonly state: 'satisfied'; readonly reason?: never }
-    | { readonly state: 'unresolved'; readonly reason: GapCode }
+    | { readonly state: 'unresolved'; readonly reason: RequirementReason }
   );

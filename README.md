@@ -43,16 +43,21 @@ Writers record during execution. Readers query what was recorded; they do not re
 
 See the [record contract](docs/guides/record-contract.md), [time-travel contract](src/lib/time-travel/README.md), and [slice contract](src/lib/slice/README.md).
 
-## Evidence requirements — unreleased
+## Evidence requirements — 1.3.0
 
 `RequirementResult` and `readRequirementResults(unknown)` on the root door carry
 one producer-issued requirement result per finding/window, the claims it
-`affects`, explicit unresolved `GapCode` reasons, check/evidence/attempt
+`affects`, explicit unresolved `RequirementReason` codes, check/evidence/attempt
 references and available action references. Domain details are namespaced IDs;
 raw subjects, payloads, credentials and executable actions do not enter this
 contract. The bounded reader rejects malformed or oversized batches atomically
 and returns detached frozen records. It works through the root ESM and CommonJS
 doors without loading the optional cause reader.
+
+`RequirementReason` is the twelve-code domain-evidence subset of the single
+`GapCode` registry. Result and check reasons refuse trace-walk codes such as
+`cycle` and `node-limit`; generic cause gaps and typed admission errors retain
+their broader vocabulary.
 
 Structural admission never authenticates a producer or establishes that a
 `satisfied` assertion is true. The host verifies current query, run, caller scope,
@@ -134,7 +139,7 @@ Record bytes are part of the versioning promise: refactors never re-pin; a named
 MIT license. Contact: sanjay@footprintjs.dev.
 
 
-## Cause and impact — 1.2.0 candidate
+## Cause and impact — 1.2.0
 
 `foottrace/cause` reads recorded dependencies; it never reruns business code, calls a model, or accesses storage by itself. An application supplies a graph or a stored-record host. `explain(graph, nodeId)` walks the selected node's recorded data and control dependencies, identifies the earliest marked ancestors in that dependency order, and walks forward to report impact. Independent candidates remain `alternatives`; timestamps and ID order never break a causal tie. A missing or cut backward dependency withholds `rootCause`; missing evidence in either direction returns `confidence: 'incomplete'` with fixed gap codes. Confidence describes evidence coverage, not proof of a provider's internal failure.
 
@@ -218,7 +223,7 @@ Foundations: [Weiser, *Program slicing* (1981)](https://dl.acm.org/doi/10.5555/8
 | Loading only queried graph nodes/scopes | **Demand-driven, or lazy, graph traversal** |
 | Default candidate selection | **Root-cause localisation on a dependency DAG**, using the earliest anomalous ancestor |
 
-These names describe the techniques, not a claim of complete language-level instrumentation. Findings are bounded by the dependencies the producer recorded. Cause queries share one deadline and node/edge/call budget across reverse traversal, ranking and forward impact; limits, cancellation and unavailable reads become gaps. Output carries references and fixed codes, never a serialized DAG or business payload. `/cause` is ESM-only and `sideEffects: false`; its unused-import browser bundle is tested to match a bundle without the import. The package has no runtime dependencies. This is an unpublished candidate; later engine stamping, viewer integration and agent tools are separate changes.
+These names describe the techniques, not a claim of complete language-level instrumentation. Findings are bounded by the dependencies the producer recorded. Cause queries share one deadline and node/edge/call budget across reverse traversal, ranking and forward impact; limits, cancellation and unavailable reads become gaps. Output carries references and fixed codes, never a serialized DAG or business payload. `/cause` is ESM-only and `sideEffects: false`; its unused-import browser bundle is tested to match a bundle without the import. The package has no runtime dependencies. The cause reader shipped in 1.2.0; later engine stamping, viewer integration and agent tools are separate changes.
 
 Direct `graph.openScope(address, { signal })` discovery rejects with a fixed `cause: record unavailable` error and a gap `code` on failure; an unavailable scope is never reported as an empty successful log. Public `explain` and `attentionList` queries turn unavailable reads into bounded incomplete findings.
 

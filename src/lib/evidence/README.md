@@ -5,12 +5,13 @@ and reference-only requirement records. It imports no engine, graph walker,
 storage host, provider or platform runtime. Cause readers consume this leaf;
 root requirement imports do not load the optional cause algorithms.
 
-`RequirementResult`, `RequirementCheck`, `RequirementCheckDisposition`,
+`RequirementResult`, `RequirementCheck`, `RequirementCheckDisposition`, `RequirementReason`,
 `readRequirementResults`, `RequirementValidationError` and
 `REQUIREMENT_RESULT_LIMITS` have one public door: `foottrace`. `GapCode` retains
-its existing named type export on `foottrace/cause`; a root consumer can use
-`Extract<RequirementResult, { state: 'unresolved' }>['reason']` without a runtime
-cause import. The registry and admission helpers stay private.
+its existing named type export on `foottrace/cause`. `RequirementReason` is the
+narrower producer-facing subset, derived from membership in that same registry;
+neither the type nor its reader requires a runtime cause import. The registry
+and admission helpers stay private.
 
 ## Structural law
 
@@ -72,20 +73,25 @@ permission to invoke it; the host checks scope and permission at execution.
 
 ## One reason vocabulary, distinct meanings
 
-Trace-reader limits and domain-required-evidence gaps use the same `GapCode`
-registry without pretending to have the same origin. Existing `HonestyCode`
-reader diagnostics remain unchanged. An adapter may retain its more specific
-meaning in a namespaced `detail` and reference the actual check/attempt evidence.
+The `RequirementReason` subset contains exactly the twelve domain-evidence codes
+shown below. Both result and check reasons use this subset; traversal/admission
+codes such as `cycle`, `node-limit`, `edge-limit`, `call-limit` and
+`strategy-failed` are refused in these fields. Generic cause gaps and
+`RequirementValidationError.code` retain the broader `GapCode` vocabulary.
+Membership and both runtime predicates derive from the one canonical registry.
+Existing `HonestyCode` reader diagnostics remain unchanged. An adapter may retain
+its more specific meaning in a namespaced `detail` and reference the actual
+check/attempt evidence.
 
 | Code | Producer meaning; never inferred by structural admission |
 | --- | --- |
 | `not-checked` | Required proof has not been checked; do not invent an attempt. |
 | `not-collected` | The required evidence was not collected. |
-| `no-match` | A real bounded lookup found no match in its checked scope; no proof that a physical relationship does not exist. |
+| `no-match` | A completed bounded query or lookup found no subject/match in its checked scope; no proof that a physical relationship does not exist. |
 | `ambiguous` | The checked evidence does not select a single supported result. |
 | `stale` | The producer's domain policy established staleness. |
 | `incompatible` | The evidence does not fit the requirement. |
-| `unavailable`, `timeout`, `cancelled` | Evidence could not be read, with the actual read outcome retained. |
+| `unavailable`, `timeout` | Evidence could not be read, with the actual read outcome retained. |
 | `invalid-data` | Evidence failed admission or a domain check. |
 | `unsupported` | This evidence/check is not supported by the producer. |
 | `not-permitted` | Policy denied a required check or evidence read. |

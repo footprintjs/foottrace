@@ -42,6 +42,8 @@ const NOT_HONESTY: Record<string, string> = {
   MoveRefusal: 'why a cursor move did not happen (clamped, miss, empty) — navigation, not a gap in the recording',
   RequirementCheckDisposition:
     'how a producer says a check ended (checked-pass / checked-fail / unreachable / not-applicable), not the reason for missing evidence; unresolved reasons use the canonical GapCode registry',
+  RequirementReason:
+    'producer-asserted domain evidence reasons, derived from the single GapCode registry; not a second vocabulary of trace-reader capture limits',
   StopKind: 'what a time-travel stop is (its place on the axis) — structure, not what a reader cannot see',
   UntrackedSource:
     "the VALUES `CausalNode.incompleteSources` carries (args, env, silent); the signal itself is registered as 'incomplete-sources'",

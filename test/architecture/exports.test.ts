@@ -374,6 +374,7 @@ describe('reference-only evidence requirements', () => {
       'RequirementResult',
       'RequirementCheck',
       'RequirementCheckDisposition',
+      'RequirementReason',
       'readRequirementResults',
       'RequirementValidationError',
       'REQUIREMENT_RESULT_LIMITS',
@@ -384,7 +385,7 @@ describe('reference-only evidence requirements', () => {
     expect(exportsByDoor['./cause'].has('GapCode')).toBe(true);
     expect(exportsByDoor['.'].has('GapCode')).toBe(false);
     for (const exports of Object.values(exportsByDoor))
-      for (const name of ['GAP_CODES', 'isGapCode', 'EvidenceRefusal', 'ownData', 'boundedList'])
+      for (const name of ['GAP_CODES', 'isGapCode', 'isRequirementReason', 'EvidenceRefusal', 'ownData', 'boundedList'])
         expect(exports.has(name), name).toBe(false);
   });
 });

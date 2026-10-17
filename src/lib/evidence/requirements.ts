@@ -1,5 +1,5 @@
 import { boundedList, boundedName, EvidenceRefusal, ownData, spendFields } from './admission.js';
-import { isGapCode, type GapCode } from './codes.js';
+import { isRequirementReason, type GapCode, type RequirementReason } from './codes.js';
 import type { RequirementCheck, RequirementCheckDisposition, RequirementResult } from './requirementTypes.js';
 
 /** Fixed per-call ceilings; characters are UTF-16 code units, not serialized transport bytes. */
@@ -121,8 +121,8 @@ function refs(value: unknown, budget: Budget, maximum: number = REQUIREMENT_RESU
     (item) => item,
   );
 }
-function reason(value: unknown): GapCode {
-  if (!isGapCode(value)) throw refuse();
+function reason(value: unknown): RequirementReason {
+  if (!isRequirementReason(value)) throw refuse();
   return value;
 }
 function optionalName(value: unknown, key: string, budget: Budget): string | undefined {

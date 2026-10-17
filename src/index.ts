@@ -138,6 +138,7 @@ export { serveRecord } from './lib/capture/freeze.js';
 export type { Attention, AttentionKind } from './lib/cause/types.js';
 
 /** Reference-only requirement records: structural admission never grants authority or verifies domain truth. */
+export type { RequirementReason } from './lib/evidence/codes.js';
 export type {
   RequirementCheck,
   RequirementCheckDisposition,
