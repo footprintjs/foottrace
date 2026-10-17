@@ -1,8 +1,11 @@
 import type { Adjacency, Attention, Gap, GapCode, GraphEdge, NodeId } from './types.js';
 
-export class AdmissionError extends Error {
+import { boundedList, boundedName, EvidenceRefusal, ownData } from './admission.js';
+
+/** Graph-port refusals carry their code through Session; loader refusals are handled at the record boundary. */
+export class AdmissionError extends EvidenceRefusal {
   constructor(readonly code: GapCode = 'invalid-data') {
-    super('Invalid cause evidence');
+    super(code, 'Invalid cause evidence');
   }
 }
 /**
@@ -24,35 +27,30 @@ export function observePromise(
   }
   return true;
 }
+const refuseGraph = (code?: GapCode): AdmissionError => new AdmissionError(code);
+const graphDescriptors = { translateTrapErrors: false, requireOwnValue: false };
 export function own(value: unknown, key: string): unknown {
-  if (!value || typeof value !== 'object') throw new AdmissionError();
-  const descriptor = Object.getOwnPropertyDescriptor(value, key);
-  if (!descriptor) return undefined;
-  if (!('value' in descriptor)) throw new AdmissionError();
-  return descriptor.value;
+  return ownData(value, key, refuseGraph, graphDescriptors);
 }
 export function plain(value: unknown): void {
   if (!value || typeof value !== 'object' || ![Object.prototype, null].includes(Object.getPrototypeOf(value)))
     throw new AdmissionError();
 }
-export function name(value: unknown, max = 2048): string {
-  if (typeof value !== 'string' || !value.length || value.length > max || /[\u0000-\u001f\u007f-\u009f]/.test(value))
-    throw new AdmissionError();
-  return value;
+export function name(value: unknown, maximum = 2048): string {
+  return boundedName(value, maximum, refuseGraph);
 }
 export function list<T>(
   value: unknown,
-  max: number,
+  maximum: number,
   read: (item: unknown) => T,
   overflow: GapCode = 'invalid-data',
 ): readonly T[] {
-  if (!Array.isArray(value)) throw new AdmissionError();
-  const length = own(value, 'length');
-  if (typeof length !== 'number' || !Number.isSafeInteger(length) || length < 0) throw new AdmissionError();
-  if (length > max) throw new AdmissionError(overflow);
-  const result: T[] = [];
-  for (let i = 0; i < length; i++) result.push(read(own(value, String(i))));
-  return Object.freeze(result);
+  return boundedList(value, maximum, read, {
+    refuse: refuseGraph,
+    overflow,
+    freeze: true,
+    descriptors: graphDescriptors,
+  });
 }
 const reasons = new Set([
   'ERROR_RECORDED',

@@ -3,46 +3,34 @@ import type { LogAddress } from '../memory/eventPosition.js';
 import type { CommitBundle } from '../memory/types.js';
 import type { GapCode } from './types.js';
 import { attention as marksOf, AdmissionError, observePromise } from './validation.js';
+import { boundedList, boundedName, EvidenceRefusal, ownData, spendFields } from './admission.js';
+
 export { marksOf };
-export class RecordRefusal extends Error {
+
+/** Loader refusals stay distinct from graph-port refusals so a failed host load keeps its original classification. */
+export class RecordRefusal extends EvidenceRefusal {
   constructor(readonly code: GapCode = 'invalid-data') {
-    super('cause: record unavailable');
+    super(code, 'cause: record unavailable');
   }
 }
+const refuseRecord = (code?: GapCode): RecordRefusal => new RecordRefusal(code);
+const recordDescriptors = { translateTrapErrors: true, requireOwnValue: true };
 export function own(value: unknown, key: string): unknown {
-  if (value === null || typeof value !== 'object') throw new RecordRefusal();
-  let d: PropertyDescriptor | undefined;
-  try {
-    d = Object.getOwnPropertyDescriptor(value, key);
-  } catch {
-    throw new RecordRefusal();
-  }
-  if (!d) return undefined;
-  if (!Object.hasOwn(d, 'value')) throw new RecordRefusal();
-  return d.value;
+  return ownData(value, key, refuseRecord, recordDescriptors);
 }
-export function names(value: unknown, max = 128, path = false): string[] {
-  const rows = list(value, max);
-  return rows.map((v) => name(v, path));
+export function names(value: unknown, maximum = 128, path = false): string[] {
+  return list(value, maximum).map((item) => name(item, path));
 }
 export function name(value: unknown, path = false): string {
-  if (
-    typeof value !== 'string' ||
-    !value.length ||
-    value.length > 1024 ||
-    (path ? /[\u0000-\u001e\u007f-\u009f]/ : /[\u0000-\u001f\u007f-\u009f]/).test(value)
-  )
-    throw new RecordRefusal();
-  return value;
+  return boundedName(value, 1024, refuseRecord, path);
 }
-export function list(value: unknown, max: number): readonly unknown[] {
-  if (!Array.isArray(value)) throw new RecordRefusal();
-  const length = own(value, 'length');
-  if (!Number.isSafeInteger(length) || (length as number) < 0) throw new RecordRefusal();
-  if ((length as number) > max) throw new RecordRefusal('node-limit');
-  const rows: unknown[] = [];
-  for (let i = 0; i < (length as number); i++) rows.push(own(value, String(i)));
-  return rows;
+export function list(value: unknown, maximum: number): readonly unknown[] {
+  return boundedList(value, maximum, (item) => item, {
+    refuse: refuseRecord,
+    overflow: 'node-limit',
+    freeze: false,
+    descriptors: recordDescriptors,
+  });
 }
 export function addressOf(value: unknown): LogAddress {
   const logRunId = name(own(value, 'logRunId')),
@@ -51,15 +39,14 @@ export function addressOf(value: unknown): LogAddress {
   return Object.freeze({ logRunId, drillPath: Object.freeze(drillPath) });
 }
 export function spend(budget: { left: number }, count: number): void {
-  budget.left -= count;
-  if (budget.left < 0) throw new RecordRefusal('node-limit');
+  spendFields(budget, count, refuseRecord);
 }
 export const addressKey = (a: LogAddress): string => JSON.stringify([a.logRunId, ...a.drillPath]);
 /** Iterative bounded copy: data descriptors only, no getters/toJSON/prototypes or opaque class instances. */
 export function dataCopy(value: unknown, budget: { left: number }): unknown {
   const leaf = (v: unknown): boolean => v === null || typeof v !== 'object';
   const check = (v: unknown): void => {
-    if (--budget.left < 0) throw new RecordRefusal('node-limit');
+    spend(budget, 1);
     if (typeof v === 'function' || typeof v === 'symbol' || (typeof v === 'string' && v.length > 65536))
       throw new RecordRefusal();
   };
