@@ -50,7 +50,11 @@ const expected = {
 describe('the optional cause package door', () => {
   it('checks every public door with one strict package profile and no resolution exceptions', () => {
     const commands = pkg.scripts['check:package'].split('&&').map((command: string) => command.trim().split(/\s+/));
-    expect(commands).toEqual([['publint'], ['attw', '--pack', '--profile', 'strict']]);
+    expect(commands).toEqual([
+      ['publint'],
+      ['attw', '--pack', '--profile', 'strict'],
+      ['tsc', '-p', 'test/consumer/cause/tsconfig.json'],
+    ]);
     expect(pkg.scripts['check:package']).not.toMatch(/--(?:ignore|exclude-entrypoints|entrypoints)(?:\s|=)/);
   });
 
@@ -83,39 +87,36 @@ describe('the optional cause package door', () => {
     expect(JSON.parse(output)).toEqual(expected);
   });
 
+  it('requires strict public consumers for both formats in the package gate', () => {
+    const directory = resolve(root, 'test/consumer/cause');
+    const input = ts.readConfigFile(resolve(directory, 'tsconfig.json'), ts.sys.readFile);
+    expect(input.error).toBeUndefined();
+    const config = ts.parseJsonConfigFileContent(input.config, ts.sys, directory);
+    expect(config.errors).toEqual([]);
+    expect(config.fileNames.sort()).toEqual(['consumer.cts', 'consumer.mts'].map((name) => resolve(directory, name)));
+    expect(config.options).toMatchObject({
+      strict: true,
+      skipLibCheck: false,
+      noEmit: true,
+      module: ts.ModuleKind.NodeNext,
+      moduleResolution: ts.ModuleResolutionKind.NodeNext,
+    });
+    expect(config.options.paths).toBeUndefined();
+    expect(config.options.types).toEqual([]);
+  });
+
   it.each(['cts', 'mts'] as const)(
-    'resolves public value and shared type imports from a strict .%s consumer',
+    'resolves the actual public .%s declaration without compiling standard libraries',
     (extension) => {
-      const filename = resolve(root, '__cause_consumer__.' + extension);
-      const source = `import { explain, type CauseGraph, type CauseResult } from 'foottrace/cause';
-      import type { Attention } from 'foottrace';
-      const mark: Attention = { kind: 'error', reason: 'ERROR_RECORDED', evidence: ['proof:source'] };
-      declare const graph: CauseGraph;
-      const result: Promise<CauseResult> = explain(graph, 'source');
-      void mark; void result;`;
+      const filename = resolve(root, 'test/consumer/cause/consumer.' + extension);
       const options: ts.CompilerOptions = {
-        target: ts.ScriptTarget.ES2022,
         module: ts.ModuleKind.NodeNext,
         moduleResolution: ts.ModuleResolutionKind.NodeNext,
-        strict: true,
-        noEmit: true,
-        skipLibCheck: false,
-        types: [],
       };
-      const host = ts.createCompilerHost(options);
-      const readSource = host.getSourceFile.bind(host);
-      host.getSourceFile = (name, language, onError, createNew) =>
-        name === filename
-          ? ts.createSourceFile(name, source, language, true)
-          : readSource(name, language, onError, createNew);
-      const program = ts.createProgram([filename], options, host);
-      expect(
-        ts
-          .getPreEmitDiagnostics(program)
-          .map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n')),
-      ).toEqual([]);
+      const mode = extension === 'cts' ? ts.ModuleKind.CommonJS : ts.ModuleKind.ESNext;
+      const resolved = ts.resolveModuleName('foottrace/cause', filename, options, ts.sys, undefined, undefined, mode);
       const declaration = resolve(root, extension === 'cts' ? 'dist/types/cause.d.ts' : 'dist/esm/cause.d.ts');
-      expect(program.getSourceFile(declaration)).toBeDefined();
+      expect(resolved.resolvedModule?.resolvedFileName).toBe(declaration);
     },
   );
 
