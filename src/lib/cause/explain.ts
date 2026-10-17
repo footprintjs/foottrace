@@ -11,6 +11,7 @@ import type {
 import { Session } from './session.js';
 import { frontier, pathTo, walk } from './walk.js';
 import { gap, name, nodeIds, own, uniqueGaps } from './validation.js';
+import { admitRanking } from './ranking.js';
 
 /** Read-only deterministic cause localisation and impact. No inference from timestamps or structural ancestry. */
 export async function explain(graph: CauseGraph, nodeId: NodeId, options: ExplainOptions = {}): Promise<CauseResult> {
@@ -27,12 +28,11 @@ export async function explain(graph: CauseGraph, nodeId: NodeId, options: Explai
       const selection = await session.invoke(
         undefined,
         () => rank(Object.freeze(eligible), session.context),
-        (raw) => {
-          const ids = nodeIds(raw, session.limits.maxNodes),
-            allowed = new Set(eligible.map((item) => item.nodeId));
-          if (ids.some((id) => !allowed.has(id)) || new Set(ids).size !== ids.length) throw new TypeError();
-          return ids;
-        },
+        (raw) =>
+          admitRanking(raw, new Set(eligible.map((item) => item.nodeId)), {
+            exactPermutation: false,
+            maximum: session.limits.maxNodes,
+          }),
       );
       if (selection.gap) missing.push(selection.gap, gap('strategy-failed'));
       else candidates = [...(selection.value ?? [])];
@@ -49,13 +49,11 @@ export async function explain(graph: CauseGraph, nodeId: NodeId, options: Explai
       const selection = await session.invoke(
         undefined,
         () => rankImpact(impactNodes, session.context),
-        (raw) => {
-          const ids = nodeIds(raw, session.limits.maxNodes),
-            allowed = new Set(impactNodes);
-          if (ids.length !== allowed.size || new Set(ids).size !== ids.length || ids.some((id) => !allowed.has(id)))
-            throw new TypeError();
-          return ids;
-        },
+        (raw) =>
+          admitRanking(raw, new Set(impactNodes), {
+            exactPermutation: true,
+            maximum: session.limits.maxNodes,
+          }),
       );
       if (selection.gap) impactGaps.push(selection.gap, gap('strategy-failed'));
       else impactNodes = selection.value ?? impactNodes;
