@@ -1,4 +1,4 @@
-import type { GapCode } from './types.js';
+import type { GapCode } from './codes.js';
 
 /** One refusal representation; subclasses preserve the graph-port and record-loader boundaries. */
 export class EvidenceRefusal extends Error {
@@ -51,12 +51,25 @@ export function boundedList<T>(
     readonly overflow: GapCode;
     readonly freeze: boolean;
     readonly descriptors: DescriptorPolicy;
+    /** Optional prior shape inspection must refer to the same admitted length. */
+    readonly expectedLength?: number;
+    /** New boundaries may normalize revoked-array errors without changing existing reader policy. */
+    readonly translateArrayErrors?: boolean;
   },
 ): readonly T[] {
   const { refuse, overflow, freeze, descriptors } = options;
-  if (!Array.isArray(value)) throw refuse();
+  let array: boolean;
+  if (options.translateArrayErrors) {
+    try {
+      array = Array.isArray(value);
+    } catch {
+      throw refuse();
+    }
+  } else array = Array.isArray(value);
+  if (!array) throw refuse();
   const length = ownData(value, 'length', refuse, descriptors);
   if (typeof length !== 'number' || !Number.isSafeInteger(length) || length < 0) throw refuse();
+  if (options.expectedLength !== undefined && length !== options.expectedLength) throw refuse();
   if (length > maximum) throw refuse(overflow);
   const result: T[] = [];
   for (let index = 0; index < length; index++) result.push(read(ownData(value, String(index), refuse, descriptors)));

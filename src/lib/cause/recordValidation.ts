@@ -3,7 +3,7 @@ import type { LogAddress } from '../memory/eventPosition.js';
 import type { CommitBundle } from '../memory/types.js';
 import type { GapCode } from './types.js';
 import { attention as marksOf, AdmissionError, observePromise } from './validation.js';
-import { boundedList, boundedName, EvidenceRefusal, ownData, spendFields } from './admission.js';
+import { boundedList, boundedName, EvidenceRefusal, ownData, spendFields } from '../evidence/admission.js';
 
 export { marksOf };
 
