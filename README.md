@@ -13,7 +13,7 @@ Foottrace owns the record layer used by footprintjs 10. Older stored records rem
 | `foottrace` | Record types, runtime and attempt IDs, replay, time-travel cursors, causal and variable slices, honesty codes, the stored-record reader |
 | `foottrace/write` | `SharedMemory`, `EventLog`, `RecordFrame`, encoding and write types, writer-owned freezing, the record sink port and `memorySink` |
 | `foottrace/paths` | Record-path encoding/decoding, nested access and safe diagnostic writes |
-| `foottrace/cause` (ESM) | Optional bounded attention, cause and impact queries; in-memory and lazily loaded stored-record adapters |
+| `foottrace/cause` | Optional bounded attention, cause and impact queries; in-memory and lazily loaded stored-record adapters |
 
 Every declaration has one public entry point. Producer-facing `Attention` and `AttentionKind` are type-only root exports; the cause algorithms live only on `/cause`. Existing root, `/write` and `/paths` imports retain their ESM and CommonJS doors. There are no public deep imports or `/testing` entry point. FootPrint's engine, observer channels, recorders and stores remain in `footprintjs`.
 
@@ -125,7 +125,7 @@ The parser reads from the right, so a stage ID may contain `@` or `.` and no cha
 
 ## Compatibility and development
 
-Node.js 22 or newer; develop with Node.js 24 and npm 11. Both CommonJS and ESM are provided. Browser-capable source uses no Node runtime APIs. Use one module format consistently in an application; CJS and ESM have separate module instances.
+Node.js 22 or newer; develop with Node.js 24 and npm 11. Both CommonJS and ESM are provided. Browser-capable source uses no Node runtime APIs. Use one module format consistently in an application; CJS and ESM have separate module instances. For a documented refusal such as `RequirementValidationError`, inspect the known operation's fixed `code` (and fixed `message` when distinguishing error kinds), rather than using `instanceof` across module formats.
 
 ```sh
 npm ci
@@ -145,7 +145,7 @@ MIT license. Contact: sanjay@footprintjs.dev.
 
 Enable `writeProvenance: 'reads-prefix'` in the producer for precise per-write queries. Stage-level capture remains conservative, and a reader cannot restore missing provenance in old records.
 
-The `/cause` door is ESM-only. CommonJS hosts must preserve native `import('foottrace/cause')` in their compiled code; `require('foottrace/cause')` is not exported.
+The `/cause` door provides typed ESM and CommonJS exports. Use `import { explain } from 'foottrace/cause'` in ESM or `const { explain } = require('foottrace/cause')` in CommonJS. Native `import('foottrace/cause')` remains available for lazy loading.
 
 ```ts
 import type { Attention } from 'foottrace';
