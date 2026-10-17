@@ -125,7 +125,7 @@ The parser reads from the right, so a stage ID may contain `@` or `.` and no cha
 
 ## Compatibility and development
 
-Node.js 22 or newer; develop with Node.js 24 and npm 11. Both CommonJS and ESM are provided. Browser-capable source uses no Node runtime APIs. Use one module format consistently in an application; CJS and ESM have separate module instances.
+Node.js 22 or newer; develop with Node.js 24 and npm 11. Both CommonJS and ESM are provided. Browser-capable source uses no Node runtime APIs. Use one module format consistently in an application; CJS and ESM have separate module instances. For a documented refusal such as `RequirementValidationError`, inspect the known operation's fixed `code` (and fixed `message` when distinguishing error kinds), rather than using `instanceof` across module formats.
 
 ```sh
 npm ci
