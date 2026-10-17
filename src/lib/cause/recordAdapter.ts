@@ -1,9 +1,9 @@
 import type { LogAddress } from '../memory/eventPosition.js';
 import { childrenForRecordNode } from './recordChildren.js';
 import { attentionForRecordNode, gapForRecordFailure } from './recordCoverage.js';
-import { nodeIdFor, resolveRecordNode } from './recordIdentity.js';
+import { nodeIdFor } from './recordIdentity.js';
 import { createRecordScopeLoader, openRecordScope } from './recordLoading.js';
-import { inspectRecordNode } from './recordParents.js';
+import { createRecordQuery, whenResolved } from './recordQuery.js';
 import { recordOptions } from './recordScope.js';
 import type {
   RecordCauseGraph,
@@ -12,8 +12,11 @@ import type {
   RecordNode,
   RecordScope,
 } from './recordTypes.js';
-import { addressKey, addressOf, list, own, RecordRefusal } from './recordValidation.js';
-import type { GraphContext, NodeId } from './types.js';
+import { addressKey, addressOf, recordList, recordOwn, RecordRefusal } from './recordValidation.js';
+import type { Adjacency, GraphContext, NodeId } from './types.js';
+
+/** Give each failed port its own incomplete page rather than sharing a mutable edge array. */
+const unavailableAdjacency = (): Adjacency => ({ edges: [], complete: false });
 
 export type {
   RecordCauseGraph,
@@ -31,30 +34,33 @@ export function createLazyRecordGraph(
 ): RecordCauseGraph {
   const limits = recordOptions(options),
     loader = createRecordScopeLoader(load, limits);
-  const resolve = (nodeId: NodeId, context: GraphContext) => resolveRecordNode(nodeId, context, loader);
+  const query = createRecordQuery(loader, limits.maxEdges);
   return Object.freeze({
     nodeId: (address: LogAddress, node: RecordNode) => nodeIdFor(address, node),
     openScope: (address: LogAddress, context: GraphContext) => openRecordScope(address, context, loader),
     async parents(nodeId: NodeId, context: GraphContext) {
-      const node = await resolve(nodeId, context);
-      return 'failure' in node
-        ? { edges: [], complete: false }
-        : inspectRecordNode(node, limits.maxEdges, loader.extraGapCodes(node.scope)).adjacency;
+      return whenResolved(
+        await query.resolve(nodeId, context),
+        (node) => query.inspect(node, context).adjacency,
+        unavailableAdjacency,
+      );
     },
     async gaps(nodeId: NodeId, context: GraphContext) {
-      const node = await resolve(nodeId, context);
-      return 'failure' in node
-        ? gapForRecordFailure(node.failure)
-        : inspectRecordNode(node, limits.maxEdges, loader.extraGapCodes(node.scope)).gaps;
+      return whenResolved(
+        await query.resolve(nodeId, context),
+        (node) => query.inspect(node, context).gaps,
+        (failure) => gapForRecordFailure(failure.failure),
+      );
     },
     async attention(nodeId: NodeId, context: GraphContext) {
-      return attentionForRecordNode(await resolve(nodeId, context));
+      return whenResolved(await query.resolve(nodeId, context), attentionForRecordNode, () => []);
     },
     async children(nodeId: NodeId, context: GraphContext) {
-      const node = await resolve(nodeId, context);
-      return 'failure' in node
-        ? { edges: [], complete: false }
-        : childrenForRecordNode(node, limits.maxEdges, loader.extraGapCodes(node.scope));
+      return whenResolved(
+        await query.resolve(nodeId, context),
+        (node) => childrenForRecordNode(node, limits.maxEdges, query.inspect(node, context)),
+        unavailableAdjacency,
+      );
     },
   });
 }
@@ -63,8 +69,9 @@ export function createLazyRecordGraph(
 export function createRecordGraph(scopes: readonly RecordScope[], options: RecordGraphOptions = {}): RecordCauseGraph {
   const limits = recordOptions(options);
   return createLazyRecordGraph((address) => {
-    for (const raw of list(scopes, limits.maxScopes)) {
-      if (addressKey(addressOf(own(raw, 'address'))) === addressKey(address)) return { scope: raw as RecordScope };
+    for (const raw of recordList(scopes, limits.maxScopes)) {
+      if (addressKey(addressOf(recordOwn(raw, 'address'))) === addressKey(address))
+        return { scope: raw as RecordScope };
     }
     throw new RecordRefusal('unavailable');
   }, limits);

@@ -3,13 +3,7 @@ import { relation } from '../memory/keyPaths.js';
 import { forwardSliceForKey } from '../slice/forwardSliceForKey.js';
 import { collectControlChildCoverage } from './recordControl.js';
 import { readKeysForStage } from './recordScope.js';
-import type {
-  AddRecordGap,
-  PreparedRecordScope,
-  RecordIdentity,
-  RecordLoadFailure,
-  ResolvedRecordNode,
-} from './recordTypes.js';
+import type { AddRecordGap, PreparedRecordScope, RecordIdentity, ResolvedRecordNode } from './recordTypes.js';
 import type { Attention, Gap } from './types.js';
 
 /** Preserve first-observed coverage order while collapsing repeated codes from different evidence paths. */
@@ -29,9 +23,9 @@ export function gapForRecordFailure(code: Gap['code']): readonly Gap[] {
 }
 
 /** Return captured mark references without treating an omitted attention map as collected evidence. */
-export function attentionForRecordNode(node: ResolvedRecordNode | RecordLoadFailure): readonly Attention[] {
+export function attentionForRecordNode(node: ResolvedRecordNode): readonly Attention[] {
   // An omitted map stays unknown coverage; it is never replaced by an affirmative empty map.
-  return 'failure' in node ? [] : node.scope.marks?.get(node.identity.runtimeStageId) ?? [];
+  return node.scope.marks?.get(node.identity.runtimeStageId) ?? [];
 }
 
 /** Emit host and capture gaps before query-derived gaps so existing evidence order stays stable. */

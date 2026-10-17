@@ -10,18 +10,18 @@ import type {
 } from './types.js';
 import { Session } from './session.js';
 import { frontier, pathTo, walk } from './walk.js';
-import { gap, name, nodeIds, own, uniqueGaps } from './validation.js';
+import { gap, graphName, nodeIds, graphOwn, uniqueGaps } from './validation.js';
 import { admitRanking } from './ranking.js';
 
 /** Read-only deterministic cause localisation and impact. No inference from timestamps or structural ancestry. */
 export async function explain(graph: CauseGraph, nodeId: NodeId, options: ExplainOptions = {}): Promise<CauseResult> {
-  name(nodeId);
+  graphName(nodeId);
   const session = new Session(graph, options);
   try {
     const backward = await walk(session, [nodeId], 'parents');
     const missing: Gap[] = [...backward.gaps];
     let candidates = frontier(backward).map((item) => item.nodeId);
-    const rank = own(options, 'rankRoots');
+    const rank = graphOwn(options, 'rankRoots');
     if (rank !== undefined) {
       if (typeof rank !== 'function') throw new TypeError('CAUSE_CONFIGURATION_INVALID');
       const eligible = backward.marked.filter((item) => item.attention.some((mark) => mark.kind !== 'not-collected'));
@@ -44,7 +44,7 @@ export async function explain(graph: CauseGraph, nodeId: NodeId, options: Explai
     const forward = await walk(session, [nodeId], 'children');
     let impactNodes = Object.freeze(forward.nodes.filter((id) => id !== nodeId));
     const impactGaps = [...forward.gaps],
-      rankImpact = own(options, 'rankImpact');
+      rankImpact = graphOwn(options, 'rankImpact');
     if (typeof rankImpact === 'function') {
       const selection = await session.invoke(
         undefined,
@@ -89,16 +89,16 @@ export async function attentionList(
   try {
     let seeds: readonly NodeId[] = [],
       missing: Gap[] = [];
-    const requested = own(options, 'nodeIds');
+    const requested = graphOwn(options, 'nodeIds');
     const admitSeeds = (raw: unknown): readonly NodeId[] => {
       // Only inspect the bounded prefix; the unread tail is explicitly incomplete.
       if (!Array.isArray(raw)) return nodeIds(raw, session.limits.maxNodes);
-      const length = own(raw, 'length');
+      const length = graphOwn(raw, 'length');
       if (typeof length !== 'number' || !Number.isSafeInteger(length) || length < 0)
         return nodeIds(raw, session.limits.maxNodes);
       if (length > session.limits.maxNodes) missing.push(gap('node-limit'));
       const prefix: unknown[] = [];
-      for (let i = 0; i < Math.min(length, session.limits.maxNodes); i++) prefix.push(own(raw, String(i)));
+      for (let i = 0; i < Math.min(length, session.limits.maxNodes); i++) prefix.push(graphOwn(raw, String(i)));
       return nodeIds(prefix, session.limits.maxNodes);
     };
     if (requested !== undefined) {

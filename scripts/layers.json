@@ -64,10 +64,12 @@
   "src/lib/cause/ranking.ts": 0,
   "src/lib/cause/recordTypes.ts": 3,
   "src/lib/cause/recordCoverage.ts": 3,
-  "src/lib/cause/recordParents.ts": 3,
+  "src/lib/cause/recordInspection.ts": 3,
   "src/lib/cause/recordChildren.ts": 3,
   "src/lib/cause/recordControl.ts": 3,
   "src/lib/cause/recordIdentity.ts": 3,
   "src/lib/cause/recordScope.ts": 3,
-  "src/lib/cause/recordLoading.ts": 3
+  "src/lib/cause/recordLoading.ts": 3,
+  "src/lib/cause/queryMemo.ts": 0,
+  "src/lib/cause/recordQuery.ts": 3
 }

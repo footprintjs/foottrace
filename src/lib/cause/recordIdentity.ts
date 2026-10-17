@@ -8,7 +8,7 @@ import type {
   ResolvedRecordNode,
 } from './recordTypes.js';
 import { readKeysForStage } from './recordScope.js';
-import { addressOf, name, own, RecordRefusal } from './recordValidation.js';
+import { addressOf, recordName, recordOwn, RecordRefusal } from './recordValidation.js';
 
 /** Parse only the bounded identity encoding; payload fields never become graph addresses. */
 export function readNodeIdentity(nodeId: string): RecordIdentity {
@@ -19,11 +19,11 @@ export function readNodeIdentity(nodeId: string): RecordIdentity {
   } catch {
     throw new RecordRefusal();
   }
-  const address = addressOf(own(fields, 'address')),
-    runtimeStageId = name(own(fields, 'runtimeStageId')),
-    commitIndex = own(fields, 'commitIdx'),
-    key = own(fields, 'key'),
-    read = own(fields, 'read');
+  const address = addressOf(recordOwn(fields, 'address')),
+    runtimeStageId = recordName(recordOwn(fields, 'runtimeStageId')),
+    commitIndex = recordOwn(fields, 'commitIdx'),
+    key = recordOwn(fields, 'key'),
+    read = recordOwn(fields, 'read');
   if (commitIndex !== undefined && (!Number.isSafeInteger(commitIndex) || (commitIndex as number) < 0))
     throw new RecordRefusal();
   if ((read !== undefined && read !== true) || (read === true && key === undefined)) throw new RecordRefusal();
@@ -31,7 +31,7 @@ export function readNodeIdentity(nodeId: string): RecordIdentity {
     address,
     runtimeStageId,
     ...(commitIndex === undefined ? {} : { commitIdx: commitIndex as number }),
-    ...(key === undefined ? {} : { key: name(key, true) }),
+    ...(key === undefined ? {} : { key: recordName(key, true) }),
     ...(read === true ? { read: true as const } : {}),
   };
 }
@@ -40,9 +40,9 @@ export function readNodeIdentity(nodeId: string): RecordIdentity {
 export function nodeIdFor(addressInput: LogAddress, node: RecordNode, read?: true): NodeId {
   try {
     const address = addressOf(addressInput),
-      runtimeStageId = name(own(node, 'runtimeStageId')),
-      commitIndex = own(node, 'commitIdx'),
-      key = own(node, 'key');
+      runtimeStageId = recordName(recordOwn(node, 'runtimeStageId')),
+      commitIndex = recordOwn(node, 'commitIdx'),
+      key = recordOwn(node, 'key');
     if (commitIndex !== undefined && (!Number.isSafeInteger(commitIndex) || (commitIndex as number) < 0))
       throw new RecordRefusal();
     const nodeId =
@@ -51,7 +51,7 @@ export function nodeIdFor(addressInput: LogAddress, node: RecordNode, read?: tru
         address,
         runtimeStageId,
         ...(commitIndex === undefined ? {} : { commitIdx: commitIndex }),
-        ...(key === undefined ? {} : { key: name(key, true) }),
+        ...(key === undefined ? {} : { key: recordName(key, true) }),
         ...(read ? { read: true } : {}),
       });
     return nodeId.length <= 2048 ? nodeId : 'record:invalid';
