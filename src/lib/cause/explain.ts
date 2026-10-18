@@ -18,6 +18,7 @@ export async function explain(graph: CauseGraph, nodeId: NodeId, options: Explai
   graphName(nodeId);
   const session = new Session(graph, options);
   try {
+    session.enterDirection('backward');
     const backward = await walk(session, [nodeId], 'parents');
     const missing: Gap[] = [...backward.gaps];
     let candidates = frontier(backward).map((item) => item.nodeId);
@@ -41,6 +42,7 @@ export async function explain(graph: CauseGraph, nodeId: NodeId, options: Explai
     if (stopped) missing.push(stopped);
     const causeComplete = missing.length === 0;
     const rootCause = causeComplete && candidates.length === 1 ? candidates[0] : undefined;
+    session.enterDirection('impact');
     const forward = await walk(session, [nodeId], 'children');
     let impactNodes = Object.freeze(forward.nodes.filter((id) => id !== nodeId));
     const impactGaps = [...forward.gaps],

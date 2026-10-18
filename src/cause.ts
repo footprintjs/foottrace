@@ -23,6 +23,7 @@ export type {
   NodeId,
   RootStrategy,
   TraversedEdge,
+  TraversalLimits,
   WalkLimits,
 } from './lib/cause/types.js';
 export type { RecordScope, RecordGraphOptions, RecordCauseGraph, RecordNode } from './lib/cause/recordAdapter.js';

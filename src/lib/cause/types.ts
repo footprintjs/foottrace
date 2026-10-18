@@ -88,11 +88,14 @@ export interface AttentionListResult {
   readonly confidence: Confidence;
   readonly gaps: readonly Gap[];
 }
-export interface WalkLimits {
+/** Optional per-direction work allowances; the enclosing query still owns the deadline and total ceiling. */
+export interface TraversalLimits {
   readonly maxNodes?: number;
   readonly maxDepth?: number;
   readonly maxEdges?: number;
   readonly maxCalls?: number;
+}
+export interface WalkLimits extends TraversalLimits {
   readonly timeoutMs?: number;
 }
 /** A strategy selects a tied best tier of already recorded marked nodes; it cannot introduce identities. */
@@ -103,6 +106,10 @@ export type RootStrategy = (
 /** Reorder all already discovered impact references; never inject or drop evidence. */
 export type ImpactStrategy = (nodes: readonly NodeId[], context: GraphContext) => MaybePromise<readonly NodeId[]>;
 export interface ExplainOptions extends WalkLimits {
+  /** Caps backward traversal and root ranking, without adding to the enclosing query budget. */
+  readonly backward?: TraversalLimits;
+  /** Caps forward traversal and impact ranking; shared cached reads do not consume another call. */
+  readonly impact?: TraversalLimits;
   readonly signal?: AbortSignal;
   readonly rankRoots?: RootStrategy;
   readonly rankImpact?: ImpactStrategy;
