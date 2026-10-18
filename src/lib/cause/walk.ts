@@ -53,16 +53,16 @@ export async function walk(
     }
     if (!page.value) continue;
     if (!page.value.complete) missing.push(gap('not-collected', id));
-    if (depth >= session.limits.maxDepth) {
+    if (depth >= session.maxDepth) {
       if (page.value.edges.length) missing.push(gap('depth-limit', id));
       continue;
     }
     for (const edge of page.value.edges) {
-      if (session.edges >= session.limits.maxEdges) {
-        missing.push(gap('edge-limit', id));
+      const edgeRefusal = session.takeEdge(id);
+      if (edgeRefusal) {
+        missing.push(edgeRefusal);
         break;
       }
-      session.edges++;
       const refusal = session.admit(edge.nodeId);
       if (refusal) {
         missing.push(refusal);

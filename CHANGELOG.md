@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Optional `explain` backward and impact traversal allowances, including their ranking callbacks, under the existing total node/edge/call ceiling and single deadline. A bounded backward walk can leave work capacity for a small downstream impact query. Local refusals remain explicit gaps, do not charge the refused operation against its matching total allowance, and do not poison cached evidence. Existing calls without directional options retain their behavior and output; record bytes, defaults, package dependencies and runtime exports are unchanged. `TraversalLimits` is an additive type export on `/cause`.
+
 ## 1.4.0 — 2026-10-17
 
 ### Added

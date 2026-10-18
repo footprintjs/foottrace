@@ -53,6 +53,7 @@
   "src/lib/cause/types.ts": 0,
   "src/lib/cause/validation.ts": 0,
   "src/lib/cause/session.ts": 1,
+  "src/lib/cause/queryBudget.ts": 0,
   "src/lib/cause/walk.ts": 2,
   "src/lib/cause/strategies.ts": 2,
   "src/lib/cause/explain.ts": 3,

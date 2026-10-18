@@ -1,23 +1,20 @@
 import type { CauseGraph, ExplainOptions, Gap, GraphContext, NodeId, WalkLimits } from './types.js';
-import { AdmissionError, gap, graphName, observePromise, graphOwn, plain } from './validation.js';
+import { AdmissionError, gap, observePromise, graphOwn, plain } from './validation.js';
 import { beginQueryMemo, endQueryMemo } from './queryMemo.js';
+import { QueryBudget } from './queryBudget.js';
 
 export interface Read<T> {
   readonly value?: T;
   readonly gap?: Gap;
 }
 type Method = 'parents' | 'children' | 'attention' | 'gaps' | 'roots';
-const defaults = { maxNodes: 100, maxDepth: 20, maxEdges: 1000, maxCalls: 1000, timeoutMs: 1000 };
-const ceilings = { maxNodes: 10000, maxDepth: 1000, maxEdges: 100000, maxCalls: 100000, timeoutMs: 30000 };
 /** One deadline, memo table and work budget per public query, never per graph or store. */
 export class Session {
   readonly limits: Required<WalkLimits>;
   readonly context: GraphContext;
-  readonly nodes = new Set<NodeId>();
   readonly controller = new AbortController();
   private readonly cache = new Map<string, Promise<Read<unknown>>>();
-  private calls = 0;
-  edges = 0;
+  private readonly budget: QueryBudget;
   private timedOut = false;
   private readonly deadline: number;
   private readonly timer: ReturnType<typeof setTimeout>;
@@ -28,21 +25,8 @@ export class Session {
   constructor(graph: CauseGraph, options: ExplainOptions = {}) {
     try {
       plain(options);
-      const limits = { ...defaults };
-      for (const key of Object.keys(defaults) as (keyof WalkLimits)[]) {
-        const value = graphOwn(options, key);
-        if (value !== undefined) {
-          if (
-            typeof value !== 'number' ||
-            !Number.isSafeInteger(value) ||
-            value < (key === 'maxDepth' ? 0 : 1) ||
-            value > ceilings[key]
-          )
-            throw new TypeError();
-          limits[key] = value;
-        }
-      }
-      this.limits = Object.freeze(limits);
+      this.budget = new QueryBudget(options);
+      this.limits = this.budget.limits;
       const rank = graphOwn(options, 'rankRoots');
       if (rank !== undefined && typeof rank !== 'function') throw new TypeError();
       const impactRank = graphOwn(options, 'rankImpact');
@@ -95,11 +79,16 @@ export class Session {
     return this.controller.signal.aborted ? gap(this.timedOut ? 'timeout' : 'cancelled', id) : undefined;
   }
   admit(id: NodeId): Gap | undefined {
-    graphName(id);
-    if (this.nodes.has(id)) return undefined;
-    if (this.nodes.size >= this.limits.maxNodes) return gap('node-limit', id);
-    this.nodes.add(id);
-    return undefined;
+    return this.budget.admit(id);
+  }
+  enterDirection(direction: 'backward' | 'impact'): void {
+    this.budget.enterDirection(direction);
+  }
+  get maxDepth(): number {
+    return this.budget.maxDepth;
+  }
+  takeEdge(id: NodeId): Gap | undefined {
+    return this.budget.takeEdge(id);
   }
   hasRoots(): boolean {
     return !!this.methods.roots;
@@ -108,7 +97,7 @@ export class Session {
     const key = JSON.stringify([method, id]);
     const cached = this.cache.get(key);
     if (cached) return cached as Promise<Read<T>>;
-    const pending = this.invoke(
+    return this.invoke(
       id,
       () => {
         const fn = this.methods[method];
@@ -116,15 +105,20 @@ export class Session {
         return id === undefined ? fn(this.context) : fn(id, this.context);
       },
       project,
+      key,
     );
-    this.cache.set(key, pending);
-    return pending;
   }
-  invoke<T>(id: NodeId | undefined, work: () => unknown, project: (raw: unknown) => T): Promise<Read<T>> {
+  invoke<T>(
+    id: NodeId | undefined,
+    work: () => unknown,
+    project: (raw: unknown) => T,
+    cacheKey?: string,
+  ): Promise<Read<T>> {
     const stopped = this.stopGap(id);
     if (stopped) return Promise.resolve({ gap: stopped });
-    if (++this.calls > this.limits.maxCalls) return Promise.resolve({ gap: gap('call-limit', id) });
-    return new Promise((resolve) => {
+    const refusal = this.budget.takeCall(id);
+    if (refusal) return Promise.resolve({ gap: refusal });
+    const pending = new Promise<Read<T>>((resolve) => {
       let finished = false;
       const finish = (result: Read<T>) => {
         if (finished) return;
@@ -161,5 +155,8 @@ export class Session {
         finish({ gap: gap(error instanceof AdmissionError ? error.code : 'unavailable', id) });
       }
     });
+    // A local allowance refusal is not evidence and must never poison the other direction's cache.
+    if (cacheKey !== undefined) this.cache.set(cacheKey, pending);
+    return pending;
   }
 }
