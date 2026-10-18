@@ -1,7 +1,7 @@
 import type { CauseGraph, ExplainOptions, Gap, GraphContext, NodeId, WalkLimits } from './types.js';
 import { AdmissionError, gap, observePromise, graphOwn, plain } from './validation.js';
 import { beginQueryMemo, endQueryMemo } from './queryMemo.js';
-import { QueryBudget } from './queryBudget.js';
+import { QueryBudget, type BudgetView } from './queryBudget.js';
 
 export interface Read<T> {
   readonly value?: T;
@@ -78,26 +78,21 @@ export class Session {
     }
     return this.controller.signal.aborted ? gap(this.timedOut ? 'timeout' : 'cancelled', id) : undefined;
   }
-  admit(id: NodeId): Gap | undefined {
-    return this.budget.admit(id);
+  direction(direction: 'backward' | 'impact'): BudgetView {
+    return this.budget.direction(direction);
   }
-  enterDirection(direction: 'backward' | 'impact'): void {
-    this.budget.enterDirection(direction);
-  }
-  get maxDepth(): number {
-    return this.budget.maxDepth;
-  }
-  takeEdge(id: NodeId): Gap | undefined {
-    return this.budget.takeEdge(id);
+  get total(): BudgetView {
+    return this.budget.total;
   }
   hasRoots(): boolean {
     return !!this.methods.roots;
   }
-  read<T>(method: Method, id: NodeId | undefined, project: (raw: unknown) => T): Promise<Read<T>> {
+  read<T>(budget: BudgetView, method: Method, id: NodeId | undefined, project: (raw: unknown) => T): Promise<Read<T>> {
     const key = JSON.stringify([method, id]);
     const cached = this.cache.get(key);
     if (cached) return cached as Promise<Read<T>>;
     return this.invoke(
+      budget,
       id,
       () => {
         const fn = this.methods[method];
@@ -109,6 +104,7 @@ export class Session {
     );
   }
   invoke<T>(
+    budget: BudgetView,
     id: NodeId | undefined,
     work: () => unknown,
     project: (raw: unknown) => T,
@@ -116,7 +112,7 @@ export class Session {
   ): Promise<Read<T>> {
     const stopped = this.stopGap(id);
     if (stopped) return Promise.resolve({ gap: stopped });
-    const refusal = this.budget.takeCall(id);
+    const refusal = budget.takeCall(id);
     if (refusal) return Promise.resolve({ gap: refusal });
     const pending = new Promise<Read<T>>((resolve) => {
       let finished = false;

@@ -1,5 +1,6 @@
 import type { Attention, Gap, MarkedNode, NodeId, TraversedEdge } from './types.js';
 import { Session } from './session.js';
+import type { BudgetView } from './queryBudget.js';
 import { adjacency, attention, gap, gaps, uniqueGaps } from './validation.js';
 
 export interface Walk {
@@ -11,6 +12,7 @@ export interface Walk {
 /** BFS discovers the shallowest arrival; a repeated diamond node is not a cycle. */
 export async function walk(
   session: Session,
+  budget: BudgetView,
   seeds: readonly NodeId[],
   direction: 'parents' | 'children',
 ): Promise<Walk> {
@@ -21,7 +23,7 @@ export async function walk(
     missing: Gap[] = [];
   const enqueue = (id: NodeId, depth: number) => {
     if (seen.has(id)) return;
-    const refusal = session.admit(id);
+    const refusal = budget.admit(id);
     if (refusal) {
       missing.push(refusal);
       return;
@@ -37,33 +39,33 @@ export async function walk(
       missing.push(stopped);
       break;
     }
-    const marked = await session.read('attention', id, attention);
+    const marked = await session.read(budget, 'attention', id, attention);
     if (marked.gap) missing.push(marked.gap);
     if (marked.value?.length) {
       marks.push(Object.freeze({ nodeId: id, attention: marked.value }));
       if (marked.value.some((item) => item.kind === 'not-collected')) missing.push(gap('not-collected', id));
     }
-    const coverage = await session.read('gaps', id, gaps);
+    const coverage = await session.read(budget, 'gaps', id, gaps);
     if (coverage.gap) missing.push(coverage.gap);
     if (coverage.value) missing.push(...coverage.value);
-    const page = await session.read(direction, id, (raw) => adjacency(raw, session.limits.maxEdges));
+    const page = await session.read(budget, direction, id, (raw) => adjacency(raw, session.limits.maxEdges));
     if (page.gap) {
       missing.push(page.gap);
       continue;
     }
     if (!page.value) continue;
     if (!page.value.complete) missing.push(gap('not-collected', id));
-    if (depth >= session.maxDepth) {
+    if (depth >= budget.maxDepth) {
       if (page.value.edges.length) missing.push(gap('depth-limit', id));
       continue;
     }
     for (const edge of page.value.edges) {
-      const edgeRefusal = session.takeEdge(id);
+      const edgeRefusal = budget.takeEdge(id);
       if (edgeRefusal) {
         missing.push(edgeRefusal);
         break;
       }
-      const refusal = session.admit(edge.nodeId);
+      const refusal = budget.admit(edge.nodeId);
       if (refusal) {
         missing.push(refusal);
         continue;
