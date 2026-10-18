@@ -77,7 +77,7 @@ Query defaults are 100 nodes, depth 20, 1,000 edges, 1,000 calls and one second.
 
 ### Leave work capacity for impact
 
-For a query with many ancestors and a small downstream graph, optionally cap each direction inside the existing total budget:
+For a query with many ancestors and a small downstream graph, setting only `backward` is usually enough. Impact then uses whatever remains of the total budget:
 
 ```ts
 import { explain, type CauseGraph } from 'foottrace/cause';
@@ -85,13 +85,14 @@ declare const graph: CauseGraph;
 const finding = await explain(graph, 'selected', {
   maxNodes: 100, maxEdges: 1000, maxCalls: 1000,
   backward: { maxNodes: 70, maxEdges: 700, maxCalls: 700 },
-  impact: { maxNodes: 30, maxEdges: 300, maxCalls: 300 },
 });
 ```
 
 `backward` covers the reverse walk and root ranking; `impact` covers the forward walk and impact ranking. Each accepts `maxNodes`, `maxDepth`, `maxEdges` and `maxCalls`. Every provided value must be an integer within the corresponding enclosing query limit (depth may be zero; other values start at one). Omitted fields inherit the enclosing limit. Omit both objects to retain the existing shared-budget behavior.
 
-There is still one total ceiling, deadline, cancellation signal and query cache. A node counts once globally and once in each direction that visits it. Every traversed edge and every dispatched graph or ranking call consumes both the total and the current direction's allowance. Reusing a cached graph result consumes no new call. A refused local node, edge or call does not consume its matching total allowance, and its refusal is not cached as evidence for the other direction. An edge already examined still counts when its destination node cannot be admitted. Graph-response admission remains bounded by the total edge limit.
+Add `impact` only when you also want to cap forward work. The two allowances do not have to add up to the total: the shared ceiling always applies.
+
+There is still one total ceiling, deadline, cancellation signal and query cache. A node counts once globally and once in each direction that visits it. Every traversed edge and every dispatched graph or ranking call consumes both the total and the allowance carried by that operation. Reusing a cached graph result consumes no new call. A refused local node, edge or call does not consume its matching total allowance, and its refusal is not cached as evidence for the other direction. An edge already examined still counts when its destination node cannot be admitted. Graph-response admission remains bounded by the total edge limit.
 
 Exhausting the backward allowance adds a named gap and withholds a confirmed root while leaving the remaining total capacity available for impact. An incomplete impact does not erase a root established from complete backward evidence. These allowances reserve work capacity, not time: an unresolved backward call can still consume the one shared deadline. They do not paginate stored records or measure provider billing.
 

@@ -3,6 +3,13 @@ import { gap, graphName, graphOwn, plain } from './validation.js';
 
 type Direction = 'backward' | 'impact';
 type DirectionLimits = Omit<Required<WalkLimits>, 'timeoutMs'>;
+/** A frozen handle to one allowance; its functions retain their accounting owner when extracted. */
+export interface BudgetView {
+  readonly maxDepth: number;
+  readonly admit: (id: NodeId) => Gap | undefined;
+  readonly takeEdge: (id: NodeId) => Gap | undefined;
+  readonly takeCall: (id?: NodeId) => Gap | undefined;
+}
 interface Allowance {
   readonly limits: DirectionLimits;
   readonly nodes: Set<NodeId>;
@@ -47,11 +54,11 @@ function allowance(raw: unknown, outer: Required<WalkLimits>): Allowance | undef
 /** One hard work ceiling per query; optional direction allowances can only restrict it. */
 export class QueryBudget {
   readonly limits: Required<WalkLimits>;
+  readonly total: BudgetView;
   private readonly nodes = new Set<NodeId>();
   private edges = 0;
   private calls = 0;
-  private readonly directions: Record<Direction, Allowance | undefined>;
-  private current?: Allowance;
+  private readonly directions: Record<Direction, BudgetView>;
 
   constructor(options: ExplainOptions) {
     try {
@@ -62,27 +69,34 @@ export class QueryBudget {
         if (value !== undefined) limits[key] = limit(value, key, ceilings[key]);
       }
       this.limits = Object.freeze(limits);
+      const backward = allowance(graphOwn(options, 'backward'), this.limits),
+        impact = allowance(graphOwn(options, 'impact'), this.limits);
+      this.total = this.view();
       this.directions = {
-        backward: allowance(graphOwn(options, 'backward'), this.limits),
-        impact: allowance(graphOwn(options, 'impact'), this.limits),
+        backward: this.view(backward),
+        impact: this.view(impact),
       };
     } catch {
       throw new TypeError('CAUSE_CONFIGURATION_INVALID');
     }
   }
 
-  enterDirection(direction: Direction): void {
-    // Re-entering never replenishes work, and the query signal/memo remain Session-owned.
-    this.current = this.directions[direction];
+  direction(direction: Direction): BudgetView {
+    // Reusing a view never replenishes work or changes another view's accounting owner.
+    return this.directions[direction];
   }
 
-  get maxDepth(): number {
-    return this.current?.limits.maxDepth ?? this.limits.maxDepth;
+  private view(local?: Allowance): BudgetView {
+    return Object.freeze({
+      maxDepth: local?.limits.maxDepth ?? this.limits.maxDepth,
+      admit: (id: NodeId) => this.admit(local, id),
+      takeEdge: (id: NodeId) => this.takeEdge(local, id),
+      takeCall: (id?: NodeId) => this.takeCall(local, id),
+    });
   }
 
-  admit(id: NodeId): Gap | undefined {
+  private admit(local: Allowance | undefined, id: NodeId): Gap | undefined {
     graphName(id);
-    const local = this.current;
     if (local && !local.nodes.has(id) && local.nodes.size >= local.limits.maxNodes) return gap('node-limit', id);
     if (!this.nodes.has(id) && this.nodes.size >= this.limits.maxNodes) return gap('node-limit', id);
     // Neither counter changes until both checks accept; cached identities still cost a local slot.
@@ -91,8 +105,7 @@ export class QueryBudget {
     return undefined;
   }
 
-  takeEdge(id: NodeId): Gap | undefined {
-    const local = this.current;
+  private takeEdge(local: Allowance | undefined, id: NodeId): Gap | undefined {
     if (local && local.edges >= local.limits.maxEdges) return gap('edge-limit', id);
     if (this.edges >= this.limits.maxEdges) return gap('edge-limit', id);
     this.edges++;
@@ -100,8 +113,7 @@ export class QueryBudget {
     return undefined;
   }
 
-  takeCall(id?: NodeId): Gap | undefined {
-    const local = this.current;
+  private takeCall(local: Allowance | undefined, id?: NodeId): Gap | undefined {
     if (local && local.calls >= local.limits.maxCalls) return gap('call-limit', id);
     if (this.calls >= this.limits.maxCalls) return gap('call-limit', id);
     this.calls++;

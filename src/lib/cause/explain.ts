@@ -18,8 +18,9 @@ export async function explain(graph: CauseGraph, nodeId: NodeId, options: Explai
   graphName(nodeId);
   const session = new Session(graph, options);
   try {
-    session.enterDirection('backward');
-    const backward = await walk(session, [nodeId], 'parents');
+    const backwardBudget = session.direction('backward'),
+      impactBudget = session.direction('impact');
+    const backward = await walk(session, backwardBudget, [nodeId], 'parents');
     const missing: Gap[] = [...backward.gaps];
     let candidates = frontier(backward).map((item) => item.nodeId);
     const rank = graphOwn(options, 'rankRoots');
@@ -27,6 +28,7 @@ export async function explain(graph: CauseGraph, nodeId: NodeId, options: Explai
       if (typeof rank !== 'function') throw new TypeError('CAUSE_CONFIGURATION_INVALID');
       const eligible = backward.marked.filter((item) => item.attention.some((mark) => mark.kind !== 'not-collected'));
       const selection = await session.invoke(
+        backwardBudget,
         undefined,
         () => rank(Object.freeze(eligible), session.context),
         (raw) =>
@@ -42,13 +44,13 @@ export async function explain(graph: CauseGraph, nodeId: NodeId, options: Explai
     if (stopped) missing.push(stopped);
     const causeComplete = missing.length === 0;
     const rootCause = causeComplete && candidates.length === 1 ? candidates[0] : undefined;
-    session.enterDirection('impact');
-    const forward = await walk(session, [nodeId], 'children');
+    const forward = await walk(session, impactBudget, [nodeId], 'children');
     let impactNodes = Object.freeze(forward.nodes.filter((id) => id !== nodeId));
     const impactGaps = [...forward.gaps],
       rankImpact = graphOwn(options, 'rankImpact');
     if (typeof rankImpact === 'function') {
       const selection = await session.invoke(
+        impactBudget,
         undefined,
         () => rankImpact(impactNodes, session.context),
         (raw) =>
@@ -89,6 +91,7 @@ export async function attentionList(
 ): Promise<AttentionListResult> {
   const session = new Session(graph, options);
   try {
+    const budget = session.total;
     let seeds: readonly NodeId[] = [],
       missing: Gap[] = [];
     const requested = graphOwn(options, 'nodeIds');
@@ -104,15 +107,15 @@ export async function attentionList(
       return nodeIds(prefix, session.limits.maxNodes);
     };
     if (requested !== undefined) {
-      const read = await session.invoke(undefined, () => requested, admitSeeds);
+      const read = await session.invoke(budget, undefined, () => requested, admitSeeds);
       if (read.gap) missing.push(read.gap);
       else seeds = read.value ?? [];
     } else if (session.hasRoots()) {
-      const read = await session.read('roots', undefined, admitSeeds);
+      const read = await session.read(budget, 'roots', undefined, admitSeeds);
       if (read.gap) missing.push(read.gap);
       else seeds = read.value ?? [];
     } else missing.push(gap('not-collected'));
-    const result = await walk(session, seeds, 'children');
+    const result = await walk(session, budget, seeds, 'children');
     missing = [...missing, ...result.gaps];
     return Object.freeze({
       nodes: result.marked,
