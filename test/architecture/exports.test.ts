@@ -1,4 +1,4 @@
-/** Four doors, one public name per declaration, no engine dependency. */
+/** Optional reader doors keep one public name per declaration and no engine dependency. */
 import { createRequire } from 'node:module';
 import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 
 const root = resolve(__dirname, '../..');
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
-const entries = { '.': 'index', './write': 'write', './paths': 'paths', './cause': 'cause' } as const;
+const entries = { '.': 'index', './write': 'write', './paths': 'paths', './cause': 'cause', './prov': 'prov' } as const;
 const config = ts.parseJsonConfigFileContent(
   ts.readConfigFile(join(root, 'tsconfig.json'), ts.sys.readFile).config,
   ts.sys,
@@ -51,7 +51,7 @@ function duplicates(doors: typeof exportsByDoor): string[][] {
 }
 
 describe('foottrace public ownership', () => {
-  it('has four code doors with matching public ESM and CommonJS targets', () => {
+  it('has five code doors with matching public ESM and CommonJS targets', () => {
     expect(
       Object.keys(pkg.exports)
         .filter((key) => key !== './package.json')
@@ -144,7 +144,7 @@ describe('foottrace public ownership', () => {
  * Every public name foottrace 1.0.3 shipped, by door — read off `main` at 1.0.3 with this file's own checker.
  * A minor keeps every one on the same door (1.1.0 only adds); only a major may drop or move one.
  */
-const SHIPPED_1_0_3: Record<Exclude<keyof typeof entries, './cause'>, readonly string[]> = {
+const SHIPPED_1_0_3: Record<Exclude<keyof typeof entries, './cause' | './prov'>, readonly string[]> = {
   '.': [
     'ArrayProvenance',
     'AttributionBasis',
@@ -382,5 +382,27 @@ describe('reference-only evidence requirements', () => {
     for (const exports of Object.values(exportsByDoor))
       for (const name of ['GAP_CODES', 'isGapCode', 'isRequirementReason', 'EvidenceRefusal', 'ownData', 'boundedList'])
         expect(exports.has(name), name).toBe(false);
+  });
+});
+
+describe('PROV export public ownership', () => {
+  it('keeps the asynchronous exporter and its contracts on the optional door only', () => {
+    for (const name of [
+      'exportProv',
+      'ProvExportRefusal',
+      'ProvExport',
+      'ProvExportOptions',
+      'ProvExportGap',
+      'ProvDocument',
+      'ProvNode',
+    ]) {
+      expect(exportsByDoor['./prov'].has(name), name).toBe(true);
+      for (const door of ['.', './write', './paths', './cause']) {
+        expect(exportsByDoor[door].has(name), door + ': ' + name).toBe(false);
+      }
+    }
+    for (const name of ['admitProvRecord', 'ProvBudget', 'ProvOutput', 'ProvIds', 'provOptions', 'PROV_CONTEXT']) {
+      for (const exports of Object.values(exportsByDoor)) expect(exports.has(name), name).toBe(false);
+    }
   });
 });

@@ -6,7 +6,7 @@ This package extracts FootPrint's established record layer. It does not introduc
 
 Foottrace owns the record layer used by footprintjs 10. Older stored records remain readable without installing their original engine.
 
-## Four entry points
+## Entry points
 
 | Import | Responsibility |
 | --- | --- |
@@ -14,8 +14,25 @@ Foottrace owns the record layer used by footprintjs 10. Older stored records rem
 | `foottrace/write` | `SharedMemory`, `EventLog`, `RecordFrame`, encoding and write types, writer-owned freezing, the record sink port and `memorySink` |
 | `foottrace/paths` | Record-path encoding/decoding, nested access and safe diagnostic writes |
 | `foottrace/cause` | Optional bounded attention, cause and impact queries; in-memory and lazily loaded stored-record adapters |
+| `foottrace/prov` | Optional bounded, asynchronous export of one recorded scope as PROV-O JSON-LD, without values |
 
 Every declaration has one public entry point. Producer-facing `Attention` and `AttentionKind` are type-only root exports; the cause algorithms live only on `/cause`. Existing root, `/write` and `/paths` imports retain their ESM and CommonJS doors. There are no public deep imports or `/testing` entry point. FootPrint's engine, observer channels, recorders and stores remain in `footprintjs`.
+
+## PROV-O export — unreleased
+
+The optional `foottrace/prov` entry exports one record as JSON-LD using
+[PROV-O, a W3C Recommendation](https://www.w3.org/TR/prov-o/). The asynchronous
+`exportProv(record, { base })` returns `{ document, gaps, complete }`. It includes
+recorded activities, write occurrences and supported control links; it exports no
+values, fingerprints, inferred people or invented times. Captured reads remain
+explicit candidate evidence rather than a claim of semantic derivation.
+
+Redacted writes retain opaque placeholders: their count and position remain
+visible, while their names and values are withheld. An ordinary record currently
+returns `complete: false` because native capture and ending attestation is not
+available. Keep its gaps with the document. See the
+[export recipe and safety limits](https://github.com/footprintjs/foottrace/blob/main/docs/prov.md)
+and the [runnable example](https://github.com/footprintjs/foottrace/blob/main/examples/post-execution/prov/01-export-prov.ts).
 
 ## Write and replay
 

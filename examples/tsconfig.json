@@ -18,6 +18,9 @@
       ],
       "foottrace/cause": [
         "../src/cause.ts"
+      ],
+      "foottrace/prov": [
+        "../src/prov.ts"
       ]
     }
   },

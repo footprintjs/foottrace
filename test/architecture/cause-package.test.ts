@@ -54,12 +54,13 @@ describe('the optional cause package door', () => {
       ['publint'],
       ['attw', '--pack', '--profile', 'strict'],
       ['tsc', '-p', 'test/consumer/cause/tsconfig.json'],
+      ['tsc', '-p', 'test/consumer/prov/tsconfig.json'],
     ]);
     expect(pkg.scripts['check:package']).not.toMatch(/--(?:ignore|exclude-entrypoints|entrypoints)(?:\s|=)/);
   });
 
   it('exports typed ESM and CommonJS cause targets using the existing public-door pattern', () => {
-    for (const name of ['index', 'write', 'paths', 'cause']) {
+    for (const name of ['index', 'write', 'paths', 'cause', 'prov']) {
       const door = name === 'index' ? '.' : './' + name;
       expect(pkg.exports[door]).toEqual({
         import: { types: './dist/esm/' + name + '.d.ts', default: './dist/esm/' + name + '.js' },

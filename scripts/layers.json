@@ -75,5 +75,22 @@
   "src/lib/cause/recordScope.ts": 3,
   "src/lib/cause/recordLoading.ts": 3,
   "src/lib/cause/queryMemo.ts": 0,
-  "src/lib/cause/recordQuery.ts": 3
+  "src/lib/cause/recordQuery.ts": 3,
+  "src/lib/prov/privacy.ts": 3,
+  "src/lib/prov/admitBundle.ts": 3,
+  "src/lib/prov/output.ts": 3,
+  "src/lib/prov/mapRecord.ts": 3,
+  "src/lib/prov/mapping.ts": 3,
+  "src/lib/prov/ids.ts": 0,
+  "src/lib/prov/reads.ts": 3,
+  "src/lib/prov/admission.ts": 3,
+  "src/lib/prov/context.ts": 0,
+  "src/lib/prov/types.ts": 0,
+  "src/lib/prov/exportProv.ts": 3,
+  "src/lib/prov/control.ts": 3,
+  "src/lib/prov/budget.ts": 1,
+  "src/lib/prov/options.ts": 0,
+  "src/lib/prov/admitTree.ts": 3,
+  "src/lib/prov/admitMaps.ts": 3,
+  "src/prov.ts": 4
 }
