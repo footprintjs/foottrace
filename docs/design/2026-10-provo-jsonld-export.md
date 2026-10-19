@@ -1,6 +1,23 @@
 # PROV-O JSON-LD export: proposed mapping and honesty boundary
 
-Status: **mapping approved; implement only P1 below**. No merge or publication is authorized by this note.
+Status: **historical P1 mapping approved; current P2 review below**. No merge or
+publication is authorized by this note.
+
+## P2 contract review, 2026-10-19
+
+P1 and P1.1 are merged; Foottrace 1.6.0 is published. The [P2 contract proposal](./prov-p2-contract.md)
+records the owner's external review adjustments: **P2.4 loaded scopes first, then
+P2.3 host agents**. Person labels are personal data and absent by default; an
+explicit host opt-in permits them only when the host is entitled to export them.
+Recommend opaque IDs. Canonical JSON and digests (P2.1/P2.2) wait for a real
+consumer and do not block scopes, agents or release 1.7.0. That release contains
+the chosen, separately reviewed surfaces, not necessarily every P2 packet.
+
+The revised docs-only contract returns for final review before implementation.
+The earlier approval below authorizes P1, not unreviewed P2 implementation. The
+remaining sections preserve the historical mapping and phase decisions; references
+to callbacks or the broader first-release scope are superseded by the current
+data-only P2 contract, not current implementation instructions.
 
 ## Approved phase boundary — 2026-10-18
 
