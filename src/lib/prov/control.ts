@@ -1,4 +1,4 @@
-import { reference } from './mapRecord.js';
+import { reference } from './translation.js';
 import type { ProvMapping } from './mapping.js';
 
 /** Only already-admitted, same-scope, strictly earlier governing executions are standard communication. */

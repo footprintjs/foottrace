@@ -94,5 +94,7 @@
   "src/lib/prov/options.ts": 0,
   "src/lib/prov/admitTree.ts": 3,
   "src/lib/prov/admitMaps.ts": 3,
-  "src/prov.ts": 4
+  "src/prov.ts": 4,
+  "src/lib/prov/translation.ts": 0,
+  "src/lib/prov/translateCommit.ts": 3
 }
