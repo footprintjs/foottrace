@@ -1,0 +1,425 @@
+{
+  "document": {
+    "@context": {
+      "prov": "http://www.w3.org/ns/prov#",
+      "ft": "https://footprintjs.dev/ns/foottrace#"
+    },
+    "@graph": [
+      {
+        "@id": "urn:example:prov:native-compound/scope/11:fixture-run/record",
+        "@type": "ft:Record",
+        "ft:logRunId": "fixture-run",
+        "ft:drillPath": []
+      },
+      {
+        "@id": "urn:example:prov:native-compound/scope/11:fixture-run/activity/10:decide%230",
+        "@type": "prov:Activity",
+        "ft:stageId": "decide",
+        "ft:executionIndex": 0,
+        "ft:inRecord": {
+          "@id": "urn:example:prov:native-compound/scope/11:fixture-run/record"
+        }
+      },
+      {
+        "@id": "urn:example:prov:native-compound/scope/11:fixture-run/commit/0",
+        "@type": "ft:Commit",
+        "ft:commitIdx": 0,
+        "ft:inRecord": {
+          "@id": "urn:example:prov:native-compound/scope/11:fixture-run/record"
+        },
+        "ft:execution": {
+          "@id": "urn:example:prov:native-compound/scope/11:fixture-run/activity/10:decide%230"
+        }
+      },
+      {
+        "@id": "urn:example:prov:native-compound/scope/11:fixture-run/write/0/0/6:choice",
+        "@type": "prov:Entity",
+        "ft:commitIdx": 0,
+        "ft:rowIdx": 0,
+        "ft:verb": "set",
+        "ft:inCommit": {
+          "@id": "urn:example:prov:native-compound/scope/11:fixture-run/commit/0"
+        },
+        "ft:valueAvailability": "not-exported",
+        "ft:path": "choice",
+        "prov:wasGeneratedBy": {
+          "@id": "urn:example:prov:native-compound/scope/11:fixture-run/activity/10:decide%230"
+        }
+      },
+      {
+        "@id": "urn:example:prov:native-compound/scope/11:fixture-run/activity/8:loop%231",
+        "@type": "prov:Activity",
+        "ft:stageId": "loop",
+        "ft:executionIndex": 1,
+        "ft:inRecord": {
+          "@id": "urn:example:prov:native-compound/scope/11:fixture-run/record"
+        },
+        "prov:wasInformedBy": {
+          "@id": "urn:example:prov:native-compound/scope/11:fixture-run/activity/10:decide%230"
+        },
+        "prov:qualifiedCommunication": {
+          "@id": "urn:example:prov:native-compound/scope/11:fixture-run/control/8:loop%231"
+        }
+      },
+      {
+        "@id": "urn:example:prov:native-compound/scope/11:fixture-run/commit/1",
+        "@type": "ft:Commit",
+        "ft:commitIdx": 1,
+        "ft:inRecord": {
+          "@id": "urn:example:prov:native-compound/scope/11:fixture-run/record"
+        },
+        "ft:execution": {
+          "@id": "urn:example:prov:native-compound/scope/11:fixture-run/activity/8:loop%231"
+        }
+      },
+      {
+        "@id": "urn:example:prov:native-compound/scope/11:fixture-run/write/1/0/5:count",
+        "@type": "prov:Entity",
+        "ft:commitIdx": 1,
+        "ft:rowIdx": 0,
+        "ft:verb": "set",
+        "ft:inCommit": {
+          "@id": "urn:example:prov:native-compound/scope/11:fixture-run/commit/1"
+        },
+        "ft:valueAvailability": "not-exported",
+        "ft:path": "count",
+        "prov:wasGeneratedBy": {
+          "@id": "urn:example:prov:native-compound/scope/11:fixture-run/activity/8:loop%231"
+        }
+      },
+      {
+        "@id": "urn:example:prov:native-compound/scope/11:fixture-run/write/1/1/5:count",
+        "@type": "prov:Entity",
+        "ft:commitIdx": 1,
+        "ft:rowIdx": 1,
+        "ft:verb": "set",
+        "ft:inCommit": {
+          "@id": "urn:example:prov:native-compound/scope/11:fixture-run/commit/1"
+        },
+        "ft:valueAvailability": "not-exported",
+        "ft:path": "count",
+        "prov:wasGeneratedBy": {
+          "@id": "urn:example:prov:native-compound/scope/11:fixture-run/activity/8:loop%231"
+        }
+      },
+      {
+        "@id": "urn:example:prov:native-compound/scope/11:fixture-run/activity/8:loop%232",
+        "@type": "prov:Activity",
+        "ft:stageId": "loop",
+        "ft:executionIndex": 2,
+        "ft:inRecord": {
+          "@id": "urn:example:prov:native-compound/scope/11:fixture-run/record"
+        },
+        "ft:untrackedInput": true
+      },
+      {
+        "@id": "urn:example:prov:native-compound/scope/11:fixture-run/commit/2",
+        "@type": "ft:Commit",
+        "ft:commitIdx": 2,
+        "ft:inRecord": {
+          "@id": "urn:example:prov:native-compound/scope/11:fixture-run/record"
+        },
+        "ft:execution": {
+          "@id": "urn:example:prov:native-compound/scope/11:fixture-run/activity/8:loop%232"
+        }
+      },
+      {
+        "@id": "urn:example:prov:native-compound/scope/11:fixture-run/write/2/0/5:count",
+        "@type": "prov:Entity",
+        "ft:commitIdx": 2,
+        "ft:rowIdx": 0,
+        "ft:verb": "set",
+        "ft:inCommit": {
+          "@id": "urn:example:prov:native-compound/scope/11:fixture-run/commit/2"
+        },
+        "ft:valueAvailability": "not-exported",
+        "ft:path": "count",
+        "prov:wasGeneratedBy": {
+          "@id": "urn:example:prov:native-compound/scope/11:fixture-run/activity/8:loop%232"
+        }
+      },
+      {
+        "@id": "urn:example:prov:native-compound/scope/11:fixture-run/activity/9:mount%233",
+        "@type": "prov:Activity",
+        "ft:stageId": "mount",
+        "ft:executionIndex": 3,
+        "ft:inRecord": {
+          "@id": "urn:example:prov:native-compound/scope/11:fixture-run/record"
+        }
+      },
+      {
+        "@id": "urn:example:prov:native-compound/scope/11:fixture-run/commit/3",
+        "@type": "ft:Commit",
+        "ft:commitIdx": 3,
+        "ft:inRecord": {
+          "@id": "urn:example:prov:native-compound/scope/11:fixture-run/record"
+        },
+        "ft:execution": {
+          "@id": "urn:example:prov:native-compound/scope/11:fixture-run/activity/9:mount%233"
+        }
+      },
+      {
+        "@id": "urn:example:prov:native-compound/scope/11:fixture-run/commit/4",
+        "@type": "ft:Commit",
+        "ft:commitIdx": 4,
+        "ft:inRecord": {
+          "@id": "urn:example:prov:native-compound/scope/11:fixture-run/record"
+        },
+        "ft:execution": {
+          "@id": "urn:example:prov:native-compound/scope/11:fixture-run/activity/9:mount%233"
+        },
+        "ft:phase": "exit"
+      },
+      {
+        "@id": "urn:example:prov:native-compound/scope/11:fixture-run/write/4/0/6:result",
+        "@type": "prov:Entity",
+        "ft:commitIdx": 4,
+        "ft:rowIdx": 0,
+        "ft:verb": "set",
+        "ft:inCommit": {
+          "@id": "urn:example:prov:native-compound/scope/11:fixture-run/commit/4"
+        },
+        "ft:valueAvailability": "not-exported",
+        "ft:path": "result",
+        "prov:wasGeneratedBy": {
+          "@id": "urn:example:prov:native-compound/scope/11:fixture-run/activity/9:mount%233"
+        }
+      },
+      {
+        "@id": "urn:example:prov:native-compound/scope/11:fixture-run/activity/11:protect%234",
+        "@type": "prov:Activity",
+        "ft:stageId": "protect",
+        "ft:executionIndex": 4,
+        "ft:inRecord": {
+          "@id": "urn:example:prov:native-compound/scope/11:fixture-run/record"
+        }
+      },
+      {
+        "@id": "urn:example:prov:native-compound/scope/11:fixture-run/commit/5",
+        "@type": "ft:Commit",
+        "ft:commitIdx": 5,
+        "ft:inRecord": {
+          "@id": "urn:example:prov:native-compound/scope/11:fixture-run/record"
+        },
+        "ft:execution": {
+          "@id": "urn:example:prov:native-compound/scope/11:fixture-run/activity/11:protect%234"
+        }
+      },
+      {
+        "@id": "urn:example:prov:native-compound/scope/11:fixture-run/hidden/5/0",
+        "@type": "prov:Entity",
+        "ft:commitIdx": 5,
+        "ft:rowIdx": 0,
+        "ft:verb": "set",
+        "ft:inCommit": {
+          "@id": "urn:example:prov:native-compound/scope/11:fixture-run/commit/5"
+        },
+        "ft:valueAvailability": "not-exported",
+        "ft:redacted": true,
+        "prov:wasGeneratedBy": {
+          "@id": "urn:example:prov:native-compound/scope/11:fixture-run/activity/11:protect%234"
+        }
+      },
+      {
+        "@id": "urn:example:prov:native-compound/scope/11:fixture-run/control/8:loop%231",
+        "@type": "prov:Communication",
+        "prov:activity": {
+          "@id": "urn:example:prov:native-compound/scope/11:fixture-run/activity/10:decide%230"
+        },
+        "ft:relation": "control"
+      },
+      {
+        "@id": "urn:example:prov:native-compound/scope/11:fixture-run/attention/8:loop%232/0",
+        "@type": "ft:Attention",
+        "ft:activity": {
+          "@id": "urn:example:prov:native-compound/scope/11:fixture-run/activity/8:loop%232"
+        },
+        "ft:kind": "retry",
+        "ft:reason": "RETRY_RECORDED",
+        "ft:evidence": [
+          {
+            "@id": "urn:example:prov:native-compound/scope/11:fixture-run/commit/2"
+          }
+        ]
+      },
+      {
+        "@id": "urn:example:prov:native-compound/scope/11:fixture-run/read/8:loop%231/0",
+        "@type": "ft:Read",
+        "ft:activity": {
+          "@id": "urn:example:prov:native-compound/scope/11:fixture-run/activity/8:loop%231"
+        },
+        "ft:path": "choice",
+        "ft:basis": "candidate",
+        "ft:candidateEntity": {
+          "@id": "urn:example:prov:native-compound/scope/11:fixture-run/write/0/0/6:choice"
+        }
+      },
+      {
+        "@id": "urn:example:prov:native-compound/scope/11:fixture-run/candidate/1/0/0",
+        "@type": "ft:PossibleDerivation",
+        "ft:source": {
+          "@id": "urn:example:prov:native-compound/scope/11:fixture-run/read/8:loop%231/0"
+        },
+        "ft:target": {
+          "@id": "urn:example:prov:native-compound/scope/11:fixture-run/write/1/0/5:count"
+        },
+        "ft:attribution": "reads-prefix"
+      },
+      {
+        "@id": "urn:example:prov:native-compound/scope/11:fixture-run/write/1/0/5:count",
+        "ft:possibleDerivation": {
+          "@id": "urn:example:prov:native-compound/scope/11:fixture-run/candidate/1/0/0"
+        }
+      },
+      {
+        "@id": "urn:example:prov:native-compound/scope/11:fixture-run/candidate/1/1/0",
+        "@type": "ft:PossibleDerivation",
+        "ft:source": {
+          "@id": "urn:example:prov:native-compound/scope/11:fixture-run/read/8:loop%231/0"
+        },
+        "ft:target": {
+          "@id": "urn:example:prov:native-compound/scope/11:fixture-run/write/1/1/5:count"
+        },
+        "ft:attribution": "reads-prefix"
+      },
+      {
+        "@id": "urn:example:prov:native-compound/scope/11:fixture-run/write/1/1/5:count",
+        "ft:possibleDerivation": {
+          "@id": "urn:example:prov:native-compound/scope/11:fixture-run/candidate/1/1/0"
+        }
+      },
+      {
+        "@id": "urn:example:prov:native-compound/scope/11:fixture-run/read/8:loop%232/0",
+        "@type": "ft:Read",
+        "ft:activity": {
+          "@id": "urn:example:prov:native-compound/scope/11:fixture-run/activity/8:loop%232"
+        },
+        "ft:path": "count",
+        "ft:basis": "candidate",
+        "ft:candidateEntity": {
+          "@id": "urn:example:prov:native-compound/scope/11:fixture-run/write/1/1/5:count"
+        }
+      },
+      {
+        "@id": "urn:example:prov:native-compound/scope/11:fixture-run/candidate/2/0/0",
+        "@type": "ft:PossibleDerivation",
+        "ft:source": {
+          "@id": "urn:example:prov:native-compound/scope/11:fixture-run/read/8:loop%232/0"
+        },
+        "ft:target": {
+          "@id": "urn:example:prov:native-compound/scope/11:fixture-run/write/2/0/5:count"
+        },
+        "ft:attribution": "reads-prefix"
+      },
+      {
+        "@id": "urn:example:prov:native-compound/scope/11:fixture-run/write/2/0/5:count",
+        "ft:possibleDerivation": {
+          "@id": "urn:example:prov:native-compound/scope/11:fixture-run/candidate/2/0/0"
+        }
+      },
+      {
+        "@id": "urn:example:prov:native-compound/scope/11:fixture-run/read/9:mount%233/0",
+        "@type": "ft:Read",
+        "ft:activity": {
+          "@id": "urn:example:prov:native-compound/scope/11:fixture-run/activity/9:mount%233"
+        },
+        "ft:path": "count",
+        "ft:basis": "candidate",
+        "ft:candidateEntity": {
+          "@id": "urn:example:prov:native-compound/scope/11:fixture-run/write/2/0/5:count"
+        }
+      },
+      {
+        "@id": "urn:example:prov:native-compound/scope/11:fixture-run/candidate/4/0/0",
+        "@type": "ft:PossibleDerivation",
+        "ft:source": {
+          "@id": "urn:example:prov:native-compound/scope/11:fixture-run/read/9:mount%233/0"
+        },
+        "ft:target": {
+          "@id": "urn:example:prov:native-compound/scope/11:fixture-run/write/4/0/6:result"
+        },
+        "ft:attribution": "reads-prefix"
+      },
+      {
+        "@id": "urn:example:prov:native-compound/scope/11:fixture-run/write/4/0/6:result",
+        "ft:possibleDerivation": {
+          "@id": "urn:example:prov:native-compound/scope/11:fixture-run/candidate/4/0/0"
+        }
+      },
+      {
+        "@id": "urn:example:prov:native-compound/scope/11:fixture-run/read/11:protect%234/0",
+        "@type": "ft:Read",
+        "ft:activity": {
+          "@id": "urn:example:prov:native-compound/scope/11:fixture-run/activity/11:protect%234"
+        },
+        "ft:path": "result",
+        "ft:basis": "candidate",
+        "ft:candidateEntity": {
+          "@id": "urn:example:prov:native-compound/scope/11:fixture-run/write/4/0/6:result"
+        }
+      },
+      {
+        "@id": "urn:example:prov:native-compound/scope/11:fixture-run/candidate/5/0/0",
+        "@type": "ft:PossibleDerivation",
+        "ft:source": {
+          "@id": "urn:example:prov:native-compound/scope/11:fixture-run/read/11:protect%234/0"
+        },
+        "ft:target": {
+          "@id": "urn:example:prov:native-compound/scope/11:fixture-run/hidden/5/0"
+        },
+        "ft:attribution": "reads-prefix"
+      },
+      {
+        "@id": "urn:example:prov:native-compound/scope/11:fixture-run/hidden/5/0",
+        "ft:possibleDerivation": {
+          "@id": "urn:example:prov:native-compound/scope/11:fixture-run/candidate/5/0/0"
+        }
+      }
+    ]
+  },
+  "gaps": [
+    {
+      "code": "redacted",
+      "reason": "redacted path families withheld"
+    },
+    {
+      "code": "scope-boundary",
+      "reason": "additional child scopes are not exported by the single-record core"
+    },
+    {
+      "code": "not-collected",
+      "reason": "native capture and ending attestation is unavailable"
+    },
+    {
+      "code": "not-collected",
+      "reason": "scope capture coverage is incomplete",
+      "count": 6
+    },
+    {
+      "code": "ambiguous",
+      "reason": "intermediate write value was not retained",
+      "count": 1
+    },
+    {
+      "code": "untracked-input",
+      "reason": "commits contain untracked inputs",
+      "count": 1
+    },
+    {
+      "code": "redacted",
+      "reason": "commits contain redacted paths",
+      "count": 1
+    },
+    {
+      "code": "redacted",
+      "reason": "write paths withheld",
+      "count": 1
+    },
+    {
+      "code": "ambiguous",
+      "reason": "intra-stage read version was not captured",
+      "count": 4
+    }
+  ],
+  "complete": false
+}

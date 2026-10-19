@@ -1,0 +1,150 @@
+{
+  "document": {
+    "@context": {
+      "prov": "http://www.w3.org/ns/prov#",
+      "ft": "https://footprintjs.dev/ns/foottrace#"
+    },
+    "@graph": [
+      {
+        "@id": "urn:example:prov:record-contract/scope/record",
+        "@type": "ft:Record"
+      },
+      {
+        "@id": "urn:example:prov:record-contract/scope/activity/8:seed%230",
+        "@type": "prov:Activity",
+        "ft:stageId": "seed",
+        "ft:executionIndex": 0,
+        "ft:inRecord": {
+          "@id": "urn:example:prov:record-contract/scope/record"
+        }
+      },
+      {
+        "@id": "urn:example:prov:record-contract/scope/commit/0",
+        "@type": "ft:Commit",
+        "ft:commitIdx": 0,
+        "ft:inRecord": {
+          "@id": "urn:example:prov:record-contract/scope/record"
+        },
+        "ft:execution": {
+          "@id": "urn:example:prov:record-contract/scope/activity/8:seed%230"
+        }
+      },
+      {
+        "@id": "urn:example:prov:record-contract/scope/write/0/0/5:count",
+        "@type": "prov:Entity",
+        "ft:commitIdx": 0,
+        "ft:rowIdx": 0,
+        "ft:verb": "set",
+        "ft:inCommit": {
+          "@id": "urn:example:prov:record-contract/scope/commit/0"
+        },
+        "ft:valueAvailability": "not-exported",
+        "ft:path": "count",
+        "prov:wasGeneratedBy": {
+          "@id": "urn:example:prov:record-contract/scope/activity/8:seed%230"
+        }
+      },
+      {
+        "@id": "urn:example:prov:record-contract/scope/activity/8:grow%231",
+        "@type": "prov:Activity",
+        "ft:stageId": "grow",
+        "ft:executionIndex": 1,
+        "ft:inRecord": {
+          "@id": "urn:example:prov:record-contract/scope/record"
+        },
+        "ft:tags": [
+          "milestone:step"
+        ]
+      },
+      {
+        "@id": "urn:example:prov:record-contract/scope/commit/1",
+        "@type": "ft:Commit",
+        "ft:commitIdx": 1,
+        "ft:inRecord": {
+          "@id": "urn:example:prov:record-contract/scope/record"
+        },
+        "ft:execution": {
+          "@id": "urn:example:prov:record-contract/scope/activity/8:grow%231"
+        }
+      },
+      {
+        "@id": "urn:example:prov:record-contract/scope/write/1/0/5:items",
+        "@type": "prov:Entity",
+        "ft:commitIdx": 1,
+        "ft:rowIdx": 0,
+        "ft:verb": "append",
+        "ft:inCommit": {
+          "@id": "urn:example:prov:record-contract/scope/commit/1"
+        },
+        "ft:valueAvailability": "not-exported",
+        "ft:path": "items",
+        "prov:wasGeneratedBy": {
+          "@id": "urn:example:prov:record-contract/scope/activity/8:grow%231"
+        }
+      },
+      {
+        "@id": "urn:example:prov:record-contract/scope/activity/10:forget%232",
+        "@type": "prov:Activity",
+        "ft:stageId": "forget",
+        "ft:executionIndex": 2,
+        "ft:inRecord": {
+          "@id": "urn:example:prov:record-contract/scope/record"
+        }
+      },
+      {
+        "@id": "urn:example:prov:record-contract/scope/commit/2",
+        "@type": "ft:Commit",
+        "ft:commitIdx": 2,
+        "ft:inRecord": {
+          "@id": "urn:example:prov:record-contract/scope/record"
+        },
+        "ft:execution": {
+          "@id": "urn:example:prov:record-contract/scope/activity/10:forget%232"
+        }
+      },
+      {
+        "@id": "urn:example:prov:record-contract/scope/write/2/0/5:count",
+        "@type": "prov:Entity",
+        "ft:commitIdx": 2,
+        "ft:rowIdx": 0,
+        "ft:verb": "delete",
+        "ft:inCommit": {
+          "@id": "urn:example:prov:record-contract/scope/commit/2"
+        },
+        "ft:valueAvailability": "not-exported",
+        "ft:path": "count",
+        "ft:deleted": true,
+        "prov:wasGeneratedBy": {
+          "@id": "urn:example:prov:record-contract/scope/activity/10:forget%232"
+        }
+      }
+    ]
+  },
+  "gaps": [
+    {
+      "code": "not-collected",
+      "reason": "native capture and ending attestation is unavailable"
+    },
+    {
+      "code": "not-collected",
+      "reason": "scope capture coverage is incomplete",
+      "count": 3
+    },
+    {
+      "code": "conservative",
+      "reason": "read attribution is stage-level",
+      "count": 3
+    },
+    {
+      "code": "not-collected",
+      "reason": "read capture coverage is incomplete",
+      "count": 3
+    },
+    {
+      "code": "not-checked",
+      "reason": "final value reconstruction is outside stage one",
+      "count": 1
+    }
+  ],
+  "complete": false
+}

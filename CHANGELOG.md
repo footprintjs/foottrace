@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Optional asynchronous `foottrace/prov` ESM and CommonJS entry for a bounded, value-free PROV-O JSON-LD export of one recorded scope. Native executions, write occurrences and supported control links retain their recorded identities; captured reads use extension-only candidate relations. Missing, redacted and refused evidence remains explicit gaps, with ordinary snapshots incomplete pending supported native capture/end attestation.
+- A PROV export recipe, a runnable value-free example, strict public consumers, browser and tree-shaking checks, and dev-only offline JSON-LD representation tests. Existing record bytes and runtime dependencies remain unchanged. This is feature preparation; the package version remains 1.5.0 until a separate release review.
+
+### Fixed
+
+- Reserve bounded gap, count and truncation-marker bytes before PROV graph admission, so late gaps cannot erase an accepted graph prefix. Routine limitations use counted document summaries; unusual problems retain individual locations. P1 completeness remains always false pending supported native attestation and reader adoption.
+
 ## 1.5.0 — 2026-10-18
 
 ### Added

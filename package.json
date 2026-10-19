@@ -64,6 +64,16 @@
         "types": "./dist/types/cause.d.ts",
         "default": "./dist/cause.js"
       }
+    },
+    "./prov": {
+      "import": {
+        "types": "./dist/esm/prov.d.ts",
+        "default": "./dist/esm/prov.js"
+      },
+      "require": {
+        "types": "./dist/types/prov.d.ts",
+        "default": "./dist/prov.js"
+      }
     }
   },
   "typesVersions": {
@@ -76,6 +86,9 @@
       ],
       "cause": [
         "dist/types/cause.d.ts"
+      ],
+      "prov": [
+        "dist/types/prov.d.ts"
       ]
     }
   },
@@ -85,7 +98,7 @@
     "test:coverage": "vitest run --coverage",
     "typecheck": "tsc -p tsconfig.test.json",
     "check:layering": "node scripts/check-layering.mjs",
-    "check:package": "publint && attw --pack --profile strict && tsc -p test/consumer/cause/tsconfig.json",
+    "check:package": "publint && attw --pack --profile strict && tsc -p test/consumer/cause/tsconfig.json && tsc -p test/consumer/prov/tsconfig.json",
     "lint": "eslint 'src/**/*.ts'",
     "format": "prettier --check 'src/**/*.ts' 'test/**/*.ts'",
     "test:examples": "tsc -p examples/tsconfig.json",
@@ -100,6 +113,7 @@
     "esbuild": "0.28.2",
     "eslint": "^8.57.1",
     "fast-check": "^4.4.0",
+    "jsonld": "9.0.0",
     "prettier": "^2.8.1",
     "publint": "^0.3.0",
     "typescript": "~5.4.5",
