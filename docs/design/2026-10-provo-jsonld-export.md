@@ -2,6 +2,13 @@
 
 Status: **mapping approved; implement only P1 below**. No merge or publication is authorized by this note.
 
+## P2 contract review, 2026-10-19
+
+P1 and P1.1 are merged; Foottrace 1.6.0 is published. The [P2 contract proposal](./prov-p2-contract.md)
+defines the 1.7.0 surfaces and small-PR sequence against the actual code. It is
+pending independent and owner review; the earlier approval below authorizes P1,
+not unreviewed P2 implementation. Historical mapping decisions remain unchanged.
+
 ## Approved phase boundary — 2026-10-18
 
 The review of design PR #18, commit `27b4b3d`, approved all six mapping decisions
