@@ -1,16 +1,15 @@
 import { ProvBudget } from './budget.js';
 import { PROV_CONTEXT } from './context.js';
+import { utf8Bytes } from './encoding.js';
 import type { ProvExport, ProvNode, ProvValue } from './types.js';
 
-/** UTF-8 size for owned, well-formed strings, including JSON escaping already applied by stringify. */
-export function utf8Bytes(value: string): number {
-  let bytes = 0;
-  for (let index = 0; index < value.length; index++) {
-    const code = value.charCodeAt(index);
-    bytes += code < 0x80 ? 1 : code < 0x800 ? 2 : code >= 0xd800 && code <= 0xdbff ? (index++, 4) : 3;
-  }
-  return bytes;
-}
+const envelopeBytes = utf8Bytes(
+  JSON.stringify({
+    document: { '@context': PROV_CONTEXT, '@graph': [] },
+    gaps: [],
+    complete: false,
+  }),
+);
 
 function linksIn(node: ProvNode): number {
   let links = 0;
@@ -43,9 +42,9 @@ export class ProvOutput {
       !this.budget.spend('work', bytes) ||
       !this.budget.spend('nodes') ||
       !this.budget.spend('relations', linksIn(node)) ||
-      this.bytes + bytes > this.budget.limits.maxOutputBytes - 1024
+      envelopeBytes + this.bytes + bytes + this.budget.gapBytes > this.budget.limits.maxOutputBytes
     ) {
-      this.budget.addGap({ code: 'truncated', reason: 'export output limit reached' });
+      this.budget.outputLimitReached();
       this.stopped = true;
       return false;
     }
@@ -60,7 +59,7 @@ export class ProvOutput {
       complete: false,
     };
     if (utf8Bytes(JSON.stringify(result)) <= this.budget.limits.maxOutputBytes) return result;
-    // Never return an oversized refusal or silently cut its explanation. A fixed envelope always fits 2048 bytes.
+    // Invariant guard only: reserved gap/count/marker bytes plus the envelope prevent this on admitted input.
     return {
       document: { '@context': PROV_CONTEXT, '@graph': [] },
       gaps: [{ code: 'truncated', reason: 'export envelope limit reached' }, { code: 'not-collected' }],

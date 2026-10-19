@@ -28,9 +28,9 @@ values, fingerprints, inferred people or invented times. Captured reads remain
 explicit candidate evidence rather than a claim of semantic derivation.
 
 Redacted writes retain opaque placeholders: their count and position remain
-visible, while their names and values are withheld. An ordinary record currently
-returns `complete: false` because native capture and ending attestation is not
-available. Keep its gaps with the document. See the
+visible, while their names and values are withheld. Every P1 export returns
+`complete: false`; native capture and ending attestation must first be implemented
+and supported by this reader. Keep its gaps with the document. See the
 [export recipe and safety limits](https://github.com/footprintjs/foottrace/blob/main/docs/prov.md)
 and the [runnable example](https://github.com/footprintjs/foottrace/blob/main/examples/post-execution/prov/01-export-prov.ts).
 

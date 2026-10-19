@@ -70,6 +70,12 @@ candidate relations are never `prov:wasDerivedFrom`, `prov:wasInfluencedBy`,
 `prov:Derivation` or `prov:Influence`. A standard reader that ignores `ft:` terms
 must not infer a stronger dependency than the evidence supports.
 
+An entity's candidate links may appear in a second node object with the same
+`@id` as its write occurrence. This is valid JSON-LD: those objects describe one
+node, and JSON-LD flattening joins their properties by identity. A plain JSON
+consumer must likewise group node objects by `@id`; array position does not
+identify a distinct entity.
+
 This phase also emits no version-specific `prov:used` link from ordinary captured
 reads. A strictly earlier committed writer is not proof of the exact value read:
 the stage can read its own staged write, a container can need several nested
@@ -110,12 +116,28 @@ fixed categories with positional references, not raw input or exception text.
 Missing capture, malformed data, redaction, conservative candidates and bounds
 remain visible.
 
-An ordinary snapshot returns `complete: false` with `not-collected`: it has no
-supported native attestation of everything captured and how that run ended.
-A serialized `complete: true` or a durable closed marker alone is not accepted as
-that proof. This limitation is deliberate until native capture/end metadata is
-available and deliberately supported. `complete` would describe evidence coverage
-within the export contract, not business success or proven semantic causation.
+Routine limits are summarized once per reason at document level, without a
+`commitIdx` or `rowIdx`, with a positive integer `count`. Examples include missing
+read versions, conservative read capture, and unavailable intermediate or patch
+values. The count covers observations processed by this export, not every event
+in the original run: source records can already have deduplicated reads, and a
+bound can stop inspection early. Unusual problems keep individual gaps with
+positional references where known. Both forms share a bounded gap allowance;
+withheld reports are disclosed with a `truncated` gap and count, rather than
+silently disappearing.
+
+**Every P1 export returns `complete: false`.** There is no supported attestation
+path in this phase, including for a cleanly finished run or a closed stored log.
+Missing native capture and ending attestation is reported as `not-collected`,
+subject to the gap limits below. A serialized `complete: true` or a durable closed
+marker alone is not accepted as that proof.
+
+Native capture/end metadata is planned in
+[FootPrint #111](https://github.com/footprintjs/footPrint/issues/111). Adding it to
+the producer will not by itself change this exporter: the reader must deliberately
+adopt and validate the attestation first. `complete` would describe evidence
+coverage within the export contract, not business success or proven semantic
+causation.
 
 ## 5. Set finite work and output limits
 
@@ -139,10 +161,12 @@ There are no model-selected limits or unbounded fallbacks.
 The field, node, relation, string-byte and work allowances cover admission and
 mapping together, not just final graph size. The output byte ceiling covers the
 UTF-8 JSON serialization of the **whole returned envelope**, including context,
-graph, gaps and completeness. If those details do not fit, a bounded fixed
-truncation result replaces them; it never returns an oversized supposedly bounded
-answer. Additional gap details are capped and disclosed as truncated. Original
-commit/row indexes are retained when something is refused.
+graph, gaps and completeness. Space for bounded gap reports, including truncation
+markers, is reserved before graph output. Reaching the graph allowance retains
+the admitted graph prefix and reports truncation; accumulated gaps cannot discard
+that prefix at final serialization. At small byte ceilings some gap reports may
+also be withheld, with that omission disclosed. Original commit/row indexes are
+retained for individual refusals. The envelope never exceeds the byte ceiling.
 
 Invalid options reject with `ProvExportRefusal`, a `TypeError` with fixed
 `code: 'PROV_EXPORT_OPTIONS'`. Check the known operation's error `code`, rather than

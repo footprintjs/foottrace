@@ -28,6 +28,8 @@ export interface ProvExportGap {
   readonly commitIdx?: number;
   readonly rowIdx?: number;
   readonly reason?: string;
+  /** Processed routine observations, or withheld reports; never an inferred total for an uninspected tail. */
+  readonly count?: number;
 }
 export interface ProvDocument {
   readonly '@context': ProvNode;

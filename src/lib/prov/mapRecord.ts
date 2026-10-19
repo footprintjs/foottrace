@@ -54,7 +54,12 @@ export function mapRecord(mapping: ProvMapping): void {
     const { bundle, commitIdx } = commit;
     execution(mapping, commit);
     const native = mapping.activities.has(bundle.runtimeStageId);
-    collectScopeCoverage(mapping.scope, bundle, undefined, (code) => budget.addGap({ code, commitIdx }));
+    collectScopeCoverage(mapping.scope, bundle, undefined, (code) => {
+      if (code === 'not-collected') budget.summarizeGap('scope-coverage');
+      else if (code === 'untracked-input') budget.summarizeGap('untracked-commit');
+      else if (code === 'redacted') budget.summarizeGap('redacted-commit');
+      else budget.addGap({ code, commitIdx });
+    });
     if (
       !output.add({
         '@id': ids.commit(commitIdx),
@@ -75,23 +80,15 @@ export function mapRecord(mapping: ProvMapping): void {
         mapping.scope,
         { address: mapping.scope.address, runtimeStageId: bundle.runtimeStageId, key: row.path },
         row.readKeys !== undefined,
-        (code) => budget.addGap({ code, commitIdx, rowIdx: row.rowIdx }),
+        (code) => {
+          if (code === 'conservative') budget.summarizeGap('read-attribution');
+          else if (code === 'not-collected') budget.summarizeGap('read-coverage');
+          else budget.addGap({ code, commitIdx, rowIdx: row.rowIdx });
+        },
       );
-      if (hidden) budget.addGap({ code: 'redacted', commitIdx, rowIdx: row.rowIdx });
-      if (lastRows.get(row.path) !== row.rowIdx)
-        budget.addGap({
-          code: 'ambiguous',
-          commitIdx,
-          rowIdx: row.rowIdx,
-          reason: 'intermediate write value was not retained',
-        });
-      if (row.verb === 'append' || row.verb === 'merge')
-        budget.addGap({
-          code: 'not-checked',
-          commitIdx,
-          rowIdx: row.rowIdx,
-          reason: 'final value reconstruction is outside stage one',
-        });
+      if (hidden) budget.summarizeGap('redacted-write');
+      if (lastRows.get(row.path) !== row.rowIdx) budget.summarizeGap('intermediate-write');
+      if (row.verb === 'append' || row.verb === 'merge') budget.summarizeGap('patch-value');
       if (
         output.add({
           '@id': id,

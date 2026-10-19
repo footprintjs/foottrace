@@ -35,3 +35,9 @@ semantics independently. There is no automatic re-pin switch. A future change to
 either expected envelope needs an explicit review of its stated contract and
 changed lines; a security or correctness defect should be fixed in code, not
 hidden by refreshing expected bytes.
+
+The PR #19 gap-budget review changed only these new envelopes' `gaps` arrays:
+routine limitations now use document-level counts rather than repeated positions.
+Their complete `document` objects and `complete: false` are byte-identical to the
+first pins. The review-fix receipt captures the old and new hashes and gap diff;
+the established record and cause fixtures remain unchanged.

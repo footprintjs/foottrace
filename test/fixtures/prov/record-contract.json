@@ -127,51 +127,23 @@
     },
     {
       "code": "not-collected",
-      "commitIdx": 0
+      "reason": "scope capture coverage is incomplete",
+      "count": 3
     },
     {
       "code": "conservative",
-      "commitIdx": 0,
-      "rowIdx": 0
+      "reason": "read attribution is stage-level",
+      "count": 3
     },
     {
       "code": "not-collected",
-      "commitIdx": 0,
-      "rowIdx": 0
-    },
-    {
-      "code": "not-collected",
-      "commitIdx": 1
-    },
-    {
-      "code": "conservative",
-      "commitIdx": 1,
-      "rowIdx": 0
-    },
-    {
-      "code": "not-collected",
-      "commitIdx": 1,
-      "rowIdx": 0
+      "reason": "read capture coverage is incomplete",
+      "count": 3
     },
     {
       "code": "not-checked",
-      "commitIdx": 1,
-      "rowIdx": 0,
-      "reason": "final value reconstruction is outside stage one"
-    },
-    {
-      "code": "not-collected",
-      "commitIdx": 2
-    },
-    {
-      "code": "conservative",
-      "commitIdx": 2,
-      "rowIdx": 0
-    },
-    {
-      "code": "not-collected",
-      "commitIdx": 2,
-      "rowIdx": 0
+      "reason": "final value reconstruction is outside stage one",
+      "count": 1
     }
   ],
   "complete": false

@@ -29,9 +29,8 @@ describe('new PROV exact envelope fixtures', () => {
     expect(typed(result, 'prov:Entity').filter((node) => node['ft:deleted'] === true)).toHaveLength(1);
     expect(result.gaps).toContainEqual({
       code: 'not-checked',
-      commitIdx: 1,
-      rowIdx: 0,
       reason: 'final value reconstruction is outside stage one',
+      count: 1,
     });
     expect(serialize(result)).toBe(fixture('record-contract'));
   });
@@ -52,9 +51,8 @@ describe('new PROV exact envelope fixtures', () => {
     expect(result.gaps.some((gap) => gap.code === 'scope-boundary')).toBe(true);
     expect(result.gaps).toContainEqual({
       code: 'ambiguous',
-      commitIdx: 1,
-      rowIdx: 0,
       reason: 'intermediate write value was not retained',
+      count: 1,
     });
     expect(
       entities.filter((node) => node['ft:redacted'] === true).map((node) => [node['ft:commitIdx'], node['ft:rowIdx']]),

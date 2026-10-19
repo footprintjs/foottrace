@@ -24,6 +24,8 @@ export function mapReads(mapping: ProvMapping): void {
     }
   if (!budget.spend('work', indexCost) || !budget.spend('nodes', indexNodes)) return;
   const index = buildKeyIndex(record.log, () => []);
+  if (!budget.spend('work', record.commits.length)) return;
+  const byCommitIndex = new Map(record.commits.map((commit) => [commit.commitIdx, commit]));
   for (const [runtimeStageId, commits] of mapping.groups) {
     if (output.full || !mapping.activities.has(runtimeStageId)) continue;
     const keys = mapping.reads.get(runtimeStageId) ?? [],
@@ -40,22 +42,13 @@ export function mapReads(mapping: ProvMapping): void {
       const source =
         previous === undefined || !entry || entry.path !== key
           ? undefined
-          : lastRow(record.commits.find((commit) => commit.commitIdx === previous)?.rows ?? [], key);
+          : lastRow(byCommitIndex.get(previous)?.rows ?? [], key);
       const candidate = source
         ? ids.write(source.commitIdx, source.rowIdx, mapping.hidden(source.path) ? undefined : source.path)
         : undefined;
-      if (previous !== undefined && !candidate)
-        budget.addGap({
-          code: 'ambiguous',
-          commitIdx: commits[0].commitIdx,
-          reason: 'read basis is not a single recorded binding',
-        });
-      budget.addGap({
-        code: 'ambiguous',
-        commitIdx: commits[0].commitIdx,
-        reason: 'intra-stage read version was not captured',
-      });
-      if (hidden) budget.addGap({ code: 'redacted', commitIdx: commits[0].commitIdx });
+      if (previous !== undefined && !candidate) budget.summarizeGap('read-basis');
+      budget.summarizeGap('read-version');
+      if (hidden) budget.summarizeGap('redacted-read');
       if (
         output.add({
           '@id': readId,

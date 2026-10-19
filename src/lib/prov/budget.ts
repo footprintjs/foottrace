@@ -1,6 +1,8 @@
 import { boundedList, EvidenceRefusal, ownData } from '../evidence/admission.js';
 import type { GapCode } from '../evidence/codes.js';
 import { wellFormed } from './options.js';
+import { ProvGaps } from './gaps.js';
+import type { ProvRoutineGap } from './gaps.js';
 import type { ProvExportGap, ProvLimits } from './types.js';
 
 export type ProvCost = 'work' | 'fields' | 'rows' | 'reads' | 'nodes' | 'relations' | 'stringBytes';
@@ -25,10 +27,18 @@ const descriptors = { translateTrapErrors: true, requireOwnValue: true };
 export class ProvBudget {
   private readonly usage = new Map<ProvCost, number>();
   private readonly refused = new Set<ProvCost>();
-  private readonly held: ProvExportGap[] = [];
-  constructor(readonly limits: ProvLimits) {}
+  private readonly reports: ProvGaps;
+  constructor(readonly limits: ProvLimits) {
+    this.reports = new ProvGaps(limits.maxOutputBytes);
+  }
   get gaps(): readonly ProvExportGap[] {
-    return this.held;
+    return this.reports.gaps;
+  }
+  get gapBytes(): number {
+    return this.reports.reservedBytes;
+  }
+  outputLimitReached(): void {
+    this.reports.markOutputLimit();
   }
   spend(kind: ProvCost, count = 1): boolean {
     if (
@@ -50,21 +60,10 @@ export class ProvBudget {
     return this.refused.has(kind);
   }
   addGap(gap: ProvExportGap): void {
-    if (
-      this.held.some(
-        (held) =>
-          held.code === gap.code &&
-          held.commitIdx === gap.commitIdx &&
-          held.rowIdx === gap.rowIdx &&
-          held.reason === gap.reason,
-      )
-    )
-      return;
-    if (this.held.length >= 255) {
-      if (this.held.length === 255) this.held.push({ code: 'truncated', reason: 'additional export gaps withheld' });
-      return;
-    }
-    this.held.push(Object.freeze({ ...gap }));
+    this.reports.add(gap);
+  }
+  summarizeGap(kind: ProvRoutineGap): void {
+    this.reports.summarize(kind);
   }
 }
 

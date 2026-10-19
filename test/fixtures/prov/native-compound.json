@@ -392,66 +392,33 @@
     },
     {
       "code": "not-collected",
-      "commitIdx": 0
-    },
-    {
-      "code": "not-collected",
-      "commitIdx": 1
+      "reason": "scope capture coverage is incomplete",
+      "count": 6
     },
     {
       "code": "ambiguous",
-      "commitIdx": 1,
-      "rowIdx": 0,
-      "reason": "intermediate write value was not retained"
-    },
-    {
-      "code": "not-collected",
-      "commitIdx": 2
+      "reason": "intermediate write value was not retained",
+      "count": 1
     },
     {
       "code": "untracked-input",
-      "commitIdx": 2
-    },
-    {
-      "code": "not-collected",
-      "commitIdx": 3
-    },
-    {
-      "code": "not-collected",
-      "commitIdx": 4
-    },
-    {
-      "code": "not-collected",
-      "commitIdx": 5
+      "reason": "commits contain untracked inputs",
+      "count": 1
     },
     {
       "code": "redacted",
-      "commitIdx": 5
+      "reason": "commits contain redacted paths",
+      "count": 1
     },
     {
       "code": "redacted",
-      "commitIdx": 5,
-      "rowIdx": 0
+      "reason": "write paths withheld",
+      "count": 1
     },
     {
       "code": "ambiguous",
-      "commitIdx": 1,
-      "reason": "intra-stage read version was not captured"
-    },
-    {
-      "code": "ambiguous",
-      "commitIdx": 2,
-      "reason": "intra-stage read version was not captured"
-    },
-    {
-      "code": "ambiguous",
-      "commitIdx": 3,
-      "reason": "intra-stage read version was not captured"
-    },
-    {
-      "code": "ambiguous",
-      "commitIdx": 5,
-      "reason": "intra-stage read version was not captured"
+      "reason": "intra-stage read version was not captured",
+      "count": 4
     }
   ],
   "complete": false
