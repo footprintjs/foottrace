@@ -1,15 +1,23 @@
 # P2 contract for Foottrace 1.7.0: proposal for review
 
-Status: **design only; approval required before implementation**. This PR adds no
-runtime capability, public export, version bump or release. P1 and P1.1 are merged;
-published 1.6.0 remains the compatibility baseline. Each implementation PR must
+Status: **design only; revised after the owner's external review**. This PR adds
+no runtime capability, public export, version bump or release. P1 and P1.1 are
+merged; published 1.6.0 remains the compatibility baseline. The changes below
+record the requested demand order and person-label boundary; the revised contract
+still returns for final review before implementation. Each implementation PR must
 receive tests, independent security then code reviews, and final external review.
 
 ## Purpose and ownership
 
-P2 adds three independently reviewed surfaces: opt-in final-value fingerprints,
-explicit host agent facts, and additional already-loaded records. It translates
-captured evidence; it never reconstructs missing read versions, decisions, native
+P2 plans three independently reviewed surfaces. Build **additional already-loaded
+records first (P2.4)**, because AgentFootprint runs include sub-runs; then build
+**explicit host agent facts (P2.3)** for recorded human and software associations.
+Strict canonical JSON and opt-in final-value fingerprints (P2.1/P2.2) are deferred
+until a real consumer needs them. They are not prerequisites for scopes or agents.
+Release 1.7.0 after the chosen surfaces pass review; it need not contain all four
+implementation packets.
+
+The exporter translates captured evidence; it never reconstructs missing read versions, decisions, native
 capture coverage or an unobserved ending. Those remain FootPrint #108/#109/#111/#113.
 The LLM may explain supported facts and gaps; it is not part of this exporter.
 
@@ -20,12 +28,15 @@ semantic truth, anonymization or full PROV constraint validation.
 
 ## Proposed public boundaries
 
+Only the chosen, independently reviewed surfaces enter 1.7.0. Deferred boundaries
+below are design constraints for future work, not required release contents.
+
 | Boundary | Proposed contract |
 | --- | --- |
-| `foottrace/canonical-json` | `canonicalizeJson(value: unknown, limits?: CanonicalJsonOptions): string`, plus types and a fixed coded refusal. Pure synchronous owned-JSON admission and canonical text; no crypto, PROV, engine or root-door re-export. |
-| `foottrace/prov` | Existing async `exportProv`; `values: 'none'` stays default, adding `'digest'` explicitly. No raw-value mode. |
-| Host facts | Optional data-only `agents` and `associations` arrays; no executable callback or arbitrary JSON-LD. |
-| Extra scopes | Optional `additionalScopes` array of `ProvLoadedScope extends RecordScope`, with optional `initialState: unknown` admitted only for digest mode. No loader, URL, file path or automatic child-payload traversal. |
+| `foottrace/canonical-json` (deferred P2.1) | `canonicalizeJson(value: unknown, limits?: CanonicalJsonOptions): string`, plus types and a fixed coded refusal. Pure synchronous owned-JSON admission and canonical text; no crypto, PROV, engine or root-door re-export. |
+| `foottrace/prov` (deferred P2.2 addition) | Existing async `exportProv`; `values: 'none'` stays default, adding `'digest'` explicitly only with P2.2. No raw-value mode. |
+| Host facts (P2.3) | Optional data-only `agents` and `associations` arrays; no executable callback or arbitrary JSON-LD. `allowPersonLabels: false` by default; explicit host opt-in is required to export person labels. |
+| Extra scopes (P2.4) | Optional `additionalScopes` array of `ProvLoadedScope extends RecordScope`, with optional `initialState: unknown` admitted only for digest mode. No loader, URL, file path or automatic child-payload traversal. |
 
 Existing calls, both P1 golden outputs and all old accepted-option cutoff behavior
 must stay byte-identical. `values: 'none'` does not inspect payload members or
@@ -40,7 +51,7 @@ bytes. Do not replace it, relabel its hashes as RFC 8785, or invalidate old bund
 Foottrace owns the new strict implementation; future AgentFootprint reuse requires
 a separately reviewed explicit new format/mode, preserving historical verification.
 
-## Strict canonical JSON
+## Strict canonical JSON — deferred P2.1
 
 Accept null, booleans, finite binary64 numbers, well-formed strings, dense arrays
 and plain/null-prototype objects containing only admitted JSON members. Reject
@@ -65,7 +76,7 @@ The standalone utility returns raw canonical text; it is not a redactor or sanit
 This API receives JavaScript values: duplicate raw JSON names and numeric precision
 already lost during parsing cannot be recovered. It is not a JSON-text validator.
 
-## Digest eligibility and snapshot ownership
+## Digest eligibility and snapshot ownership — deferred P2.2
 
 Digest means SHA-256 of RFC-8785 canonical UTF-8 bytes of a complete supported
 value **at the end of that commit**. Attach only to the final eligible occurrence
@@ -86,7 +97,8 @@ intermediate values, deleted/undefined values and unsupported reconstruction get
 fixed gaps, never a guessed digest. Raw append tails and merge patches cannot be
 hashed as complete values. Begin conservatively: only final `set` occurrences with
 complete anchored reconstruction; merge/append occurrence digests stay unsupported
-in 1.7.0. Any later expansion needs its own eligibility proof and review.
+in the first digest release. Any later expansion needs its own eligibility proof
+and review. Digest work is not required for 1.7.0.
 
 Preflight eligibility and privacy for every requested candidate before crypto.
 Unknown privacy withholds every digest in that scope. Redaction at, above or below
@@ -113,11 +125,21 @@ a host-configured wait limit; a timed-out result is ignored, never emitted later
 WebCrypto cannot be cancelled, so the driver stops scheduling new digests after a
 timeout; this bounds waiting, not the underlying platform's computation lifetime.
 
-## Host agent descriptors
+## Host agent descriptors — second, P2.3
 
 An agent has `id: string`, `kind: 'software' | 'person' | 'organization'`, and an
 optional `label: string`. Map kinds to `prov:SoftwareAgent`, `prov:Person` and
-`prov:Organization`. Generate IDs in a disjoint exporter-owned agent namespace
+`prov:Organization`. **Person labels are personal data and are absent from output
+by default**, including when supplied by the host. The host option
+`allowPersonLabels` defaults to `false`; only explicit `true` permits emitting an
+admitted person label. The host must be entitled to export that personal data.
+The option is not evidence of consent or authority, and the exporter must not
+invent either. Recommend opaque IDs and no person labels; IDs themselves must
+also be suitable for export. A person without a label is a valid descriptor and
+exports normally. A withheld person label must not reappear in IDs, gaps or other
+metadata. Software and organization labels remain optional host metadata.
+
+Generate IDs in a disjoint exporter-owned agent namespace
 from admitted opaque IDs; do not accept host JSON-LD, external graph IDs or extras.
 An association contains `agentId`, `runtimeStageId`, and optional exact `address`.
 Omitting address selects the root only. An explicit address must match exactly one
@@ -131,12 +153,13 @@ This prevents a conflicting descriptor in an unseen tail from making first-wins 
 Exact duplicate agent descriptors coalesce; conflicting descriptors with the same
 ID withhold that identity and all its associations with an `ambiguous` gap. Exact
 associations coalesce; dangling references get positional fixed gaps. Preserve
-first encounter ordering. Plain labels are host-declared exportable metadata;
-they are not verified identities and cannot prove consent, authority or approval.
+first encounter ordering. Person-label opt-out does not relax descriptor admission
+or conflict checks. Labels allowed by the host policy are declared metadata; they
+are not verified identities and cannot prove consent, authority or approval.
 No secret classification can be inferred from arbitrary label text. Snapshot and
 validate all descriptors before any await; callback exceptions cannot exist here.
 
-## Additional loaded scopes
+## Additional loaded scopes — first, P2.4
 
 Reuse `RecordScope` address, commit-log and absent-versus-empty map distinctions;
 do not reuse a weaker loader admission path or trust its `complete` boolean as
@@ -163,9 +186,11 @@ FootPrint #111 and deliberate reader adoption remain a separate prerequisite.
 
 ## Proposed finite limits
 
-All new options have positive finite defaults and hard ceilings, validated before
+All new limits have positive finite defaults and hard ceilings, validated before
 work. Existing limits retain their defaults and cover totals across all scopes.
-These numbers are proposed ceilings, not performance measurements.
+These numbers are proposed ceilings, not performance measurements. Value and
+digest limits enter only with deferred P2.1/P2.2; scopes and agents do not depend
+on those options or their implementation.
 
 | New PROV limit | Default | Hard ceiling | Charged resource |
 | --- | ---: | ---: | --- |
@@ -187,16 +212,22 @@ canonicalization and output work; cap gap space within the existing envelope.
 | PR | Deliverable | Required new proof before implementation review |
 | --- | --- | --- |
 | P2.0 (this PR) | Contract, trust boundaries and sequence only | Unchanged runtime/package and both existing goldens; no capability claim |
-| P2.1 | Shared strict canonical JSON and owned admission | RFC sample bytes, Appendix B numbers, Unicode and integer-name ordering, getters/holes/cycles/Proxy refusals, every limit, strict dual-format/browser door |
-| P2.2 | Opt-in digest integration | Eligible final sets versus intermediates/patches/skipped history, ancestor/descendant writes, late privacy, mutation during await, absent/rejected/hung crypto and exact digest vectors |
-| P2.3 | Host data descriptors | Conflicts beyond the descriptor cap, unreadable IDs, duplicate/dangling associations, scope isolation, hostile labels, no invented approval/producer |
-| P2.4 | Loaded scope selection | Shared caps, address collision/truncated selection, missing children, independent privacy/maps/extent, no implicit cross-scope causality |
-| Release | Separate 1.7.0 paperwork after all approvals | Version/lock/changelog only, exact-head checks, publish then fresh registry consumers |
+| P2.4 — first | Loaded scope selection | Shared caps, address collision/truncated selection, missing children, independent privacy/maps/extent, no implicit cross-scope causality |
+| P2.3 — second | Host data descriptors | Unlabeled person exports normally; supplied person label absent by default and when opted out, explicit opt-in only, conflicts beyond the descriptor cap, unreadable IDs, duplicate/dangling associations, scope isolation, hostile labels, no invented consent/approval/producer |
+| Release | Separate 1.7.0 paperwork after the chosen surfaces pass all reviews | Version/lock/changelog only, exact-head checks, publish then fresh registry consumers; no dependency on deferred P2.1/P2.2 |
+| P2.1 — deferred until a real consumer | Shared strict canonical JSON and owned admission | RFC sample bytes, Appendix B numbers, Unicode and integer-name ordering, getters/holes/cycles/Proxy refusals, every limit, strict dual-format/browser door |
+| P2.2 — deferred, after P2.1 and a real consumer | Opt-in digest integration | Eligible final sets versus intermediates/patches/skipped history, ancestor/descendant writes, late privacy, mutation during await, absent/rejected/hung crypto and exact digest vectors |
+
+Packet numbers retain their original design references; they are not build order.
+The current order is **P2.4 → P2.3**, with each PR reviewed separately before the
+next starts. P2.1/P2.2 wait for an audit-comparison or data-reference provenance
+consumer rather than blocking either current packet or the 1.7.0 release.
 
 For each code PR: write tests red first, full Node22/24 checks and coverage,
 unchanged default/no-values golden and tight-cap differential probes, fresh packed
 CJS/ESM/strict TypeScript/browser consumers, independent SECURITY then CODE review,
 then PR and stop for the owner's other reviewer. Keep zero runtime dependencies
-and root-door tree shaking. In P2.1, also document that `ProvCommitContext.hides`
-must be side-effect-free: no budget spending or I/O. Leave speculative live-fact
+and root-door tree shaking. In the next code packet, also document that
+`ProvCommitContext.hides` must be side-effect-free: no budget spending or I/O.
+Leave speculative live-fact
 precomputation alone. P3 live delivery still waits for a real consumer and review.
