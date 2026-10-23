@@ -23,6 +23,19 @@ import { putOwn } from '../capture/ownData.js';
 
 const DENIED = new Set(['__proto__', 'constructor', 'prototype']);
 
+/** Inert facts gathered by the SAME own-slot check the native read already performs. */
+export interface NativeReadObservation {
+  dataOnly: boolean;
+  selectedAddress?: readonly string[];
+  live?: boolean;
+}
+export function observedOwn(object: object, key: string | number, observation?: NativeReadObservation): boolean {
+  if (!observation) return Object.prototype.hasOwnProperty.call(object, key);
+  const descriptor = Object.getOwnPropertyDescriptor(object, key);
+  if (descriptor && !Object.hasOwn(descriptor, 'value')) observation.dataOnly = false;
+  return descriptor !== undefined;
+}
+
 /** Is `segment` one of the three denied prototype-pollution selector names? */
 export function isDeniedSegment(segment: string | number): boolean {
   return DENIED.has(String(segment));
@@ -40,13 +53,18 @@ function toSegments(path: string | (string | number)[]): (string | number)[] {
  * e.g. nativeGet({}, '__proto__') and nativeGet({}, 'constructor') both return
  * `defaultValue` instead of leaking Object.prototype / the Object constructor.
  */
-export function nativeGet(obj: any, path: string | (string | number)[], defaultValue?: any): any {
+export function nativeGet(
+  obj: any,
+  path: string | (string | number)[],
+  defaultValue?: any,
+  observation?: NativeReadObservation,
+): any {
   const segs = toSegments(path);
   let curr = obj;
   for (const seg of segs) {
     if (curr == null) return defaultValue;
     if (DENIED.has(String(seg))) return defaultValue;
-    if (!Object.prototype.hasOwnProperty.call(curr, seg)) return defaultValue;
+    if (!observedOwn(curr, seg, observation)) return defaultValue;
     curr = curr[seg];
   }
   return curr === undefined ? defaultValue : curr;

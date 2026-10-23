@@ -39,7 +39,9 @@
 
 import type { OpVerb } from './deltaEncoding.js';
 import type { EventLog } from './EventLog.js';
-import { nativeGet } from './pathOps.js';
+import { nativeGet, type NativeReadObservation } from './pathOps.js';
+import type { SourceFrame } from '../read-sources/capture.js';
+import type { ReadSourceOccurrence, ReadSourceOwner } from '../read-sources/types.js';
 import { type CommitStamp, recordCommit } from './recordCommit.js';
 import type { SharedMemory } from './SharedMemory.js';
 import { TransactionBuffer } from './TransactionBuffer.js';
@@ -97,6 +99,7 @@ export class RecordFrame {
    * "last write's prefix == union" hold in delta mode.
    */
   private readKeys?: Set<string>;
+  private declare sourceFrame?: SourceFrame;
 
   constructor(state: SharedMemory, log?: EventLog, address: readonly string[] = []) {
     this.state = state;
@@ -183,6 +186,15 @@ export class RecordFrame {
   private firstTouch(): Record<string, unknown> {
     if (!this.base) {
       this.base = this.state.getState();
+      const capture = this.state.readSourceCapture;
+      if (capture && capture === this.log?.readSourceCapture) {
+        this.log.registerReadSourceAddress(this._address);
+        try {
+          this.sourceFrame = capture.frame(this._address);
+        } catch {
+          capture.poison();
+        }
+      }
     }
     return this.base;
   }
@@ -208,12 +220,28 @@ export class RecordFrame {
         this.encoding?.writeProvenance === 'reads-prefix' ? () => [...(this.readKeys ?? [])] : undefined;
       // The frame's address (9.30.0: the admitted record reads the containers there as where the
       // stage writes, never as a value it read).
-      this.buffer = new TransactionBuffer(
-        this.firstTouch(),
-        this.encoding?.commitValues,
-        readKeysProvider,
-        this._address,
-      );
+      const base = this.firstTouch();
+      const source = this.sourceFrame?.staging;
+      source?.beginMutation();
+      let succeeded = false;
+      try {
+        const buffer = new TransactionBuffer(
+          base,
+          this.encoding?.commitValues,
+          readKeysProvider,
+          this._address,
+          source,
+        );
+        // A getter may have constructed another buffer which this native assignment abandons.
+        if (this.buffer || this.sourceFrame?.staging !== source) {
+          source?.fail();
+          this.sourceFrame?.staging.fail();
+        }
+        this.buffer = buffer;
+        succeeded = true;
+      } finally {
+        source?.endMutation(succeeded);
+      }
     }
     return this.buffer;
   }
@@ -260,10 +288,60 @@ export class RecordFrame {
    * shared state.
    */
   read(path: string[], key?: string): unknown {
+    return this.readValue(path, key);
+  }
+
+  /** One native read plus a bounded value-free descriptor. Only callers selecting this port are observed. */
+  readWithSource(
+    path: string[],
+    key: string,
+    owner: ReadSourceOwner,
+    privacy: 'visible' | 'redacted' = 'visible',
+  ): { value: unknown; occurrence: ReadSourceOccurrence | undefined } {
+    const capture = this.state.readSourceCapture;
+    if (!capture || capture !== this.log?.readSourceCapture)
+      return { value: this.readValue(path, key), occurrence: undefined };
+    const observation: NativeReadObservation = { dataOnly: true };
+    const ordinal = capture.begin();
+    let returned = false;
+    let value: unknown;
+    try {
+      value = this.readValue(path, key, observation);
+      returned = true;
+      const selected = observation.selectedAddress ?? this._address;
+      const rootKey = path.length ? path[0] : key;
+      if (selected.length > 64 || typeof rootKey !== 'string' || rootKey.length > 1024) {
+        capture.gap('budget-exhausted');
+        return { value, occurrence: undefined };
+      }
+      const source = capture.select(
+        this.sourceFrame,
+        [...selected, rootKey],
+        value,
+        observation.dataOnly,
+        observation.live === true,
+        privacy,
+        path.length !== 0,
+      );
+      return { value, occurrence: capture.retain(ordinal, this.sourceFrame, rootKey, selected, owner, source) };
+    } catch (error) {
+      capture.poison();
+      // Never replace the original read exception with a collector error.
+      if (!returned) throw error;
+      return { value, occurrence: undefined };
+    } finally {
+      capture.finish(ordinal);
+    }
+  }
+
+  private readValue(path: string[], key?: string, observation?: NativeReadObservation): unknown {
     const at = this.at(path, key as string);
-    const fromSnapshot = this.buffer ? this.buffer.get(at) : nativeGet(this.firstTouch(), at);
+    const fromSnapshot = this.buffer
+      ? this.buffer.get(at, undefined, observation)
+      : nativeGet(this.firstTouch(), at, undefined, observation);
     if (typeof fromSnapshot !== 'undefined') return fromSnapshot;
-    const live = this.state.getValue(this._address, path, key);
+    if (observation) observation.live = true;
+    const live = this.state.getValue(this._address, path, key, observation);
     // Tier 2 after the first write: keep the diff base exact (see above).
     if (this.buffer && live !== null && typeof live === 'object') this.buffer.detachBase(at);
     return live;
@@ -329,6 +407,14 @@ export class RecordFrame {
    * a 500-iteration agent OOMed a default Node heap, backlog #18).
    */
   release(): void {
+    if (this.sourceFrame) {
+      try {
+        this.log?.readSourceCapture?.end(this.sourceFrame, 'released');
+      } catch {
+        this.log?.readSourceCapture?.poison();
+      }
+      this.sourceFrame = undefined;
+    }
     this.buffer = undefined;
     this.base = undefined;
   }
@@ -340,7 +426,13 @@ export class RecordFrame {
    * would follow an edge that no committed write ever had. Nothing is recorded.
    */
   discard(): void {
+    const sourceFrame = this.sourceFrame;
     this.release();
+    try {
+      if (sourceFrame) this.log?.readSourceCapture?.end(sourceFrame, 'discarded');
+    } catch {
+      this.log?.readSourceCapture?.poison();
+    }
     this.readKeys = undefined;
   }
 }

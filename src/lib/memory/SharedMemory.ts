@@ -19,7 +19,8 @@
  * wrote), not O(state).
  */
 
-import { mergeContextWins, ownedRootOf, ownSpine } from './pathOps.js';
+import { mergeContextWins, ownedRootOf, ownSpine, type NativeReadObservation } from './pathOps.js';
+import type { ReadSourceCapture } from '../read-sources/capture.js';
 import type { MemoryPatch, TraceEntry } from './types.js';
 import {
   getNestedValue,
@@ -33,6 +34,21 @@ import {
 export class SharedMemory {
   private context: { [key: string]: any } = {};
   private _defaultValues?: unknown;
+  private declare sourceCapture?: ReadSourceCapture;
+  private declare sourceSegment?: number;
+
+  /** @internal Only createReadSourceRecord binds a fresh admitted log lifetime. */
+  get readSourceCapture(): ReadSourceCapture | undefined {
+    return this.sourceCapture;
+  }
+  /** @internal No fields or books exist until the host explicitly opts in. */
+  nextReadSourceSegment(): number {
+    return (this.sourceSegment = (this.sourceSegment ?? 0) + 1);
+  }
+  /** @internal The binding is per heap AND per native log, never an ID-only join. */
+  attachReadSources(capture: ReadSourceCapture): void {
+    this.sourceCapture = capture;
+  }
 
   constructor(defaultValues?: unknown, initialContext?: unknown) {
     this._defaultValues = defaultValues;
@@ -53,18 +69,22 @@ export class SharedMemory {
 
   /** Updates a value at `address` + `path` using merge semantics, as a new generation (path copy + swap). */
   updateValue(address: readonly string[], path: string[], key: string, value: unknown) {
+    const previous = this.context;
     const next = this.ownedPathTo(address, path, key);
     if (next === undefined) return;
     updateNestedValue(next, address, path, key, value, this.getDefaultValues());
-    this.context = next;
+    this.replaceGeneration(next, previous);
+    this.sourceCapture?.invalidate([...address, ...path, key]);
   }
 
   /** Sets a value at `address` + `path` using overwrite semantics, as a new generation (path copy + swap). */
   setValue(address: readonly string[], path: string[], key: string, value: unknown) {
+    const previous = this.context;
     const next = this.ownedPathTo(address, path, key);
     if (next === undefined) return;
     setNestedValue(next, address, path, key, value, this.getDefaultValues());
-    this.context = next;
+    this.replaceGeneration(next, previous);
+    this.sourceCapture?.invalidate([...address, ...path, key]);
   }
 
   /**
@@ -84,10 +104,15 @@ export class SharedMemory {
    * Reads a value from the store.
    * Looks up at `address` first, falls back to the root.
    */
-  getValue(address?: readonly string[], path?: string[], key?: string): any {
+  getValue(address?: readonly string[], path?: string[], key?: string, observation?: NativeReadObservation): any {
     const { globalPath, runPath } = getRunAndGlobalPaths(address, path);
-    const value = runPath ? getNestedValue(this.context, runPath, key) : undefined;
-    return typeof value !== 'undefined' ? value : getNestedValue(this.context, globalPath, key);
+    const value = runPath ? getNestedValue(this.context, runPath, key, observation) : undefined;
+    if (typeof value !== 'undefined') {
+      if (observation) observation.selectedAddress = address;
+      return value;
+    }
+    if (observation) observation.selectedAddress = [];
+    return getNestedValue(this.context, globalPath, key, observation);
   }
 
   /** Gets the entire state as a JSON object — the current generation, by reference. Never mutate it. */
@@ -95,8 +120,17 @@ export class SharedMemory {
     return this.context;
   }
 
+  /** A callback can swap a newer generation while the native outer fold is still building its copy. */
+  private replaceGeneration(next: Record<string, unknown>, previous: Record<string, unknown>): void {
+    const reentrant = this.context !== previous;
+    this.context = next;
+    if (reentrant) this.sourceCapture?.poison();
+  }
+
   /** Applies a commit bundle from TransactionBuffer: builds the next generation and swaps it in. */
   applyPatch(overwrite: MemoryPatch, updates: MemoryPatch, trace: TraceEntry[]): void {
-    this.context = nextGeneration(this.context, updates, overwrite, trace);
+    const previous = this.context;
+    this.replaceGeneration(nextGeneration(previous, updates, overwrite, trace), previous);
+    this.sourceCapture?.invalidateRows(trace);
   }
 }

@@ -58,10 +58,17 @@ export function recordCommit(payload: CommitPayload | undefined, stamp: CommitSt
   const names = namesOf(stamp);
   const { redactedPaths, trace } = payload;
   into.state.applyPatch(payload.overwrite, payload.updates, trace);
+  const capture = into.state.readSourceCapture;
+  const sourceClock = capture?.clock;
   const overwrite = scrubPatch(payload.overwrite, redactedPaths);
   const updates = scrubPatch(payload.updates, redactedPaths);
   into.mirror?.applyPatch(overwrite, updates, trace);
-  into.log?.record(bundleOf(overwrite, updates, [...redactedPaths], trace, names));
+  if (!into.log) return;
+  const bundle = bundleOf(overwrite, updates, [...redactedPaths], trace, names);
+  into.log.record(bundle);
+  if (capture && capture === into.log?.readSourceCapture && sourceClock !== undefined && bundle.idx !== undefined) {
+    capture.confirm(sourceClock, bundle.idx, trace, redactedPaths);
+  }
 }
 
 /** THE bundle (law 3): the payload's four keys, the three names, then each optional name that has something to say. */

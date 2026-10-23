@@ -183,3 +183,8 @@ const finding = await explain(graph, selectedNodeId, {
 ```
 
 Follow the [cause and impact manual](https://github.com/footprintjs/foottrace/blob/main/docs/cause.md) to record per-write provenance, adapt an authorized stored record, run bounded queries and interpret roots, alternatives and gaps. A complete synthetic [record example](https://github.com/footprintjs/foottrace/blob/main/examples/cause-record.ts) demonstrates both in-memory and stored adapters.
+
+
+## Optional native root-read sources
+
+`foottrace/write` provides an opt-in, value-free source descriptor for the same native scalar root read. Existing reads and record bytes stay unchanged. This is the writer port only; engine integration and cause/PROV consumption follow separately. See the [setup, bounds and limitations](https://github.com/footprintjs/foottrace/blob/main/docs/read-sources.md).
