@@ -1,3 +1,4 @@
+import { captureFor } from '../read-sources/bindings.js';
 /**
  * recordCommit — one stage's commit onto the record (C1, L3). The one owner of a bundle's bytes and
  * of where a commit lands: live state, the redacted mirror, the log.
@@ -58,7 +59,7 @@ export function recordCommit(payload: CommitPayload | undefined, stamp: CommitSt
   const names = namesOf(stamp);
   const { redactedPaths, trace } = payload;
   into.state.applyPatch(payload.overwrite, payload.updates, trace);
-  const capture = into.state.readSourceCapture;
+  const capture = captureFor(into.state);
   const sourceClock = capture?.clock;
   const overwrite = scrubPatch(payload.overwrite, redactedPaths);
   const updates = scrubPatch(payload.updates, redactedPaths);
@@ -66,7 +67,7 @@ export function recordCommit(payload: CommitPayload | undefined, stamp: CommitSt
   if (!into.log) return;
   const bundle = bundleOf(overwrite, updates, [...redactedPaths], trace, names);
   into.log.record(bundle);
-  if (capture && capture === into.log?.readSourceCapture && sourceClock !== undefined && bundle.idx !== undefined) {
+  if (capture && capture === captureFor(into.log) && sourceClock !== undefined && bundle.idx !== undefined) {
     capture.confirm(sourceClock, bundle.idx, trace, redactedPaths);
   }
 }

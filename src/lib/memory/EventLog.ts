@@ -49,7 +49,7 @@ import {
   sendEntry,
 } from './sink.js';
 import type { CommitBundle, MemoryPatch } from './types.js';
-import type { ReadSourceCapture } from '../read-sources/capture.js';
+import { captureFor } from '../read-sources/bindings.js';
 import { applySmartMergeInto } from './utils.js';
 
 /** True when `value` has a callable `then` — an adapter that answered with a promise. */
@@ -132,24 +132,6 @@ export class EventLog {
   private steps: CommitBundle[] = [];
   private sourceAddress?: LogAddress;
   private sourceAddressRetired = false;
-  private declare readCapture?: ReadSourceCapture;
-  /** @internal Created only by the opted-in writer-port factory. */
-  get readSourceCapture(): ReadSourceCapture | undefined {
-    return this.readCapture;
-  }
-  /** @internal A fresh log is bound once, by native object identity, never a matching string alone. */
-  attachReadSources(capture: ReadSourceCapture): void {
-    if (this.readCapture) throw new TypeError('read sources: log already bound');
-    this.readCapture = capture;
-  }
-  /** @internal Register a frame namespace for future writes. A cloned base cannot vouch for its old descriptors. */
-  registerReadSourceAddress(address: readonly string[]): void {
-    try {
-      this.readCapture?.index.register(address);
-    } catch {
-      this.readCapture?.poison();
-    }
-  }
   // The sink's two fields are DECLARED, not initialised, and set only with a sink: the one-argument
   // log keeps 1.0.3's own fields exactly (its `Object.keys`, its JSON).
   /** Where entries go as they land; absent for the one-argument log. */
@@ -424,7 +406,7 @@ export class EventLog {
       );
     }
     this.steps = [];
-    this.readCapture?.retire();
+    captureFor(this)?.retire();
     // A reset prefix cannot reuse old coordinates, even if another stage of
     // the SAME leg binds it again. Keep clear's data behavior, but retire
     // addressing for this log; known coordinates require a fresh EventLog.

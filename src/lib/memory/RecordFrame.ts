@@ -1,3 +1,5 @@
+import { sourceOwner } from '../read-sources/admission.js';
+import { captureFor } from '../read-sources/bindings.js';
 /**
  * RecordFrame — the record half of one stage's frame (C3, L3).
  *
@@ -99,7 +101,7 @@ export class RecordFrame {
    * "last write's prefix == union" hold in delta mode.
    */
   private readKeys?: Set<string>;
-  private declare sourceFrame?: SourceFrame;
+  #sourceFrame?: SourceFrame;
 
   constructor(state: SharedMemory, log?: EventLog, address: readonly string[] = []) {
     this.state = state;
@@ -186,11 +188,15 @@ export class RecordFrame {
   private firstTouch(): Record<string, unknown> {
     if (!this.base) {
       this.base = this.state.getState();
-      const capture = this.state.readSourceCapture;
-      if (capture && capture === this.log?.readSourceCapture) {
-        this.log.registerReadSourceAddress(this._address);
+      const capture = captureFor(this.state);
+      if (capture && capture === captureFor(this.log)) {
         try {
-          this.sourceFrame = capture.frame(this._address);
+          capture.index.register(this._address);
+        } catch {
+          capture.poison();
+        }
+        try {
+          this.#sourceFrame = capture.frame(this._address);
         } catch {
           capture.poison();
         }
@@ -221,7 +227,7 @@ export class RecordFrame {
       // The frame's address (9.30.0: the admitted record reads the containers there as where the
       // stage writes, never as a value it read).
       const base = this.firstTouch();
-      const source = this.sourceFrame?.staging;
+      const source = this.#sourceFrame?.staging;
       source?.beginMutation();
       let succeeded = false;
       try {
@@ -233,9 +239,9 @@ export class RecordFrame {
           source,
         );
         // A getter may have constructed another buffer which this native assignment abandons.
-        if (this.buffer || this.sourceFrame?.staging !== source) {
+        if (this.buffer || this.#sourceFrame?.staging !== source) {
           source?.fail();
-          this.sourceFrame?.staging.fail();
+          this.#sourceFrame?.staging.fail();
         }
         this.buffer = buffer;
         succeeded = true;
@@ -291,46 +297,79 @@ export class RecordFrame {
     return this.readValue(path, key);
   }
 
-  /** One native read plus a bounded value-free descriptor. Only callers selecting this port are observed. */
+  /** One native read plus a bounded value-free descriptor. Existing string verdicts are unchanged.
+   * An optional value-free verdict runs synchronously AFTER the read, once, even without capture.
+   * Its exception is the caller's exception; collector failure must never swallow or replay it. */
   readWithSource(
     path: string[],
     key: string,
     owner: ReadSourceOwner,
-    privacy: 'visible' | 'redacted' = 'visible',
+    privacy: 'visible' | 'redacted' | (() => 'visible' | 'redacted') = 'visible',
   ): { value: unknown; occurrence: ReadSourceOccurrence | undefined } {
-    const capture = this.state.readSourceCapture;
-    if (!capture || capture !== this.log?.readSourceCapture)
-      return { value: this.readValue(path, key), occurrence: undefined };
-    const observation: NativeReadObservation = { dataOnly: true };
-    const ordinal = capture.begin();
-    let returned = false;
+    const bound = captureFor(this.state);
+    const capture = bound && bound === captureFor(this.log) ? bound : undefined;
+    const ordinal = capture?.begin(this.#sourceFrame?.clock);
     let value: unknown;
+    let occurrence: ReadSourceOccurrence | undefined;
+    let frame: SourceFrame | undefined;
+    let selected: readonly string[] = [];
+    let rootKey: unknown;
+    let source: import('../read-sources/types.js').ReadSource | undefined;
+    let admittedOwner: ReadSourceOwner | undefined;
     try {
-      value = this.readValue(path, key, observation);
-      returned = true;
-      const selected = observation.selectedAddress ?? this._address;
-      const rootKey = path.length ? path[0] : key;
-      if (selected.length > 64 || typeof rootKey !== 'string' || rootKey.length > 1024) {
-        capture.gap('budget-exhausted');
-        return { value, occurrence: undefined };
+      // Admit/copy identities before user accessors or the verdict can mutate them.
+      try {
+        if (capture) admittedOwner = sourceOwner(owner);
+      } catch {
+        capture?.poison();
       }
-      const source = capture.select(
-        this.sourceFrame,
-        [...selected, rootKey],
-        value,
-        observation.dataOnly,
-        observation.live === true,
-        privacy,
-        path.length !== 0,
-      );
-      return { value, occurrence: capture.retain(ordinal, this.sourceFrame, rootKey, selected, owner, source) };
-    } catch (error) {
-      capture.poison();
-      // Never replace the original read exception with a collector error.
-      if (!returned) throw error;
-      return { value, occurrence: undefined };
+      const observation: NativeReadObservation = { dataOnly: true };
+      try {
+        this.firstTouch();
+        frame = this.#sourceFrame;
+        value = this.readValue(path, key, capture ? observation : undefined);
+      } catch (error) {
+        capture?.poison();
+        throw error;
+      }
+      try {
+        selected = [...(observation.selectedAddress ?? this._address)];
+        rootKey = path.length ? path[0] : key;
+        if (capture) {
+          if (selected.length > 64 || typeof rootKey !== 'string' || rootKey.length > 1024)
+            capture.gap('budget-exhausted');
+          else
+            source = capture.select(
+              frame,
+              [...selected, rootKey],
+              value,
+              observation.dataOnly,
+              observation.live === true,
+              'visible',
+              path.length !== 0,
+            );
+        }
+      } catch {
+        capture?.poison();
+      }
+      // No value/source is passed to this callback. Do not await, coerce or retain its result.
+      let verdict: 'visible' | 'redacted';
+      try {
+        verdict = typeof privacy === 'function' ? privacy() : privacy;
+      } catch (error) {
+        capture?.poison();
+        throw error;
+      }
+      if (verdict !== 'visible')
+        source = { kind: 'unavailable', reason: verdict === 'redacted' ? 'redacted' : 'capture-failed' };
+      occurrence =
+        capture && source && admittedOwner
+          ? capture.retain(ordinal, frame, rootKey, selected, admittedOwner, source)
+          : undefined;
+      return { value, occurrence };
     } finally {
-      capture.finish(ordinal);
+      if (!occurrence) capture?.omitted(frame, admittedOwner);
+      capture?.finish(ordinal);
     }
   }
 
@@ -407,13 +446,13 @@ export class RecordFrame {
    * a 500-iteration agent OOMed a default Node heap, backlog #18).
    */
   release(): void {
-    if (this.sourceFrame) {
+    if (this.#sourceFrame) {
       try {
-        this.log?.readSourceCapture?.end(this.sourceFrame, 'released');
+        captureFor(this.log)?.end(this.#sourceFrame, 'released');
       } catch {
-        this.log?.readSourceCapture?.poison();
+        captureFor(this.log)?.poison();
       }
-      this.sourceFrame = undefined;
+      this.#sourceFrame = undefined;
     }
     this.buffer = undefined;
     this.base = undefined;
@@ -426,12 +465,12 @@ export class RecordFrame {
    * would follow an edge that no committed write ever had. Nothing is recorded.
    */
   discard(): void {
-    const sourceFrame = this.sourceFrame;
+    const sourceFrame = this.#sourceFrame;
     this.release();
     try {
-      if (sourceFrame) this.log?.readSourceCapture?.end(sourceFrame, 'discarded');
+      if (sourceFrame) captureFor(this.log)?.end(sourceFrame, 'discarded');
     } catch {
-      this.log?.readSourceCapture?.poison();
+      captureFor(this.log)?.poison();
     }
     this.readKeys = undefined;
   }

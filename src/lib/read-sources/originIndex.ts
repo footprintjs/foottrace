@@ -2,9 +2,14 @@ import type { ReadSource, ReadSourceGap } from './types.js';
 import { sourceBytes, sourceKey } from './admission.js';
 
 const unavailable = (reason: ReadSourceGap): ReadSource => ({ kind: 'unavailable', reason });
-interface Version {
+interface Fact {
   readonly at: number;
   readonly source: ReadSource;
+}
+interface Version extends Fact {
+  readonly bytes: number;
+  /** Latest descendant barrier at this version; a shallow fact, never a chain of old versions. */
+  readonly barrier?: Fact;
 }
 
 /** Metadata-only per-key histories. No state generation, selected value or fingerprint is retained. */
@@ -106,10 +111,19 @@ export class OriginIndex {
         path.slice(0, depth + 1),
         depth + 1 === path.length ? source : unavailable('composite-unsupported'),
         this.tick,
+        depth + 1 === path.length,
       );
     }
+    // Replacing a native namespace invalidates its old descendants, even when its
+    // parent is not a registered frame namespace. Only declared address names are retained.
+    for (const tuple of this.seeded) {
+      const namespace = JSON.parse(tuple) as string[];
+      if (namespace.length >= path.length && path.every((part, index) => namespace[index] === part)) {
+        this.put(namespace, source.kind === 'unavailable' ? source : unavailable('composite-unsupported'), this.tick);
+      }
+    }
   }
-  private put(path: readonly string[], source: ReadSource, at: number): void {
+  private put(path: readonly string[], source: ReadSource, at: number, shadowsDescendants = true): void {
     if (this.lostAt !== Infinity) return;
     if (this.retained >= this.maximum) {
       this.fail('budget-exhausted');
@@ -118,7 +132,9 @@ export class OriginIndex {
     const key = JSON.stringify(path);
     let versions = this.entries.get(key);
     if (at === 0 && versions?.[0]?.at === 0) return;
-    const bytes = sourceBytes({ key, at, source });
+    const fact: Fact = { at, source: Object.freeze(source) };
+    const barrier = shadowsDescendants ? fact : versions?.[versions.length - 1]?.barrier;
+    const bytes = sourceBytes({ key, at, source, barrier });
     if (this.retainedBytes + bytes > this.maxBytes) {
       this.fail('budget-exhausted');
       return;
@@ -126,14 +142,27 @@ export class OriginIndex {
     if (!versions) this.entries.set(key, (versions = []));
     if (at === 0) {
       if (versions[0]?.at === 0) return;
-      versions.unshift({ at, source: Object.freeze(source) });
-    } else versions.push({ at, source: Object.freeze(source) });
+      versions.unshift({ ...fact, bytes, barrier });
+    } else versions.push({ ...fact, bytes, barrier });
     this.retained++;
     this.retainedBytes += bytes;
   }
+  /** Keep the last fact at/before the oldest live view, plus every newer fact.
+   * Privacy and invalidation tombstones obey the same rule; loss is never repaired by pruning. */
+  prune(oldestClock: number): void {
+    for (const versions of this.entries.values()) {
+      let keep = 0;
+      while (keep + 1 < versions.length && versions[keep + 1].at <= oldestClock) keep++;
+      for (let index = 0; index < keep; index++) {
+        this.retained--;
+        this.retainedBytes -= versions[index].bytes;
+      }
+      if (keep) versions.splice(0, keep);
+    }
+  }
   resolve(path: readonly string[], clock: number): ReadSource {
     if (clock >= this.lostAt) return unavailable(this.loss);
-    let latest: Version | undefined;
+    let latest: Fact | undefined;
     for (let depth = 1; depth <= path.length; depth++) {
       const versions = this.entries.get(JSON.stringify(path.slice(0, depth)));
       if (!versions) continue;
@@ -144,7 +173,8 @@ export class OriginIndex {
         if (versions[middle].at <= clock) lo = middle + 1;
         else hi = middle;
       }
-      const candidate = versions[lo - 1];
+      const version = versions[lo - 1];
+      const candidate = depth === path.length ? version : version?.barrier;
       if (
         candidate &&
         (!latest ||

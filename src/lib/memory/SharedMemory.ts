@@ -20,7 +20,7 @@
  */
 
 import { mergeContextWins, ownedRootOf, ownSpine, type NativeReadObservation } from './pathOps.js';
-import type { ReadSourceCapture } from '../read-sources/capture.js';
+import { captureFor } from '../read-sources/bindings.js';
 import type { MemoryPatch, TraceEntry } from './types.js';
 import {
   getNestedValue,
@@ -34,22 +34,6 @@ import {
 export class SharedMemory {
   private context: { [key: string]: any } = {};
   private _defaultValues?: unknown;
-  private declare sourceCapture?: ReadSourceCapture;
-  private declare sourceSegment?: number;
-
-  /** @internal Only createReadSourceRecord binds a fresh admitted log lifetime. */
-  get readSourceCapture(): ReadSourceCapture | undefined {
-    return this.sourceCapture;
-  }
-  /** @internal No fields or books exist until the host explicitly opts in. */
-  nextReadSourceSegment(): number {
-    return (this.sourceSegment = (this.sourceSegment ?? 0) + 1);
-  }
-  /** @internal The binding is per heap AND per native log, never an ID-only join. */
-  attachReadSources(capture: ReadSourceCapture): void {
-    this.sourceCapture = capture;
-  }
-
   constructor(defaultValues?: unknown, initialContext?: unknown) {
     this._defaultValues = defaultValues;
     const seed = mergeContextWins(initialContext || {}, defaultValues || {});
@@ -74,7 +58,7 @@ export class SharedMemory {
     if (next === undefined) return;
     updateNestedValue(next, address, path, key, value, this.getDefaultValues());
     this.replaceGeneration(next, previous);
-    this.sourceCapture?.invalidate([...address, ...path, key]);
+    captureFor(this)?.invalidate([...address, ...path, key]);
   }
 
   /** Sets a value at `address` + `path` using overwrite semantics, as a new generation (path copy + swap). */
@@ -84,7 +68,7 @@ export class SharedMemory {
     if (next === undefined) return;
     setNestedValue(next, address, path, key, value, this.getDefaultValues());
     this.replaceGeneration(next, previous);
-    this.sourceCapture?.invalidate([...address, ...path, key]);
+    captureFor(this)?.invalidate([...address, ...path, key]);
   }
 
   /**
@@ -124,13 +108,13 @@ export class SharedMemory {
   private replaceGeneration(next: Record<string, unknown>, previous: Record<string, unknown>): void {
     const reentrant = this.context !== previous;
     this.context = next;
-    if (reentrant) this.sourceCapture?.poison();
+    if (reentrant) captureFor(this)?.poison();
   }
 
   /** Applies a commit bundle from TransactionBuffer: builds the next generation and swaps it in. */
   applyPatch(overwrite: MemoryPatch, updates: MemoryPatch, trace: TraceEntry[]): void {
     const previous = this.context;
     this.replaceGeneration(nextGeneration(previous, updates, overwrite, trace), previous);
-    this.sourceCapture?.invalidateRows(trace);
+    captureFor(this)?.invalidateRows(trace);
   }
 }

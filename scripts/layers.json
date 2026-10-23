@@ -104,5 +104,7 @@
   "src/lib/read-sources/capture.ts": 2,
   "src/lib/read-sources/writer.ts": 3,
   "src/lib/read-sources/codec.ts": 1,
-  "src/lib/read-sources/commitFacts.ts": 1
+  "src/lib/read-sources/commitFacts.ts": 1,
+  "src/lib/read-sources/bindings.ts": 0,
+  "src/lib/read-sources/format.ts": 0
 }

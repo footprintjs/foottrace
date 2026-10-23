@@ -1,3 +1,4 @@
+import { captureFor } from '../../../../src/lib/read-sources/bindings';
 import { describe, expect, it, vi } from 'vitest';
 import {
   createReadSourceRecord,
@@ -212,15 +213,15 @@ describe('read-source independent budgets and admission', () => {
     expect(decodeReadSourceSnapshot(JSON.parse(JSON.stringify(snapshot)))).toEqual(snapshot);
   });
 
-  it('withholds staged precision when its independent generation budget is exhausted', () => {
+  it('withholds staged precision when its independent live-slot budget is exhausted', () => {
     const state = new SharedMemory(undefined, { count: 1 });
     const record = createReadSourceRecord(state, address, { limits: { maxStaging: 1 } });
     const frame = new RecordFrame(state, record.log);
     frame.write(['count'], 2, 'set');
     expect(frame.readWithSource([], 'count', owner).occurrence?.source.kind).toBe('staged');
-    frame.write(['count'], 3, 'set');
+    frame.write(['other'], 3, 'set');
     expect(frame.readWithSource([], 'count', owner)).toMatchObject({
-      value: 3,
+      value: 2,
       occurrence: { source: { kind: 'unavailable', reason: 'budget-exhausted' } },
     });
   });
@@ -314,7 +315,7 @@ it('retains no hidden nested names after staged and committed nested writes', ()
   frame.write(['box', 'PRIVATE_NESTED_KEY'], 2, 'set', { whole: true });
   frame.readWithSource(['box'], 'PRIVATE_NESTED_KEY', owner);
   frame.commit(stamp);
-  const index = state.readSourceCapture!.index as unknown as { entries: Map<string, unknown> };
+  const index = captureFor(state)!.index as unknown as { entries: Map<string, unknown> };
   expect([...index.entries.keys()].join()).not.toContain('PRIVATE_NESTED_KEY');
   expect(JSON.stringify(record.snapshot())).not.toContain('PRIVATE_NESTED_KEY');
 });

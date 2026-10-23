@@ -1,3 +1,4 @@
+import { READ_SOURCE_V1_CEILINGS } from './format.js';
 import { boundedList, boundedName, ownData } from '../evidence/admission.js';
 import { parseAttemptId } from '../ids/attemptId.js';
 import { nativeExecution } from '../prov/ids.js';
@@ -42,7 +43,7 @@ export function sourceOwner(value: unknown): ReadSourceOwner {
   return { runtimeStageId, attemptId };
 }
 
-/** Measured ceilings: see docs/read-sources.md and bench/read-sources.mjs. Hosts may only reduce them. */
+/** Writer defaults; hosts may tune within the immutable wire-version ceilings. */
 export const READ_SOURCE_DEFAULTS: ReadSourceLimits = Object.freeze({
   maxOccurrences: 4096,
   maxPerExecution: 1024,
@@ -50,8 +51,8 @@ export const READ_SOURCE_DEFAULTS: ReadSourceLimits = Object.freeze({
   maxOrigins: 4096,
   maxStaging: 2048,
 });
-export function sourceLimits(value?: unknown): ReadSourceLimits {
-  const result = { ...READ_SOURCE_DEFAULTS };
+export function sourceLimits(value?: unknown, defaults: ReadSourceLimits = READ_SOURCE_DEFAULTS): ReadSourceLimits {
+  const result = { ...defaults };
   for (const key of Object.keys(result) as (keyof ReadSourceLimits)[]) {
     const limit = value === undefined ? undefined : sourceOwn(value, key);
     if (limit === undefined) continue;
@@ -59,7 +60,7 @@ export function sourceLimits(value?: unknown): ReadSourceLimits {
       typeof limit !== 'number' ||
       !Number.isSafeInteger(limit) ||
       limit < 1 ||
-      limit > result[key] ||
+      limit > READ_SOURCE_V1_CEILINGS[key] ||
       (key === 'maxBytes' && limit < 2048)
     )
       throw new TypeError('read sources: invalid limits');

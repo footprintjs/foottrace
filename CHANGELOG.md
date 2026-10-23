@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Fixed
+
+- Keep exact-read ownership in private bindings, reclaim obsolete live metadata, and validate stored limits against immutable wire-v1 ceilings. Hosts can size retained history within those ceilings; defaults stay unchanged. Existing privacy strings remain supported alongside a value-free post-read verdict.
+
 ### Added
 
 - Opt-in native root-read source writer port in `foottrace/write`, with ordered value-free base, committed, staged or unavailable descriptors; bounded historical origin metadata, lifecycle isolation and structural saved-metadata decoding. Scalar root reads are the precise subset; unsupported, missing and redacted evidence remains explicit.

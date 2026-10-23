@@ -1,3 +1,4 @@
+import { bindCapture, captureFor, nextSourceSegment } from './bindings.js';
 import type { LogAddress } from '../memory/eventPosition.js';
 import { EventLog } from '../memory/EventLog.js';
 import type { RecordSink } from '../memory/sink.js';
@@ -28,11 +29,10 @@ export function createReadSourceRecord(
   const address = sourceAddress(addressInput);
   const limits = sourceLimits(options === undefined ? undefined : sourceOwn(options, 'limits'));
   const namespaces = sourceNamespaces(options === undefined ? undefined : sourceOwn(options, 'stateAddresses'), limits);
-  if (state.readSourceCapture && !state.readSourceCapture.retired)
-    throw new TypeError('read sources: heap already bound');
+  if (captureFor(state) && !captureFor(state)!.retired) throw new TypeError('read sources: heap already bound');
   const before = state.getState();
   const sink = options === undefined ? undefined : (sourceOwn(options, 'sink') as RecordSink | undefined);
-  const capture = new ReadSourceCapture(address, state.nextReadSourceSegment(), limits);
+  const capture = new ReadSourceCapture(address, nextSourceSegment(state), limits);
   // Inspect descriptors before base cloning can turn an accessor result into an apparent data slot.
   try {
     capture.index.seed(before);
@@ -40,7 +40,7 @@ export function createReadSourceRecord(
   } catch {
     capture.poison();
   }
-  state.attachReadSources(capture); // reserve binding before clone/opened-sink callbacks can re-enter.
+  bindCapture(state, capture); // reserve binding before clone/opened-sink callbacks can re-enter.
   let log: EventLog;
   try {
     log = new EventLog(before, sink ? { sink, address } : undefined);
@@ -50,6 +50,6 @@ export function createReadSourceRecord(
   }
   log.bindAddress(address.logRunId, address.drillPath);
   if (state.getState() !== before) capture.poison(); // clone/opened-sink reentrancy is not an exact base.
-  log.attachReadSources(capture);
+  bindCapture(log, capture);
   return Object.freeze({ log, snapshot: () => capture.snapshot(), retire: () => capture.retire() });
 }

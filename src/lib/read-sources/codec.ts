@@ -1,3 +1,4 @@
+import { READ_SOURCE_V1_CEILINGS } from './format.js';
 import type { ReadSource, ReadSourceOccurrence, ReadSourceSnapshot } from './types.js';
 import { READ_SOURCE_GAPS } from './types.js';
 import {
@@ -32,7 +33,7 @@ function sourceOf(value: unknown): ReadSource {
 export function decodeReadSourceSnapshot(value: unknown): ReadSourceSnapshot | undefined {
   try {
     if (sourceOwn(value, 'version') !== 1) return undefined;
-    const limits = sourceLimits(sourceOwn(value, 'limits'));
+    const limits = sourceLimits(sourceOwn(value, 'limits'), READ_SOURCE_V1_CEILINGS);
     let remaining = limits.maxBytes;
     const spend = (bytes: number) => {
       remaining -= bytes;

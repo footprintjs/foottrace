@@ -19,6 +19,7 @@ export interface SourceFrame {
   readonly id: number;
   readonly clock: number;
   readonly staging: SourceStaging;
+  disposition: ReadSourceDisposition;
 }
 
 /** One opted-in native log lifetime. Hosts cannot supply an observer that selects a read's value. */
@@ -32,10 +33,16 @@ export class ReadSourceCapture {
   private bytes: number;
   private ordinal = 0;
   private pending = 0;
+  private prunedThrough = -1;
   private frames = 0;
+  private readonly active = new Map<number, number>();
+  private readonly pins = new Map<number, number>();
+  private readonly retainedFrames = new Set<number>();
+  private generation = 0;
   private staged = 0;
   private stagedBytes = 0;
   private failed = false;
+  private discardedAttemptsIncomplete = false;
   private stopped = false;
   constructor(readonly address: LogAddress, readonly segment: number, readonly limits: ReadSourceLimits) {
     this.index = createOriginIndex(limits.maxOrigins, segment, limits.maxBytes);
@@ -58,21 +65,45 @@ export class ReadSourceCapture {
     if (reason === 'capture-failed') this.failed = true;
   }
   frame(address: readonly string[]): SourceFrame | undefined {
-    if (this.stopped || this.frames >= this.limits.maxOccurrences) return undefined;
+    if (this.stopped) return undefined;
+    if (this.active.size >= this.limits.maxOrigins || this.frames === Number.MAX_SAFE_INTEGER) {
+      // Without a frame witness, later discard/reuse cannot be reconstructed safely.
+      this.discardedAttemptsIncomplete = true;
+      this.gap('budget-exhausted');
+      return undefined;
+    }
     const id = ++this.frames;
     const staging = new SourceStaging(
       id,
-      (bytes) => {
-        if (this.staged >= this.limits.maxStaging || this.stagedBytes + bytes > this.limits.maxBytes) return undefined;
-        this.stagedBytes += bytes;
-        return ++this.staged;
+      (bytes, previousBytes) => {
+        const added = previousBytes === undefined ? 1 : 0;
+        const nextBytes = this.stagedBytes + bytes - (previousBytes ?? 0);
+        if (
+          this.staged + added > this.limits.maxStaging ||
+          nextBytes > this.limits.maxBytes ||
+          this.generation === Number.MAX_SAFE_INTEGER
+        )
+          return undefined;
+        this.staged += added;
+        this.stagedBytes = nextBytes;
+        return ++this.generation;
       },
       sourceList(address, 64, sourceKey),
+      (count, bytes) => {
+        this.staged -= count;
+        this.stagedBytes -= bytes;
+      },
     );
-    return { id, clock: this.clock, staging };
+    this.active.set(id, this.clock);
+    return { id, clock: this.clock, staging, disposition: 'active' };
   }
   end(frame: SourceFrame | undefined, disposition: ReadSourceDisposition): void {
-    if (frame) this.dispositions.set(frame.id, disposition);
+    if (!frame) return;
+    if (frame.disposition !== 'discarded') frame.disposition = disposition;
+    if (this.retainedFrames.has(frame.id)) this.dispositions.set(frame.id, frame.disposition);
+    this.active.delete(frame.id);
+    frame.staging.dispose();
+    this.prune();
     if (frame && disposition === 'discarded') {
       for (const row of this.occurrences)
         if (row.frame === frame.id && row.attemptId) this.abandoned.add(row.attemptId);
@@ -131,20 +162,35 @@ export class ReadSourceCapture {
     )
       return { kind: 'unavailable', reason: 'composite-unsupported' };
     if (value === undefined) return { kind: 'unavailable', reason: 'undefined-presence-unknown' };
-    if (!frame) return { kind: 'unavailable', reason: 'capture-failed' };
+    if (!frame) return { kind: 'unavailable', reason: this.failed ? 'capture-failed' : 'budget-exhausted' };
     return (!live && frame.staging.resolve(path)) || this.index.resolve(path, live ? this.clock : frame.clock);
   }
   /** Reserve before the actual read: accessors may start another read synchronously. */
-  begin(): number | undefined {
-    if (this.ordinal === Number.MAX_SAFE_INTEGER) {
+  begin(clock = this.clock): number | undefined {
+    if (this.ordinal === Number.MAX_SAFE_INTEGER || this.pins.size >= this.limits.maxOrigins) {
       this.gap('budget-exhausted', false);
       return undefined;
     }
     this.pending++;
-    return ++this.ordinal;
+    this.pins.set(++this.ordinal, clock);
+    return this.ordinal;
   }
   finish(ordinal: number | undefined): void {
-    if (ordinal !== undefined) this.pending--;
+    if (ordinal !== undefined && this.pins.delete(ordinal)) this.pending--;
+    this.prune();
+  }
+  private prune(): void {
+    let oldest = this.clock;
+    for (const clock of this.active.values()) oldest = Math.min(oldest, clock);
+    for (const clock of this.pins.values()) oldest = Math.min(oldest, clock);
+    if (oldest > this.prunedThrough) {
+      this.index.prune(oldest);
+      this.prunedThrough = oldest;
+    }
+  }
+  /** A successful read may lose metadata before retain() is even reached. */
+  omitted(frame: SourceFrame | undefined, owner: ReadSourceOwner | undefined): void {
+    if (frame?.disposition === 'discarded' && owner?.attemptId) this.discardedAttemptsIncomplete = true;
   }
   retain(
     ordinal: number | undefined,
@@ -154,22 +200,34 @@ export class ReadSourceCapture {
     ownerInput: ReadSourceOwner,
     source: ReadSource,
   ): ReadSourceOccurrence | undefined {
+    let owner: ReadSourceOwner | undefined;
+    let retained = false;
     try {
+      owner = sourceOwner(ownerInput);
+      if (!frame) {
+        this.discardedAttemptsIncomplete = true;
+        this.gap(source.kind === 'unavailable' ? source.reason : 'capture-failed');
+        return undefined;
+      }
       if (ordinal === undefined) return undefined;
       if (this.occurrences.length >= this.limits.maxOccurrences) {
         this.gap('budget-exhausted');
         return undefined;
       }
-      const owner = sourceOwner(ownerInput),
-        key = sourceKey(keyInput);
+      const key = sourceKey(keyInput);
       const stateAddress = sourceList(stateAddressInput, 64, sourceKey);
       const count = this.executions.get(owner.runtimeStageId) ?? 0;
       if (count >= this.limits.maxPerExecution) {
         this.gap('budget-exhausted');
         return undefined;
       }
-      const abandoned = owner.attemptId !== undefined && this.abandoned.has(owner.attemptId);
+      // A verdict may discard the original frame before its pending read is retained.
+      // Remember that attempt now too, so later calls cannot borrow a fresh incarnation.
+      const discardedHere = frame?.disposition === 'discarded';
+      const abandoned = owner.attemptId !== undefined && (discardedHere || this.abandoned.has(owner.attemptId));
       if (abandoned) source = { kind: 'unavailable', reason: 'scope-retired' };
+      else if (owner.attemptId !== undefined && this.discardedAttemptsIncomplete)
+        source = { kind: 'unavailable', reason: this.failed ? 'capture-failed' : 'budget-exhausted' };
       const occurrence: ReadSourceOccurrence = Object.freeze({
         ordinal,
         ...owner,
@@ -178,13 +236,18 @@ export class ReadSourceCapture {
         key,
         stateAddress,
         source: Object.freeze(source),
-        disposition: abandoned ? 'discarded' : 'active',
+        disposition: abandoned ? 'discarded' : frame?.disposition ?? 'active',
       });
       const bytes = sourceBytes({ ...occurrence, disposition: 'discarded' }) + 1;
       // Fixed bounded gap vocabulary and saturating counts have a separately reserved tail.
       if (this.bytes + bytes > this.limits.maxBytes - 1024) {
         this.gap('budget-exhausted');
         return undefined;
+      }
+      if (discardedHere && owner.attemptId) this.abandoned.add(owner.attemptId);
+      if (frame) {
+        this.retainedFrames.add(frame.id);
+        if (frame.disposition !== 'active') this.dispositions.set(frame.id, frame.disposition);
       }
       this.bytes += bytes;
       this.executions.set(owner.runtimeStageId, count + 1);
@@ -193,10 +256,15 @@ export class ReadSourceCapture {
       while (position > 0 && this.occurrences[position - 1].ordinal > ordinal) position--;
       this.occurrences.splice(position, 0, occurrence);
       if (source.kind === 'unavailable') this.gap(source.reason);
+      retained = true;
       return occurrence;
     } catch {
       this.poison();
       return undefined;
+    } finally {
+      // Every refusal door (including pending-pin/ordinal admission) loses the same
+      // discard evidence. Quarantine precision with one bit rather than retaining IDs.
+      if (!retained && frame?.disposition === 'discarded' && owner?.attemptId) this.discardedAttemptsIncomplete = true;
     }
   }
   snapshot(): ReadSourceSnapshot {

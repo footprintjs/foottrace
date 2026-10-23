@@ -78,8 +78,14 @@ no dependency from A to B. The existing `reads-prefix` meaning is unchanged.
 ## Privacy and failure
 
 Pass `'redacted'` when the producer's EXISTING privacy rule says so. This is a
-value-free verdict, not a callback or a second redaction matcher. Invalid verdicts
-fail closed. Native write redaction marks carry into source selection. Only root
+value-free verdict, never a second redaction matcher. The same argument also
+accepts a synchronous zero-argument verdict function when a producer must decide
+privacy after the native read. It runs once after a successful read, receives no
+value or source, and is never retained or awaited. Its original exception propagates
+without retrying the read; pending snapshots remain incomplete. The native source
+and owner are pinned before it runs, so callback writes cannot relabel the read.
+Existing string arguments and the factory signature remain backward compatible.
+Invalid verdicts fail closed. Native write redaction marks carry into source selection. Only root
 key names are retained; nested hidden business field names are not indexed.
 As with the current native record, decisions are made at capture time, not
 retroactively. If stronger hiding is needed, do not enable this port until the
@@ -105,19 +111,38 @@ a Proxy-trap time limiter, or a detector of arbitrary out-of-contract mutation.
 
 ## Bounds and defaults
 
-Hosts may reduce limits at record creation; invalid, fractional, infinite,
-negative or increased limits are refused with fixed setup errors.
+Hosts may set limits at record creation within the immutable wire-v1 ceilings
+below. Invalid, fractional, infinite, negative or above-ceiling limits are refused
+with fixed setup errors. Writer defaults can change independently of stored admission.
 
-| Limit | Measured default |
-| --- | ---: |
-| Occurrences per segment | 4,096 |
-| Occurrences per execution (across attempts) | 1,024 |
-| Serialized source channel, including gaps | 1 MiB |
-| Historical origin versions (not just distinct keys) | 4,096 |
-| Staging generations across frames | 2,048 |
+| Limit | Default | Wire-v1 ceiling |
+| --- | ---: | ---: |
+| Retained occurrences per segment | 4,096 | 65,536 |
+| Occurrences per execution (across attempts) | 1,024 | 16,384 |
+| Serialized source channel, including gaps | 1 MiB | 16 MiB |
+| Live origin versions (not just distinct keys) | 4,096 | 65,536 |
+| Live staging slots across frames | 2,048 | 16,384 |
 
-The 1 MiB byte limit also independently bounds origin metadata and staging
-metadata: at most 3 MiB of accounted metadata across those three books, plus
+For a long run, increase both occurrence and byte limits explicitly, for example
+`{ limits: { maxOccurrences: 16000, maxBytes: 8 * 1024 * 1024 } }`.
+This does not remove any limit. Once retained history is full, later reads are
+counted as omitted; compaction never deletes retained read occurrences.
+
+Ended frames return live staging credits. Replacing one staged key reuses its
+slot but never its generation ID. Origin histories keep the last fact at or before
+the oldest active frame/pending-read clock and every newer fact. Older versions
+are reclaimed; privacy/invalidation tombstones are not skipped and prior loss is
+never upgraded to precision. Long-lived overlapping views can still fill this bound. If frame admission
+is refused, the read is withheld with a gap rather than inventing an active
+incarnation; later tagged-attempt precision stays unknown because missed discard
+evidence cannot be recovered from an ID.
+Aggregate container markers do not shadow unrelated native namespaces; replacing
+a namespace itself still invalidates its old descendants. Native invalidation and
+confirmation remain distinct when a callback could have observed the intervening
+state; obsolete versions are reclaimed once no view needs them.
+
+The configured byte limit (1 MiB by default) also independently bounds origin metadata and staging
+metadata: at most three times that limit in accounted metadata across those three books, plus
 bounded JavaScript object/Map overhead. It is not an exact V8 heap cap. Source
 identity/key strings have at most 1,024 JSON UTF-8 content bytes. Native namespaces
 have at most 64 components and log drill paths at most 16. There is no deep-field
@@ -162,8 +187,10 @@ Default-off reads allocated zero origin books or added promises in the counted
 1,000-read test; the microbenchmark measured about 21 ns added CPU time per read.
 10,000 distinct-key index entries took about 9.21 ms for build plus 10,000 lookups
 and 3.42 MB retained heap; 10,000 versions of one key took 4.06 ms and 0.88 MB.
-These costs led to reducing segment/origin limits to 4,096, byte limits to 1 MiB,
-and staging to 2,048, while retaining 1,024 reads per execution. The benchmark
+These original costs led to choosing segment/origin limits to 4,096, byte limits to 1 MiB,
+and staging to 2,048, while retaining 1,024 reads per execution. The later review
+adds bounded host opt-in ceilings and live reclamation; the numbers above are
+historical baseline measurements, not a new benchmark of those changes. The benchmark
 still probes 10,000 entries independently to expose the scaling cost.
 
 These are synthetic, machine-specific measurements, not an application latency

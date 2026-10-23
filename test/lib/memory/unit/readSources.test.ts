@@ -1,3 +1,4 @@
+import { captureFor } from '../../../../src/lib/read-sources/bindings';
 import { describe, expect, it } from 'vitest';
 import * as writer from '../../../../src/write';
 import { EventLog, RecordFrame, SharedMemory } from '../../../../src/write';
@@ -191,7 +192,7 @@ describe('native exact root read sources', () => {
   it('does not index private nested field names while admitting root keys', () => {
     const { record, frame } = setup({ box: { PRIVATE_NESTED_FIELD: 'secret' } });
     read(frame, 'box', owner, 'redacted');
-    const index = (record.log as any).readSourceCapture.index;
+    const index = captureFor(record.log)!.index as any;
     expect(JSON.stringify([...index.entries.keys()])).not.toContain('PRIVATE_NESTED_FIELD');
   });
 
@@ -205,7 +206,7 @@ describe('native exact root read sources', () => {
       value: 4,
       occurrence: { stateAddress: ['runs', 'branch'], source: { kind: 'base' } },
     });
-    expect(JSON.stringify([...(record.log as any).readSourceCapture.index.entries.keys()])).not.toContain(
+    expect(JSON.stringify([...(captureFor(record.log)!.index as any).entries.keys()])).not.toContain(
       'PRIVATE_NESTED_FIELD',
     );
   });
