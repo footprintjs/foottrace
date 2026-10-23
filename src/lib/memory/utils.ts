@@ -16,7 +16,7 @@
  */
 
 import { setOwnValue } from '../capture/ownData.js';
-import { isDeniedSegment, nativeGet as _get } from './pathOps.js';
+import { isDeniedSegment, nativeGet as _get, observedOwn, type NativeReadObservation } from './pathOps.js';
 import { DELIM } from './paths.js';
 import type { MemoryPatch } from './types.js';
 
@@ -170,10 +170,15 @@ export function updateValue(object: any, key: string | number, value: any): void
 /**
  * Gets a value at a nested path with prototype-pollution protection.
  */
-export function getNestedValue(root: any, path: (string | number)[], field?: string | number): any {
-  const node = path && path.length > 0 ? _get(root, path) : root;
+export function getNestedValue(
+  root: any,
+  path: (string | number)[],
+  field?: string | number,
+  observation?: NativeReadObservation,
+): any {
+  const node = path && path.length > 0 ? _get(root, path, undefined, observation) : root;
   if (field === undefined || node === undefined) return node;
-  if (node !== null && typeof node === 'object' && Object.prototype.hasOwnProperty.call(node, field)) {
+  if (node !== null && typeof node === 'object' && observedOwn(node, field, observation)) {
     return node[field];
   }
   return undefined;

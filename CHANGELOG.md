@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Keep exact-read ownership in private bindings, reclaim obsolete live metadata, and validate stored limits against immutable wire-v1 ceilings. Hosts can size retained history within those ceilings; defaults stay unchanged. Existing privacy strings remain supported alongside a value-free post-read verdict.
+
+### Added
+
+- Opt-in native root-read source writer port in `foottrace/write`, with ordered value-free base, committed, staged or unavailable descriptors; bounded historical origin metadata, lifecycle isolation and structural saved-metadata decoding. Scalar root reads are the precise subset; unsupported, missing and redacted evidence remains explicit.
+- Offline regression tests and a reproducible read/index overhead benchmark with measured limits. Existing default-off reads, native record bytes, dependencies and reads-prefix semantics stay unchanged. Engine integration, durability, cause/PROV readers and release preparation remain separate.
+
 ## 1.6.0 — 2026-10-18
 
 ### Added

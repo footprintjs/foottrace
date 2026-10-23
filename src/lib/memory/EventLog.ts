@@ -49,6 +49,7 @@ import {
   sendEntry,
 } from './sink.js';
 import type { CommitBundle, MemoryPatch } from './types.js';
+import { captureFor } from '../read-sources/bindings.js';
 import { applySmartMergeInto } from './utils.js';
 
 /** True when `value` has a callable `then` — an adapter that answered with a promise. */
@@ -405,6 +406,7 @@ export class EventLog {
       );
     }
     this.steps = [];
+    captureFor(this)?.retire();
     // A reset prefix cannot reuse old coordinates, even if another stage of
     // the SAME leg binds it again. Keep clear's data behavior, but retire
     // addressing for this log; known coordinates require a fresh EventLog.

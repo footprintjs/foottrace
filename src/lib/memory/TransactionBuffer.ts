@@ -79,6 +79,8 @@ import {
   shallowCopy,
 } from './pathOps.js';
 import type { CommitValuesMode, MemoryPatch, TraceEntry } from './types.js';
+import type { NativeReadObservation } from './pathOps.js';
+import type { SourceStaging } from '../read-sources/staging.js';
 import { deepEqual, deepSmartMerge, DELIM, dryFold, normalisePath } from './utils.js';
 
 export class TransactionBuffer {
@@ -166,12 +168,14 @@ export class TransactionBuffer {
   private stagedMerges = 0;
   /** Ops staged deeper than one key below the stage's address — see {@link admit}. */
   private nestedOps = 0;
+  private declare sourceStaging?: SourceStaging;
 
   constructor(
     base: any,
     commitValues: CommitValuesMode = 'full',
     readKeysProvider?: () => string[],
     address: readonly string[] = [],
+    sourceStaging?: SourceStaging,
   ) {
     // `base` is the committed generation the stage first touched —
     // immutable-after-swap, the invariant the first-touch view already rests
@@ -183,6 +187,7 @@ export class TransactionBuffer {
     this.commitValues = commitValues;
     this.readKeysProvider = readKeysProvider;
     this.address = address;
+    if (sourceStaging) this.sourceStaging = sourceStaging;
   }
 
   /** Stamp the current read prefix onto a staged op — only when the
@@ -197,6 +202,7 @@ export class TransactionBuffer {
   private stage(path: (string | number)[], key: string, verb: OpVerb): void {
     if (verb === 'merge') this.stagedMerges++;
     if (path.length - addressDepthOf(path, this.address) > 1) this.nestedOps++;
+    this.sourceStaging?.write(path, verb, this.redactedPaths.has(key));
     this.opTrace.push(this.stampReadKeys({ path: key, verb }));
   }
 
@@ -205,21 +211,29 @@ export class TransactionBuffer {
    * (9.23.0) — the record's copy is taken once, at commit; see the header.
    */
   set(path: (string | number)[], value: any, shouldRedact = false): void {
-    const key = normalisePath(path);
-    this.detachHeldAncestors(path);
-    ownSpine(this.workingCopy, path, this.owned);
-    _set(this.workingCopy, path, value);
-    _set(this.overwritePatch, path, value);
-    if (isContainer(value)) {
-      this.heldRefs.add(key);
-      this.staged.add(value);
-    } else {
-      this.heldRefs.delete(key);
+    const source = this.sourceStaging;
+    source?.beginMutation();
+    let succeeded = false;
+    try {
+      const key = normalisePath(path);
+      this.detachHeldAncestors(path);
+      ownSpine(this.workingCopy, path, this.owned);
+      _set(this.workingCopy, path, value);
+      _set(this.overwritePatch, path, value);
+      if (isContainer(value)) {
+        this.heldRefs.add(key);
+        this.staged.add(value);
+      } else {
+        this.heldRefs.delete(key);
+      }
+      if (shouldRedact) {
+        this.redactedPaths.add(key);
+      }
+      this.stage(path, key, 'set');
+      succeeded = true;
+    } finally {
+      source?.endMutation(succeeded);
     }
-    if (shouldRedact) {
-      this.redactedPaths.add(key);
-    }
-    this.stage(path, key, 'set');
   }
 
   /**
@@ -265,16 +279,24 @@ export class TransactionBuffer {
    * re-wrote is the no-op it is, not a `set` of the whole container.
    */
   delete(path: (string | number)[], shouldRedact = false): void {
-    const key = normalisePath(path);
-    this.detachHeldAncestors(path);
-    ownSpine(this.workingCopy, path, this.owned);
-    _set(this.workingCopy, path, undefined);
-    _set(this.overwritePatch, path, undefined);
-    this.heldRefs.delete(key);
-    if (shouldRedact) {
-      this.redactedPaths.add(key);
+    const source = this.sourceStaging;
+    source?.beginMutation();
+    let succeeded = false;
+    try {
+      const key = normalisePath(path);
+      this.detachHeldAncestors(path);
+      ownSpine(this.workingCopy, path, this.owned);
+      _set(this.workingCopy, path, undefined);
+      _set(this.overwritePatch, path, undefined);
+      this.heldRefs.delete(key);
+      if (shouldRedact) {
+        this.redactedPaths.add(key);
+      }
+      this.stage(path, key, 'delete');
+      succeeded = true;
+    } finally {
+      source?.endMutation(succeeded);
     }
-    this.stage(path, key, 'delete');
   }
 
   /** Deep union merge at the specified path. `deepSmartMerge` builds fresh
@@ -289,20 +311,28 @@ export class TransactionBuffer {
    *  read from it before its first write, where the private copy (and
    *  9.28.0) appends it. */
   merge(path: (string | number)[], value: any, shouldRedact = false): void {
-    const key = normalisePath(path);
-    this.detachHeldAncestors(path);
-    this.privatise(path);
-    const existing = _get(this.workingCopy, path) ?? {};
-    const merged = deepSmartMerge(existing, value);
-    ownSpine(this.workingCopy, path, this.owned);
-    own(merged, this.owned);
-    if (isContainer(merged)) this.privateTrees.add(merged);
-    _set(this.workingCopy, path, merged);
-    _set(this.updatePatch, path, deepSmartMerge(_get(this.updatePatch, path) ?? {}, value));
-    if (shouldRedact) {
-      this.redactedPaths.add(key);
+    const source = this.sourceStaging;
+    source?.beginMutation();
+    let succeeded = false;
+    try {
+      const key = normalisePath(path);
+      this.detachHeldAncestors(path);
+      this.privatise(path);
+      const existing = _get(this.workingCopy, path) ?? {};
+      const merged = deepSmartMerge(existing, value);
+      ownSpine(this.workingCopy, path, this.owned);
+      own(merged, this.owned);
+      if (isContainer(merged)) this.privateTrees.add(merged);
+      _set(this.workingCopy, path, merged);
+      _set(this.updatePatch, path, deepSmartMerge(_get(this.updatePatch, path) ?? {}, value));
+      if (shouldRedact) {
+        this.redactedPaths.add(key);
+      }
+      this.stage(path, key, 'merge');
+      succeeded = true;
+    } finally {
+      source?.endMutation(succeeded);
     }
-    this.stage(path, key, 'merge');
   }
 
   /**
@@ -315,6 +345,7 @@ export class TransactionBuffer {
    * (see {@link survivingRedactedPaths}).
    */
   markRedactedFields(path: (string | number)[], fields: readonly string[]): void {
+    if (fields.length) this.sourceStaging?.redact(path);
     for (const field of fields) {
       this.redactedPaths.add(normalisePath([...path, field]));
       if (field.includes('.')) this.redactedPaths.add(normalisePath([...path, ...field.split('.')]));
@@ -365,9 +396,9 @@ export class TransactionBuffer {
    * the stage's own — private to it, as the whole-state clone made every read
    * after the first write before 9.29.0 (`privatise`).
    */
-  get(path: (string | number)[], defaultValue?: any) {
+  get(path: (string | number)[], defaultValue?: any, observation?: NativeReadObservation) {
     this.privatise(path);
-    return _get(this.workingCopy, path, defaultValue);
+    return _get(this.workingCopy, path, defaultValue, observation);
   }
 
   /**
