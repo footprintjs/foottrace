@@ -85,6 +85,9 @@ value or source, and is never retained or awaited. Its original exception propag
 without retrying the read; pending snapshots remain incomplete. The native source
 and owner are pinned before it runs, so callback writes cannot relabel the read.
 Existing string arguments and the factory signature remain backward compatible.
+The verdict must be pure and decide by name only, using the producer's existing
+privacy rule; it must not inspect values or mutate recording state. If this API
+needs more options later, use a single options object instead of widening this union.
 Invalid verdicts fail closed. Native write redaction marks carry into source selection. Only root
 key names are retained; nested hidden business field names are not indexed.
 As with the current native record, decisions are made at capture time, not
