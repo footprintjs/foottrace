@@ -195,7 +195,9 @@ export function prepareReadSources(
         byCommit.set(read.commitIdx, writes);
       }
     }
-    return { observations, owners: new Set(bindings.keys()), byOwner, byCommit, gaps };
+    // An optional binding without a known authorized attempt cannot establish empty execution coverage.
+    const owners = new Set([...bindings].filter(([, binding]) => binding.attempts.size > 0).map(([id]) => id));
+    return { observations, owners, byOwner, byCommit, gaps };
   } catch (error) {
     return {
       observations: [],

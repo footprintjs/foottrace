@@ -233,6 +233,14 @@ An explicitly empty per-write prefix remains an exclusion. Original source
 ordinals, attempt IDs and discarded/released disposition are preserved in the source book and PROV occurrences. Graph edges cite the original read ordinal and include attempt IDs that fit the existing 512-character evidence-reference limit; longer attempts remain resolvable through that ordinal. An exact
 read in a discarded attempt proves that read happened, not influence on its output.
 
+A captured empty source book does not establish read collection for an unbound
+execution. Execution coverage requires an authorized known attempt or explicit
+stage-read collection, with known reads matched to admitted observations. An empty
+per-write prefix excludes inputs only for that output. Missing later consumer
+coverage makes impact incomplete while preserving a root established by complete
+backward evidence. Ancestor-qualified impact includes supported scalar source
+reads inside that key, using the canonical path grammar.
+
 PROV adds separate `ft:Read` occurrence nodes and `prov:used` only when a supported
 source entity actually joins the admitted output. A scalar base gets a value-free
 initial entity. A committed entity must be the matching final `set` row; patch,

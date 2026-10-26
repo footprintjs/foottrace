@@ -1,4 +1,4 @@
-import { sourceDataChildren } from './recordSourceEdges.js';
+import { sourceChildrenCollected, sourceDataChildren } from './recordSourceEdges.js';
 import { forwardSliceForKey } from '../slice/forwardSliceForKey.js';
 import type { ForwardNode } from '../slice/types.js';
 import { appendControlChildren } from './recordControl.js';
@@ -103,7 +103,7 @@ export function childrenForRecordNode(
   if (scope.readSources) {
     const data = sourceDataChildren(scope, node, maximumEdges);
     edges.push(...data.edges);
-    complete = data.complete && complete;
+    complete = data.complete && sourceChildrenCollected(node) && complete;
   } else {
     if (!allStageReadsCollected(scope)) complete = false;
     complete = appendDataChildren(scope, identity, commitIndex, maximumEdges, edges) && complete;

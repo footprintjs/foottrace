@@ -48,6 +48,7 @@ export interface PreparedRecordScope {
   marks?: Map<string, readonly Attention[]>;
   complete: boolean;
   readSources?: PreparedReadSources;
+  sourceCoveredExecutions?: ReadonlySet<string>;
 }
 export interface RecordLoadFailure {
   failure: Gap['code'];

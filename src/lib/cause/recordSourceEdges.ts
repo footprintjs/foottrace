@@ -1,11 +1,11 @@
 import { sliceForKey } from '../slice/sliceForKey.js';
 import { relation } from '../memory/keyPaths.js';
-import { collectControlParentCoverage } from './recordControl.js';
+import { collectControlChildCoverage, collectControlParentCoverage } from './recordControl.js';
 import { collectScopeCoverage, recordGapCollector, writtenKeysForNode } from './recordCoverage.js';
 import { nodeIdFor } from './recordIdentity.js';
 import { readKeysForStage } from './recordScope.js';
 import type { ExactRecordRead } from './recordSources.js';
-import type { PreparedRecordScope, RecordInspection, ResolvedRecordNode } from './recordTypes.js';
+import type { AddRecordGap, PreparedRecordScope, RecordInspection, ResolvedRecordNode } from './recordTypes.js';
 import type { Adjacency, GapCode, GraphEdge } from './types.js';
 
 function evidence(read: ExactRecordRead): string[] {
@@ -63,6 +63,8 @@ export function inspectSourceParents(
   );
   if (keys.some((key) => !reads.some((read) => read.path === key || read.occurrence.key === key)))
     coverage.addGap('unavailable');
+  if (identity.key === undefined && !scope.sourceCoveredExecutions?.has(identity.runtimeStageId))
+    coverage.addGap('not-collected');
   if (!sources.owners.has(identity.runtimeStageId) && keys.length) coverage.addGap('unavailable');
   if (identity.key !== undefined && !identity.read && (keys.length || rows.some((row) => row.readKeys === undefined)))
     coverage.addGap('conservative');
@@ -107,8 +109,32 @@ export function inspectSourceParents(
     )
   )
     coverage.addGap('edge-limit');
-  if (!sourceDataChildren(scope, node, maximum).complete) coverage.addGap('edge-limit');
+  collectSourceChildCoverage(node, first, maximum, coverage.addGap);
   return { adjacency: { edges, complete: coverage.gaps.length === 0 }, gaps: coverage.gaps };
+}
+
+/** Retain the adapter's shared immediate data/control adjacency cap and control-boundary gaps. */
+function collectSourceChildCoverage(
+  node: ResolvedRecordNode,
+  firstCommitIndex: number,
+  maximum: number,
+  addGap: AddRecordGap,
+): void {
+  const { scope, identity } = node,
+    children = sourceDataChildren(scope, node, maximum),
+    neighbors = new Set(children.edges.map((_, index) => JSON.stringify(['data', index])));
+  if (!children.complete) addGap('edge-limit');
+  collectControlChildCoverage(scope, identity, firstCommitIndex, neighbors, addGap);
+  if (neighbors.size > maximum) addGap('edge-limit');
+}
+
+/** Missing future source coverage limits impact without changing a complete backward explanation. */
+export function sourceChildrenCollected(node: ResolvedRecordNode): boolean {
+  const { scope, identity, commitIndex } = node;
+  if (!writtenKeysForNode(scope.log[commitIndex], identity).length) return true;
+  for (let index = commitIndex + 1; index < scope.log.length; index++)
+    if (!scope.sourceCoveredExecutions?.has(scope.log[index].runtimeStageId)) return false;
+  return true;
 }
 
 /** Forward impact is the exact consuming execution, never an inferred output-write life. */
@@ -116,7 +142,14 @@ export function sourceDataChildren(scope: PreparedRecordScope, node: ResolvedRec
   const keys = writtenKeysForNode(scope.log[node.commitIndex], node.identity),
     edges: GraphEdge[] = [];
   for (const read of scope.readSources!.byCommit.get(node.commitIndex) ?? []) {
-    if (read.commitIdx !== node.commitIndex || !keys.includes(read.path)) continue;
+    if (
+      read.commitIdx !== node.commitIndex ||
+      !keys.some((key) => {
+        const position = relation(read.path, key);
+        return position === 'exact' || position === 'inside';
+      })
+    )
+      continue;
     const commitIdx = read.readerCommitIdx;
     if (
       !append(

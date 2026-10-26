@@ -90,7 +90,7 @@ export function prepareRecordScope(
     sources === undefined ? undefined : recordOwn(value, 'initialState'),
     budget,
   );
-  return {
+  const scope: PreparedRecordScope = {
     address,
     log,
     reads,
@@ -99,6 +99,27 @@ export function prepareRecordScope(
     complete: recordOwn(value, 'complete') === true,
     ...(readSources ? { readSources } : {}),
   };
+  if (readSources) scope.sourceCoveredExecutions = sourceCoveredExecutions(scope);
+  return scope;
+}
+
+/** Source absence is known only for collected executions; a write prefix covers that write, not every read. */
+function sourceCoveredExecutions(scope: PreparedRecordScope): ReadonlySet<string> {
+  const groups = new Map<string, PreparedRecordScope['log']>();
+  for (const bundle of scope.log) {
+    const group = groups.get(bundle.runtimeStageId) ?? [];
+    group.push(bundle);
+    groups.set(bundle.runtimeStageId, group);
+  }
+  const covered = new Set<string>(),
+    sources = scope.readSources!;
+  for (const [id, log] of groups) {
+    if (!sources.owners.has(id) && !scope.reads?.has(id)) continue;
+    const observed = new Set((sources.byOwner.get(id) ?? []).flatMap((read) => [read.path, read.occurrence.key]));
+    // Reuse the canonical union on this execution's own bundles, avoiding a whole-log scan for every owner.
+    if (readKeysForStage({ ...scope, log }, id).every((key) => observed.has(key))) covered.add(id);
+  }
+  return covered;
 }
 
 /** Preserve both stage reads and stronger per-write prefixes, including their original encounter order. */
