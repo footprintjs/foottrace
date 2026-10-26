@@ -37,7 +37,7 @@ export interface Gap {
 export interface GraphEdge {
   readonly nodeId: NodeId;
   readonly kind: 'data' | 'control';
-  readonly attribution: 'per-write' | 'stage' | 'recorded-control';
+  readonly attribution: 'per-write' | 'stage' | 'recorded-control' | 'recorded-read';
   readonly evidence: readonly string[];
 }
 export interface Adjacency {

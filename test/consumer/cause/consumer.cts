@@ -14,3 +14,8 @@ void invalidDirection;
 
 // @ts-expect-error Public node identities are strings in both module formats.
 explain(graph, 1);
+
+import type { RecordReadSources, RecordScope } from 'foottrace/cause';
+declare const sources: RecordReadSources;
+const sourceScope: RecordScope = { address: { logRunId: 'run', drillPath: [] }, commitLog: [], initialState: {}, readSources: sources };
+void sourceScope;

@@ -1,3 +1,4 @@
+import type { PreparedReadSources } from '../cause/recordSources.js';
 import type { Attention } from '../cause/types.js';
 import type { GapCode } from '../evidence/codes.js';
 import type { ControlDependency } from '../memory/backtrack.js';
@@ -62,6 +63,7 @@ export interface AdmittedProvRecord {
   readonly attention?: Map<string, readonly Attention[]>;
   readonly address?: LogAddress;
   readonly privacy: ProvPrivacy;
+  readonly readSources?: PreparedReadSources;
   readonly gaps: readonly ProvExportGap[];
   readonly complete: false;
 }

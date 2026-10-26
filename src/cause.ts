@@ -28,3 +28,5 @@ export type {
 } from './lib/cause/types.js';
 export type { RecordScope, RecordGraphOptions, RecordCauseGraph, RecordNode } from './lib/cause/recordAdapter.js';
 export type { StoredRecordScope, StoredRecordHost } from './lib/cause/storedRecordAdapter.js';
+
+export type { RecordReadSources, ReadSourceExecution } from './lib/cause/recordSources.js';

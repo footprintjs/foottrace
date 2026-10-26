@@ -1,3 +1,4 @@
+import { inspectSourceParents } from './recordSourceEdges.js';
 import { causalChain, type CausalEdge } from '../memory/backtrack.js';
 import { findLastWriter } from '../memory/commitLogUtils.js';
 import { sliceForKey } from '../slice/sliceForKey.js';
@@ -60,6 +61,7 @@ export function inspectRecordNode(
   extraGapCodes: readonly Gap['code'][] | undefined,
 ): RecordInspection {
   const { scope, identity, commitIndex } = node;
+  if (scope.readSources) return inspectSourceParents(node, maximumEdges, extraGapCodes);
   const bundle = scope.log[commitIndex],
     firstCommitIndex = scope.log.findIndex((entry) => entry.runtimeStageId === identity.runtimeStageId),
     coverage = recordGapCollector();

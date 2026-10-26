@@ -109,7 +109,10 @@ export function adjacency(value: unknown, maximum: number): Adjacency {
         attribution = graphOwn(item, 'attribution');
       if (
         (kind !== 'data' && kind !== 'control') ||
-        (attribution !== 'per-write' && attribution !== 'stage' && attribution !== 'recorded-control') ||
+        (attribution !== 'per-write' &&
+          attribution !== 'stage' &&
+          attribution !== 'recorded-control' &&
+          attribution !== 'recorded-read') ||
         (kind === 'control' && attribution !== 'recorded-control') ||
         (kind === 'data' && attribution === 'recorded-control')
       )

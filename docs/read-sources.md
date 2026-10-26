@@ -1,10 +1,6 @@
-# Native root-read sources (opt-in writer port)
+# Native root-read sources
 
-This is packet 2 of the exact-read-source work: a native **writer port**, not engine
-integration or a new cause algorithm. Nothing is captured by existing `read()` calls.
-A future engine change must choose this port, supply scope/attempt/privacy facts and
-connect persistence separately. The capture note still says read sources are not
-collected. Neither `/cause` nor `/prov` consumes this channel yet.
+The writer port records native scalar root-read source observations. Existing `read()` calls do not capture this channel. A producer supplies scope, attempt and privacy facts, and a host separately admits its native observation or saved history. Cause and PROV readers accept the optional authorized root evidence below.
 
 ## Open a fresh record and use the actual read
 
@@ -200,3 +196,63 @@ These are synthetic, machine-specific measurements, not an application latency
 or savings claim. GC heap estimates are noisy; serialized/accounted byte counts
 are exact. Full engine adoption, durable source history, `/cause`/`/prov` readers,
 UI integration and any release remain separate reviewed work.
+
+## Consume an authorized root observation
+
+`RecordReadSources` and `ReadSourceExecution` have one canonical type door,
+`foottrace/cause`. A `RecordScope` may supply `readSources: { record, executions }`
+and its existing `initialState` beside the log. The same fields are accepted by
+`exportProv`. Each execution binding names a canonical `runtimeStageId`, the exact
+literal `stateAddress` chosen by that native execution, and its authorized
+`attemptIds`. Missing or mismatched owners, namespaces or attempts stay unknown.
+These bindings come from trusted host code after it admits the producer's native
+observation or saved-history receipt; never expose them as model-controlled options.
+
+The consumer reuses the source codec and canonical value reader. It checks the
+exact log address, execution membership, first-commit boundary and matching scalar,
+non-redacted row references. A committed source must precede its reader's first
+commit. The source descriptor, rather than a temporal nearest-writer guess, chooses
+which committed version was observed. Source metadata and optional base values are
+copied as inert data; getters are refused and values never enter results.
+
+This first consumer supports only root addresses with source segment 1. Child
+scopes, unproved resumed segments, staged-to-commit joins, missing attempts, rich
+composites and ambiguous literal path encodings retain gaps. Partial observations
+remain usable lower bounds with incomplete coverage. Capture limits, omitted
+observations and source-admission work exhaustion never become proof of absence.
+`maxFields` bounds both copied evidence and conservatively precharged source
+validation; increase it explicitly within the existing record limits for larger
+source books. PROV also retains its existing work, privacy and output limits.
+
+For cause queries, an unqualified execution gets `recorded-read` source edges.
+Forward impact reaches the exact consuming execution. A scalar base is a known
+pre-run terminus, without a fabricated commit node. A key-qualified output still
+has conservative `stage` links when a read prefix names possible inputs: there
+is no occurrence-to-write join, and that ambiguity can withhold `rootCause`.
+An explicitly empty per-write prefix remains an exclusion. Original source
+ordinals, attempt IDs and discarded/released disposition are preserved in the source book and PROV occurrences. Graph edges cite the original read ordinal and include attempt IDs that fit the existing 512-character evidence-reference limit; longer attempts remain resolvable through that ordinal. An exact
+read in a discarded attempt proves that read happened, not influence on its output.
+
+A captured empty source book does not establish read collection for an unbound
+execution. Execution coverage requires an authorized known attempt or explicit
+stage-read collection, with known reads matched to admitted observations. An empty
+per-write prefix excludes inputs only for that output. Missing later consumer
+coverage makes impact incomplete while preserving a root established by complete
+backward evidence. Ancestor-qualified impact includes supported scalar source
+reads inside that key, using the canonical path grammar.
+
+PROV adds separate `ft:Read` occurrence nodes and `prov:used` only when a supported
+source entity actually joins the admitted output. A scalar base gets a value-free
+initial entity. A committed entity must be the matching final `set` row; patch,
+missing, hidden or output-capped entities receive a gap. Existing candidate reads
+and `ft:PossibleDerivation` remain extension evidence, so per-write ambiguity
+and ordinary snapshot incompleteness still apply. Reads alone never emit
+`prov:wasDerivedFrom` or prove semantic derivation.
+
+`createStoredRecordGraph` forwards only explicitly supplied host evidence and uses
+the stored log's own admitted initial state. It does not inspect opaque capture
+notes, authenticate receipts, or borrow root authority for a child log. A checksum
+or unkeyed digest is consistency evidence, not authentication or truth. Hosts own
+tenant authorization, native/saved-history admission and any trusted signature.
+With `readSources` absent or `undefined`, legacy query and export results retain
+their existing bytes and meaning.

@@ -1,9 +1,6 @@
 # Export one record as PROV-O JSON-LD
 
-This is the first, value-free export contract, prepared for a separate 1.6.0
-release review. It is not part of the published 1.5.0 package. Import the optional
-`foottrace/prov` entry in a build containing this feature; the root entry does not
-load or re-export it.
+Import the optional `foottrace/prov` entry for a bounded, value-free export. The root entry does not load or re-export it.
 
 PROV-O is a [W3C Recommendation](https://www.w3.org/TR/prov-o/), serialized here as
 [JSON-LD](https://www.w3.org/TR/json-ld11/). This exporter does not certify records,
@@ -88,6 +85,10 @@ payload may remain in a record, so the exporter does not pretend to have the
 earlier intermediate values. In this phase no payload value is exported at all.
 No clock, human approver or runtime producer is inferred. The exporter package is
 not evidence of which runtime executed the record.
+
+## Optional exact source usage
+
+Supply the authorized root `readSources` seam and the same scope's `initialState` to add original source occurrences and `prov:used` for proven entity joins. Initial scalar values receive value-free initial entities; committed sources require matching final `set` entities. Hidden, patch, missing and capped entities stay unavailable. Ordinary candidate links and per-write ambiguity remain, and reads alone never produce `prov:wasDerivedFrom`. See the [shared source contract](read-sources.md#consume-an-authorized-root-observation).
 
 ## 3. Treat redaction as a disclosure boundary
 
