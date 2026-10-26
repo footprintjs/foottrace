@@ -106,5 +106,8 @@
   "src/lib/read-sources/codec.ts": 1,
   "src/lib/read-sources/commitFacts.ts": 1,
   "src/lib/read-sources/bindings.ts": 0,
-  "src/lib/read-sources/format.ts": 0
+  "src/lib/read-sources/format.ts": 0,
+  "src/lib/cause/recordSources.ts": 3,
+  "src/lib/cause/recordSourceEdges.ts": 3,
+  "src/lib/prov/sourceReads.ts": 3
 }

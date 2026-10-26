@@ -57,6 +57,7 @@ export function prepareMapping(record: AdmittedProvRecord, budget: ProvBudget): 
     for (const key of keys) inspect(key);
     for (const commit of commits) for (const row of commit.rows) inspect(row.path);
   }
+  for (const read of record.readSources?.observations ?? []) inspect(read.path);
   // A late fail-closed transition also withholds every earlier cached disclosure decision.
   const hideAll = record.privacy.hideAllPaths || budget.exhausted('work');
   const controls = new Map<string, string>(),

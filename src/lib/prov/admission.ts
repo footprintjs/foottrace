@@ -1,8 +1,10 @@
+import { prepareReadSources } from '../cause/recordSources.js';
+import { bundleOf, recordOwn, RecordRefusal } from '../cause/recordValidation.js';
 import type { Attention } from '../cause/types.js';
 import { admitBundle, gapBundle } from './admitBundle.js';
 import { admitAddress, admitMaps } from './admitMaps.js';
 import { admitTree } from './admitTree.js';
-import { dataField, ProvBudget, ProvDataRefusal, requireSpend, refusalCode } from './budget.js';
+import { dataField, dataPath, dataString, ProvBudget, ProvDataRefusal, requireSpend, refusalCode } from './budget.js';
 import { inspectPrivacy } from './privacy.js';
 import type { AdmittedCommit, AdmittedProvRecord, ProvLimits } from './types.js';
 
@@ -109,6 +111,38 @@ export function admitProvRecord(
   }
   if (capturedReads || readSets.size) allReads = new Map([...readSets].map(([id, names]) => [id, [...names]]));
   const address = admitAddress(source, budget);
+  let readSources: ReturnType<typeof prepareReadSources>;
+  try {
+    const evidence = recordOwn(source, 'readSources');
+    if (evidence !== undefined) {
+      const allowance = { left: Math.min(budget.remaining('fields'), budget.remaining('work')) },
+        before = allowance.left;
+      try {
+        if (!address || commits.length !== prefix.log.length || prefix.truncated)
+          throw new RecordRefusal('not-collected');
+        // Existing bounded record admission copies the exact same prefix's value basis only for this opt-in seam.
+        const nativeLog = prefix.log.map((entry, index) => bundleOf(entry, index, allowance));
+        readSources = prepareReadSources(evidence, address, nativeLog, recordOwn(source, 'initialState'), allowance);
+        for (const read of readSources?.observations ?? []) {
+          dataPath(read.path, budget);
+          dataString(read.occurrence.attemptId, budget, false);
+        }
+      } catch (error) {
+        readSources = {
+          observations: [],
+          owners: new Set(),
+          byOwner: new Map(),
+          byCommit: new Map(),
+          gaps: [error instanceof RecordRefusal ? error.code : 'invalid-data'],
+        };
+      }
+      requireSpend(budget, 'fields', before - Math.max(0, allowance.left));
+      for (const code of readSources?.gaps ?? [])
+        budget.addGap({ code, reason: 'exact read-source evidence unavailable' });
+    }
+  } catch (error) {
+    budget.addGap({ code: refusalCode(error), reason: 'exact read-source evidence unavailable' });
+  }
   budget.addGap({ code: 'not-collected', reason: 'native capture and ending attestation is unavailable' });
   return {
     commits,
@@ -118,6 +152,7 @@ export function admitProvRecord(
     ...(attention ? { attention } : {}),
     ...(address ? { address } : {}),
     privacy: inspected.privacy,
+    ...(readSources ? { readSources } : {}),
     gaps: budget.gaps,
     complete: false,
   };

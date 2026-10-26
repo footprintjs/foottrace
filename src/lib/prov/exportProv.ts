@@ -4,6 +4,7 @@ import { mapAttention, mapControls } from './control.js';
 import { prepareMapping } from './mapping.js';
 import { mapRecord } from './mapRecord.js';
 import { provOptions } from './options.js';
+import { mapSourceReads } from './sourceReads.js';
 import { mapReads } from './reads.js';
 import type { ProvExport, ProvExportOptions } from './types.js';
 
@@ -17,5 +18,6 @@ export async function exportProv(record: unknown, options: ProvExportOptions): P
   mapControls(mapping);
   mapAttention(mapping);
   mapReads(mapping);
+  mapSourceReads(mapping);
   return mapping.output.finish();
 }

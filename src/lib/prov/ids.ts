@@ -49,6 +49,9 @@ export class ProvIds {
       (path === undefined ? '' : '/' + pathSegments(path).map(iriPart).join('/'))
     );
   }
+  initial(path: string): string {
+    return this.prefix + 'initial/' + pathSegments(path).map(iriPart).join('/');
+  }
   read(runtimeStageId: string, ordinal: number): string {
     return this.prefix + 'read/' + iriPart(runtimeStageId) + '/' + ordinal;
   }

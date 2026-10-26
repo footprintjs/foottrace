@@ -1,3 +1,4 @@
+import { prepareReadSources } from './recordSources.js';
 import type { LogAddress } from '../memory/eventPosition.js';
 import type { PreparedRecordScope, RecordGraphOptions, RecordScope } from './recordTypes.js';
 import {
@@ -81,7 +82,23 @@ export function prepareRecordScope(
     },
     budget,
   );
-  return { address, log, reads, control, marks, complete: recordOwn(value, 'complete') === true };
+  const sources = recordOwn(value, 'readSources');
+  const readSources = prepareReadSources(
+    sources,
+    address,
+    log,
+    sources === undefined ? undefined : recordOwn(value, 'initialState'),
+    budget,
+  );
+  return {
+    address,
+    log,
+    reads,
+    control,
+    marks,
+    complete: recordOwn(value, 'complete') === true,
+    ...(readSources ? { readSources } : {}),
+  };
 }
 
 /** Preserve both stage reads and stronger per-write prefixes, including their original encounter order. */

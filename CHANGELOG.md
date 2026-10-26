@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Optional host-authorized root read-source evidence for cause and PROV. Exact committed reads link sources to consuming executions; supported entity joins export `prov:used`. Per-write ambiguity, missing ownership, staged/child/resume limits and partial capture retain gaps. Existing calls without the seam keep their results.
+- `GraphEdge.attribution` adds `'recorded-read'` for observed source-to-execution edges only. Per-write and semantic derivation stay unproved; exhaustive consumers must handle the new literal.
+
 ## 1.7.0 — 2026-10-23
 
 ### Fixed

@@ -18,7 +18,7 @@ import {
   RecordRefusal,
 } from './recordValidation.js';
 import type { GraphContext, MaybePromise } from './types.js';
-export interface StoredRecordScope extends Omit<RecordScope, 'address' | 'commitLog' | 'complete'> {
+export interface StoredRecordScope extends Omit<RecordScope, 'address' | 'commitLog' | 'complete' | 'initialState'> {
   readonly entries: readonly unknown[];
 }
 export interface StoredRecordHost {
@@ -77,6 +77,8 @@ export function createStoredRecordGraph(host: StoredRecordHost, options: RecordG
             scope: {
               address,
               commitLog: log.commitLog,
+              initialState: log.initialState,
+              readSources: recordOwn(loaded, 'readSources') as RecordScope['readSources'],
               reads: recordOwn(loaded, 'reads') as RecordScope['reads'],
               controlDeps: recordOwn(loaded, 'controlDeps') as RecordScope['controlDeps'],
               attention: recordOwn(loaded, 'attention') as RecordScope['attention'],

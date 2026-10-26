@@ -14,3 +14,9 @@ void exportProv({ commitLog: [] }, { values: 'none' });
 // @ts-expect-error P1 does not execute host agent callbacks.
 const callbacks: ProvExportOptions = { base: 'urn:example:consumer/', agents: () => [] };
 void callbacks;
+
+import type { RecordReadSources, ReadSourceExecution } from 'foottrace/cause';
+declare const sources: RecordReadSources;
+const owner: ReadSourceExecution = { runtimeStageId: 'read#1', stateAddress: [], attemptIds: ['read#1@1'] };
+void owner;
+void exportProv({ commitLog: [], readSources: sources }, options);

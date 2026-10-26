@@ -28,6 +28,10 @@ frame.commit(() => ({ stage: 'Derive', stageId: 'derive', runtimeStageId: 'deriv
 frame.release();
 ```
 
+## Optional exact root-read sources
+
+An authorized host can supply `RecordScope.readSources` and the same scope's `initialState`. Exact committed observations use `recorded-read` source-to-execution edges, and forward impact reaches that consuming execution. Key-qualified output links remain conservative because the source channel does not join each occurrence to a write. Base observations are known pre-run termini. Missing, staged, child/resume and unsupported evidence retains gaps. See the [shared source contract](read-sources.md#consume-an-authorized-root-observation) for authorization, bounds and PROV meaning.
+
 ## 2. Adapt an authorized stored record
 
 A stored host can expose one authorized log at a time:

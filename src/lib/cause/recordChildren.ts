@@ -1,3 +1,4 @@
+import { sourceDataChildren } from './recordSourceEdges.js';
 import { forwardSliceForKey } from '../slice/forwardSliceForKey.js';
 import type { ForwardNode } from '../slice/types.js';
 import { appendControlChildren } from './recordControl.js';
@@ -99,8 +100,14 @@ export function childrenForRecordNode(
   const { scope, identity, commitIndex } = node;
   const edges: GraphEdge[] = [];
   let complete = inspection.gaps.length === 0;
-  if (!allStageReadsCollected(scope)) complete = false;
-  complete = appendDataChildren(scope, identity, commitIndex, maximumEdges, edges) && complete;
+  if (scope.readSources) {
+    const data = sourceDataChildren(scope, node, maximumEdges);
+    edges.push(...data.edges);
+    complete = data.complete && complete;
+  } else {
+    if (!allStageReadsCollected(scope)) complete = false;
+    complete = appendDataChildren(scope, identity, commitIndex, maximumEdges, edges) && complete;
+  }
   complete = appendControlChildren(scope, identity, commitIndex, maximumEdges, edges) && complete;
   return { edges, complete };
 }
