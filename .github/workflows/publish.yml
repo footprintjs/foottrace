@@ -1,39 +1,318 @@
-name: Publish
+# Release helpers are read directly from the same immutable main event commit.
+name: Release App
 on:
-  release:
-    types: [published]
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      verify_only:
+        description: Inspect the existing release without preparation or submission
+        type: boolean
+        default: false
 permissions:
   contents: read
+  actions: read
+  pull-requests: read
+concurrency:
+  group: foottrace-release
+  cancel-in-progress: false
+env:
+  REPO_ID: ${{ github.repository_id }}
+  REPO_NAME: ${{ github.repository }}
+  SOURCE_SHA: ${{ github.sha }}
+  SOURCE_REF: ${{ github.ref }}
+  EVENT_NAME: ${{ github.event_name }}
+  RUN_ID: ${{ github.run_id }}
+  RUN_ATTEMPT: ${{ github.run_attempt }}
+  VERIFY_ONLY: ${{ inputs.verify_only == true && 'true' || 'false' }}
+  APP_CLIENT_ID: ${{ vars.RELEASE_APP_CLIENT_ID }}
+  APP_SLUG: ${{ vars.RELEASE_APP_SLUG }}
+  NODE_OPTIONS: ''
+  NODE_PATH: ''
 jobs:
-  publish:
-    # Bootstrap 1.0.0 belongs to the owner. This workflow must never race that manual publish.
-    if: github.event.release.tag_name != 'v1.0.0' && !github.event.release.prerelease
+  plan:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      plan: ${{ steps.control.outputs.plan }}
+      mode: ${{ steps.control.outputs.mode }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          submodules: false
+          lfs: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24.21.0
+          package-manager-cache: false
+      - id: control
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/release-runner.cjs plan
+  prepare:
+    needs: plan
+    if: needs.plan.outputs.mode == 'prepare'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      artifact: ${{ steps.upload.outputs.artifact-id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          submodules: false
+          lfs: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24.21.0
+          package-manager-cache: false
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          PLAN_JSON: ${{ needs.plan.outputs.plan }}
+        run: node scripts/release-runner.cjs prepare
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        id: upload
+        with:
+          name: foottrace-${{ github.repository_id }}-${{ github.run_id }}-${{ github.run_attempt }}-prepare
+          path: |
+            release-artifact/proposal.json
+            release-artifact/manifest.json
+          if-no-files-found: error
+          retention-days: 30
+  proposal:
+    needs: [plan, prepare]
+    if: needs.plan.outputs.mode == 'prepare' && needs.prepare.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          submodules: false
+          lfs: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24.21.0
+          package-manager-cache: false
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        id: app
+        with:
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: footprintjs
+          repositories: foottrace
+          permission-contents: write
+          permission-pull-requests: write
+          permission-actions: read
+      - env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          PLAN_JSON: ${{ needs.plan.outputs.plan }}
+          ARTIFACT_ID: ${{ needs.prepare.outputs.artifact }}
+        run: node scripts/release-runner.cjs proposal
+  authority:
+    needs: plan
+    if: needs.plan.outputs.mode == 'publish'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      identity: ${{ steps.control.outputs.identity }}
+      authorized: ${{ steps.control.outputs.authorized }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          submodules: false
+          lfs: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24.21.0
+          package-manager-cache: false
+      - id: control
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PLAN_JSON: ${{ needs.plan.outputs.plan }}
+        run: node scripts/release-runner.cjs authority
+  verdict:
+    needs: [plan, authority]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      tested: ${{ steps.control.outputs.tested }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          submodules: false
+          lfs: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24.21.0
+          package-manager-cache: false
+      - id: control
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PLAN_JSON: ${{ needs.plan.outputs.plan }}
+          IDENTITY_JSON: ${{ needs.authority.outputs.identity }}
+        run: node scripts/release-runner.cjs verdict
+  gates:
+    needs: [plan, authority, verdict]
+    if: needs.authority.outputs.authorized == 'true' && needs.verdict.outputs.tested != 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
-      id-token: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.release.tag_name }}
-      - uses: actions/setup-node@v4
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
-          node-version: 24
-          registry-url: https://registry.npmjs.org
-      - run: npm install -g npm@11
+          node-version: ${{ matrix.node == 22 && '22.16.0' || '24.21.0' }}
+      - run: npm install -g npm@11.19.0
       - run: npm ci
       - run: npm run check
-      - name: Require the tag to match the package version
-        env:
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
-        run: node -e "if (process.env.RELEASE_TAG !== 'v' + require('./package.json').version) process.exit(1)"
-      - name: Pack the checked release
-        run: npm pack
-      - name: Retain the exact archive being published
-        uses: actions/upload-artifact@v4
+      - run: npm run test:coverage
+      - run: git diff --exit-code -- test/fixtures/hcifootprint/transitions-2.6.1.json
+  build:
+    needs: [plan, authority, verdict, gates]
+    if: >-
+      always() && !cancelled() && needs.plan.result == 'success' && needs.authority.result == 'success' && needs.verdict.result == 'success' &&
+      ((needs.verdict.outputs.tested == 'true' && needs.gates.result == 'skipped') || (needs.verdict.outputs.tested != 'true' && needs.gates.result == 'success'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      artifact: ${{ steps.upload.outputs.artifact-id }}
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          name: package-tarball
-          path: foottrace-*.tgz
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24.21.0
+      - run: npm ci
+      - run: npm run build
+      - run: npm run check:package
+      - run: npm pack --ignore-scripts --json > pack.json
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          PLAN_JSON: ${{ needs.plan.outputs.plan }}
+        run: node scripts/release-runner.cjs build-manifest
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        id: upload
+        with:
+          name: foottrace-${{ github.repository_id }}-${{ github.run_id }}-${{ github.run_attempt }}-build
+          path: |
+            release-artifact/package.tgz
+            release-artifact/manifest.json
           if-no-files-found: error
-      - name: Publish the checked archive
-        run: npm publish "./foottrace-$(node -p "require('./package.json').version").tgz" --access public
+          retention-days: 90
+  release:
+    needs: [plan, authority, build]
+    if: always() && !cancelled() && needs.plan.result == 'success' && needs.authority.result == 'success' && needs.build.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      actions: read
+      pull-requests: read
+    outputs:
+      grant: ${{ steps.control.outputs.grant }}
+      fresh: ${{ steps.control.outputs.fresh }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          submodules: false
+          lfs: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24.21.0
+          package-manager-cache: false
+      - id: control
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PLAN_JSON: ${{ needs.plan.outputs.plan }}
+          IDENTITY_JSON: ${{ needs.authority.outputs.identity }}
+          ARTIFACT_ID: ${{ needs.build.outputs.artifact }}
+        run: node scripts/release-runner.cjs release
+  publish:
+    needs: [plan, authority, build, release]
+    if: always() && !cancelled() && needs.plan.result == 'success' && needs.authority.result == 'success' && needs.build.result == 'success' && needs.release.result == 'success' && needs.release.outputs.fresh == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          submodules: false
+          lfs: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24.21.0
+          package-manager-cache: false
+          registry-url: https://registry.npmjs.org
+      - id: control
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PLAN_JSON: ${{ needs.plan.outputs.plan }}
+          IDENTITY_JSON: ${{ needs.authority.outputs.identity }}
+          ARTIFACT_ID: ${{ needs.build.outputs.artifact }}
+          GRANT_JSON: ${{ needs.release.outputs.grant }}
+        run: node scripts/release-runner.cjs publish
+      - name: Require the pinned bundled npm
+        if: steps.control.outputs.submit == 'true'
+        working-directory: ${{ runner.temp }}/foottrace-publish-${{ github.run_id }}-${{ github.run_attempt }}
+        run: test "$(npm --version)" = '11.19.0'
+      - name: Submit the one checked archive
+        if: steps.control.outputs.submit == 'true'
+        working-directory: ${{ runner.temp }}/foottrace-publish-${{ github.run_id }}-${{ github.run_attempt }}
+        env:
+          PACKAGE_FILE: ${{ steps.control.outputs.file }}
+          NODE_AUTH_TOKEN: ''
+        run: npm publish "$PACKAGE_FILE" --ignore-scripts --access public --registry=https://registry.npmjs.org
+  verify:
+    needs: [plan, authority, build, release, publish]
+    if: >-
+      always() && !cancelled() && needs.plan.result == 'success' &&
+      (needs.plan.outputs.mode == 'verify' || (needs.release.result == 'success' && (needs.release.outputs.fresh == 'false' || needs.publish.result == 'success' || needs.publish.result == 'failure')))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          submodules: false
+          lfs: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24.21.0
+          package-manager-cache: false
+      - id: control
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PLAN_JSON: ${{ needs.plan.outputs.plan }}
+        run: node scripts/release-runner.cjs verify
