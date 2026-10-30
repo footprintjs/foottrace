@@ -6,6 +6,219 @@ const fail = (code) => {
   e.code = code;
   throw e;
 };
+
+// Codes are diagnostic labels, never evidence of authority. Do not inspect messages,
+// stacks or arbitrary object stringification at this output boundary.
+const LEGACY_CODES = new Set([
+  'EEXIST',
+  'api-route',
+  'app-settings',
+  'archive-manifest',
+  'artifact-id',
+  'artifact-manifest',
+  'artifact-source',
+  'authority-app',
+  'authority-approval',
+  'authority-changes-requested',
+  'authority-event',
+  'authority-identity',
+  'authority-incomplete',
+  'authority-invalid-evidence',
+  'authority-plan',
+  'authority-release-pr',
+  'authority-review-shape',
+  'authority-reviewed-tree',
+  'blob',
+  'build-tree',
+  'checkout-sha',
+  'context',
+  'current-run',
+  'dirty-checkout',
+  'event',
+  'fragment-path',
+  'identity',
+  'identity-changed',
+  'incomplete-pages',
+  'invalid-archive',
+  'invalid-fragment',
+  'invalid-release-docs',
+  'invalid-release-input',
+  'invalid-version',
+  'journal-asset',
+  'journal-conflict',
+  'journal-grant',
+  'main-moved',
+  'output-limit',
+  'output-path',
+  'output-shape',
+  'pack-identity',
+  'package',
+  'package-version',
+  'plan-substitution',
+  'pr-moved',
+  'producer-attempt',
+  'producer-job',
+  'proposal-base',
+  'proposal-commit',
+  'proposal-existing',
+  'proposal-plan',
+  'proposal-pr',
+  'proposal-substitution',
+  'proposal-tree',
+  'publish-directory',
+  'registry-bytes',
+  'registry-conflict',
+  'registry-shape',
+  'registry-unavailable',
+  'release-conflict',
+  'release-notes',
+  'release-pr',
+  'release-upload-url',
+  'repository',
+  'reservation-ambiguous',
+  'response-limit',
+  'runner-output',
+  'runner-summary',
+  'security-job',
+  'security-run',
+  'source-commit',
+  'source-content',
+  'source-sha',
+  'source-tree',
+  'stage',
+  'tag-conflict',
+  'tag-depth',
+  'tag-shape',
+  'verify-unreleased-main',
+  'version',
+]);
+const OPERATIONS = new Set([
+  'authority-main',
+  'authority-merge',
+  'authority-linked-prs',
+  'authority-pr',
+  'authority-head',
+  'authority-reviews',
+  'authority-permission',
+  'authority-app',
+  'authority-bot',
+  'authority-package',
+  'authority-recheck',
+  'runner-context',
+  'runner-checkout',
+  'runner-output-encode',
+  'runner-output-write',
+  'runner-summary-write',
+  'runner-plan',
+  'runner-prepare',
+  'runner-proposal',
+  'runner-authority',
+  'runner-verdict',
+  'runner-build-manifest',
+  'runner-release',
+  'runner-publish',
+  'runner-verify',
+  'security-evidence',
+  'optional',
+  'github-request',
+  'registry-request',
+  'plan-json',
+  'identity-json',
+  'grant-json',
+  'package-json',
+  'lock-json',
+  'pack-json',
+  'artifact-json',
+  'journal-json',
+  'registry-json',
+  'registry-latest-json',
+]);
+const REASONS = new Set([
+  'unexpected',
+  'json',
+  'github-transport',
+  'github-response',
+  'github-body',
+  'github-json',
+  'registry-transport',
+  'registry-body',
+  'github-http-unauthorized',
+  'github-http-forbidden',
+  'github-http-not-found',
+  'github-http-conflict',
+  'github-http-invalid',
+  'github-http-rate-limited',
+  'github-http-server',
+  'github-http-other',
+]);
+const CONTEXT_CODES = new Set([...OPERATIONS].flatMap((op) => [...REASONS].map((reason) => `${op}:${reason}`)));
+const PRINTABLE_CODES = new Set([
+  ...LEGACY_CODES,
+  ...REASONS,
+  ...CONTEXT_CODES,
+  'release-unexpected',
+  'diagnostic-operation',
+]);
+function ownData(value, key) {
+  try {
+    if ((typeof value !== 'object' || value === null) && typeof value !== 'function') return undefined;
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    return descriptor && Object.prototype.hasOwnProperty.call(descriptor, 'value') ? descriptor.value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+function refusalCode(error) {
+  const code = ownData(error, 'code');
+  return typeof code === 'string' && PRINTABLE_CODES.has(code) ? code : 'release-unexpected';
+}
+function diagnostic(code, message = code) {
+  const error = new Error(message);
+  error.code = code;
+  return error;
+}
+function contextual(error, operation) {
+  if (!OPERATIONS.has(operation)) return diagnostic('diagnostic-operation');
+  const code = refusalCode(error);
+  // Keep exact direct-caller contracts and already-contextualized failures intact.
+  if (LEGACY_CODES.has(code) || CONTEXT_CODES.has(code) || code === 'diagnostic-operation') return error;
+  const result = diagnostic(`${operation}:${REASONS.has(code) ? code : 'unexpected'}`);
+  const status = ownData(error, 'status');
+  if (Number.isSafeInteger(status) && status >= 100 && status <= 599) result.status = status;
+  return result;
+}
+function withRefusalSync(operation, work) {
+  if (!OPERATIONS.has(operation)) throw diagnostic('diagnostic-operation');
+  try {
+    return work();
+  } catch (error) {
+    throw contextual(error, operation);
+  }
+}
+async function withRefusal(operation, work) {
+  if (!OPERATIONS.has(operation)) throw diagnostic('diagnostic-operation');
+  try {
+    return await work();
+  } catch (error) {
+    throw contextual(error, operation);
+  }
+}
+function parseJson(operation, bytes) {
+  if (!OPERATIONS.has(operation)) throw diagnostic('diagnostic-operation');
+  try {
+    return JSON.parse(bytes);
+  } catch {
+    throw diagnostic(`${operation}:json`);
+  }
+}
+async function registryFetch(url, fetcher) {
+  try {
+    return await fetcher(url, { signal: AbortSignal.timeout(30000) });
+  } catch {
+    throw diagnostic('registry-transport');
+  }
+}
+
 const enc = encodeURIComponent;
 const prefix = (context) => {
   if (context.repository?.full_name !== 'footprintjs/foottrace' || !Number.isSafeInteger(context.repository.id))
@@ -89,7 +302,7 @@ async function plan(api, context) {
   if (!control.sameRepo(repo, context.repository)) fail('repository');
   await assertCurrentMain(api, context);
   const input = await sourceInput(api, context),
-    pkg = JSON.parse(input.files['package.json']);
+    pkg = parseJson('package-json', input.files['package.json']);
   if (pkg.name !== 'foottrace') fail('package');
   if (context.verify === true && input.prepared) fail('verify-unreleased-main');
   const mode = context.verify === true ? 'verify' : input.prepared ? 'prepare' : 'publish';
@@ -116,25 +329,45 @@ async function prepareProposal(api, context, pinned) {
   return { base: context.sha, tree: pinned.tree, repository: context.repository, prepared: input.prepared };
 }
 async function collectAuthority(api, context, settings) {
-  await assertCurrentMain(api, context);
+  await withRefusal('authority-main', () => assertCurrentMain(api, context));
   const base = prefix(context),
-    commit = (await api('GET', `${base}/git/commits/${context.sha}`)).data;
-  const linked = await pages(api, `${base}/commits/${context.sha}/pulls`);
+    commit = await withRefusal(
+      'authority-merge',
+      async () => (await api('GET', `${base}/git/commits/${context.sha}`)).data,
+    );
+  const linked = await withRefusal('authority-linked-prs', () => pages(api, `${base}/commits/${context.sha}/pulls`));
   const candidates = linked.filter((p) => p.head?.ref === 'release/next' && p.merge_commit_sha === context.sha);
   if (candidates.length !== 1) fail('release-pr');
-  const p = (await api('GET', `${base}/pulls/${candidates[0].number}`)).data;
-  const headCommit = (await api('GET', `${base}/git/commits/${p.head.sha}`)).data;
-  const reviews = await pages(api, `${base}/pulls/${p.number}/reviews`),
+  const p = await withRefusal(
+    'authority-pr',
+    async () => (await api('GET', `${base}/pulls/${candidates[0].number}`)).data,
+  );
+  const headCommit = await withRefusal(
+    'authority-head',
+    async () => (await api('GET', `${base}/git/commits/${p.head.sha}`)).data,
+  );
+  const reviews = await withRefusal('authority-reviews', () => pages(api, `${base}/pulls/${p.number}/reviews`)),
     reviewerPermissions = [];
   for (const user of new Map(reviews.filter((r) => r.user?.type === 'User').map((r) => [r.user.id, r.user])).values()) {
-    const permission = (await api('GET', `${base}/collaborators/${enc(user.login)}/permission`)).data;
+    const permission = await withRefusal(
+      'authority-permission',
+      async () => (await api('GET', `${base}/collaborators/${enc(user.login)}/permission`)).data,
+    );
     reviewerPermissions.push(permission);
   }
   if (!/^[a-z0-9-]+$/.test(settings.slug ?? '') || typeof settings.clientId !== 'string' || !settings.clientId)
     fail('app-settings');
-  const metadata = (await api('GET', `/apps/${enc(settings.slug)}`)).data;
-  const bot = (await api('GET', `/users/${enc(settings.slug + '[bot]')}`)).data;
-  const pkg = JSON.parse(await content(api, context, 'package.json'));
+  const metadata = await withRefusal(
+    'authority-app',
+    async () => (await api('GET', `/apps/${enc(settings.slug)}`)).data,
+  );
+  const bot = await withRefusal(
+    'authority-bot',
+    async () => (await api('GET', `/users/${enc(settings.slug + '[bot]')}`)).data,
+  );
+  const pkg = await withRefusal('authority-package', async () =>
+    parseJson('package-json', await content(api, context, 'package.json')),
+  );
   const expected = {
     repository: context.repository,
     baseRef: 'main',
@@ -163,7 +396,10 @@ async function collectAuthority(api, context, settings) {
   const result = control.decideAuthority(world);
   if (!result.authorized) fail(`authority-${result.reason}`);
   // The final mutable PR view must still bind the same exact reviewed head.
-  const fresh = (await api('GET', `${base}/pulls/${p.number}`)).data;
+  const fresh = await withRefusal(
+    'authority-recheck',
+    async () => (await api('GET', `${base}/pulls/${p.number}`)).data,
+  );
   if (fresh.head?.sha !== p.head.sha || fresh.merge_commit_sha !== context.sha || !fresh.merged_at) fail('pr-moved');
   return expected;
 }
@@ -196,33 +432,35 @@ async function ciVerdict(api, identity) {
   }
 }
 async function requireSecurity(api, identity) {
-  const w = await workflowEvidence(api, identity, 'codeql.yml'),
-    r = [...w.runs].sort((a, b) => b.id - a.id)[0];
-  if (
-    w.workflow.path !== '.github/workflows/codeql.yml' ||
-    !r ||
-    r.head_sha !== identity.headSha ||
-    r.event !== 'pull_request' ||
-    !control.sameRepo(r.head_repository, identity.repository) ||
-    r.workflow_id !== w.workflow.id ||
-    r.path !== w.workflow.path ||
-    !control.success(r) ||
-    !control.success(w.attempt) ||
-    w.attempt.id !== r.id ||
-    w.attempt.run_attempt !== r.run_attempt
-  )
-    fail('security-run');
-  for (const name of ['Analyze (javascript-typescript)', 'Analyze (actions)']) {
-    const jobs = w.jobs.filter((j) => j.name === name);
+  return withRefusal('security-evidence', async () => {
+    const w = await workflowEvidence(api, identity, 'codeql.yml'),
+      r = [...w.runs].sort((a, b) => b.id - a.id)[0];
     if (
-      jobs.length !== 1 ||
-      !control.success(jobs[0]) ||
-      jobs[0].run_id !== r.id ||
-      jobs[0].run_attempt !== r.run_attempt
+      w.workflow.path !== '.github/workflows/codeql.yml' ||
+      !r ||
+      r.head_sha !== identity.headSha ||
+      r.event !== 'pull_request' ||
+      !control.sameRepo(r.head_repository, identity.repository) ||
+      r.workflow_id !== w.workflow.id ||
+      r.path !== w.workflow.path ||
+      !control.success(r) ||
+      !control.success(w.attempt) ||
+      w.attempt.id !== r.id ||
+      w.attempt.run_attempt !== r.run_attempt
     )
-      fail('security-job');
-  }
-  return { runId: r.id, attempt: r.run_attempt };
+      fail('security-run');
+    for (const name of ['Analyze (javascript-typescript)', 'Analyze (actions)']) {
+      const jobs = w.jobs.filter((j) => j.name === name);
+      if (
+        jobs.length !== 1 ||
+        !control.success(jobs[0]) ||
+        jobs[0].run_id !== r.id ||
+        jobs[0].run_attempt !== r.run_attempt
+      )
+        fail('security-job');
+    }
+    return { runId: r.id, attempt: r.run_attempt };
+  });
 }
 async function reserveAttempt(api, release, marker) {
   if (
@@ -242,8 +480,8 @@ async function optional(api, route) {
   try {
     return (await api('GET', route)).data;
   } catch (e) {
-    if (e.status === 404) return null;
-    throw e;
+    if (ownData(e, 'status') === 404) return null;
+    throw contextual(e, 'optional');
   }
 }
 async function writeProposal(api, context, payload, pinned) {
@@ -370,7 +608,7 @@ async function readArtifact(api, context, pinned, artifactId, role) {
     Buffer.from(downloaded),
     role === 'prepare' ? ['manifest.json', 'proposal.json'] : ['manifest.json', 'package.tgz'],
   );
-  const manifest = JSON.parse(members['manifest.json'].toString('utf8'));
+  const manifest = parseJson('artifact-json', members['manifest.json'].toString('utf8'));
   if (
     !control.validateArtifactBinding({
       expected,
@@ -474,7 +712,7 @@ async function publishGrant(api, context, identity, archive, grant) {
   const raw = (
     await api('GET', `${prefix(context)}/releases/assets/${grant.assetId}`, { accept: 'application/octet-stream' })
   ).data;
-  const marker = JSON.parse(Buffer.from(raw).toString('utf8'));
+  const marker = parseJson('journal-json', Buffer.from(raw).toString('utf8'));
   const expected = {
     version: identity.version,
     runId: context.runId,
@@ -486,67 +724,97 @@ async function publishGrant(api, context, identity, archive, grant) {
   if ((await peeledTag(api, context, identity.tag)) !== context.sha) fail('tag-conflict');
   return true;
 }
-async function responseBytes(response, max = 24 * 1024 * 1024) {
-  if (Number(response.headers.get('content-length') ?? 0) > max) fail('response-limit');
-  const chunks = [];
-  let size = 0;
-  for await (const chunk of response.body) {
-    size += chunk.length;
-    if (size > max) fail('response-limit');
-    chunks.push(Buffer.from(chunk));
+async function responseBytes(response, max = 24 * 1024 * 1024, failure = 'github-body') {
+  try {
+    if (Number(response.headers.get('content-length') ?? 0) > max) fail('response-limit');
+    const chunks = [];
+    let size = 0;
+    for await (const chunk of response.body) {
+      size += chunk.length;
+      if (size > max) fail('response-limit');
+      chunks.push(Buffer.from(chunk));
+    }
+    return Buffer.concat(chunks);
+  } catch (error) {
+    if (refusalCode(error) === 'response-limit') throw error;
+    throw diagnostic(failure === 'registry-body' ? 'registry-body' : 'github-body');
   }
-  return Buffer.concat(chunks);
 }
 function makeApi(token, fetcher = fetch) {
   return async (method, route, body) => {
-    if (
-      !(
-        route.startsWith('/repos/footprintjs/foottrace/') ||
-        route === '/repos/footprintjs/foottrace' ||
-        route.startsWith('/apps/') ||
-        route.startsWith('/users/') ||
-        route.startsWith('https://uploads.github.com/repos/footprintjs/foottrace/releases/')
+    try {
+      if (
+        !(
+          route.startsWith('/repos/footprintjs/foottrace/') ||
+          route === '/repos/footprintjs/foottrace' ||
+          route.startsWith('/apps/') ||
+          route.startsWith('/users/') ||
+          route.startsWith('https://uploads.github.com/repos/footprintjs/foottrace/releases/')
+        )
       )
-    )
-      fail('api-route');
-    const headers = {
-      authorization: `Bearer ${token}`,
-      accept: body?.accept ?? 'application/vnd.github+json',
-      'x-github-api-version': '2022-11-28',
-    };
-    const options = { method, headers, signal: AbortSignal.timeout(30000) };
-    if (body?.raw) {
-      headers['content-type'] = body.contentType;
-      options.body = body.raw;
-    } else if (body && !body.accept) {
-      headers['content-type'] = 'application/json';
-      options.body = JSON.stringify(body);
-    }
-    const response = await fetcher(route.startsWith('https:') ? route : `https://api.github.com${route}`, options);
-    if (!response.ok) {
-      const error = new Error('github-api-failed');
-      error.status = response.status;
-      throw error;
-    }
-    const bytes = await responseBytes(response);
-    return {
-      data:
+        fail('api-route');
+      const headers = {
+        authorization: `Bearer ${token}`,
+        accept: body?.accept ?? 'application/vnd.github+json',
+        'x-github-api-version': '2022-11-28',
+      };
+      const options = { method, headers, signal: AbortSignal.timeout(30000) };
+      if (body?.raw) {
+        headers['content-type'] = body.contentType;
+        options.body = body.raw;
+      } else if (body && !body.accept) {
+        headers['content-type'] = 'application/json';
+        options.body = JSON.stringify(body);
+      }
+      let response;
+      try {
+        response = await fetcher(route.startsWith('https:') ? route : `https://api.github.com${route}`, options);
+      } catch {
+        throw diagnostic('github-transport');
+      }
+      if (!response || typeof response.ok !== 'boolean') throw diagnostic('github-response');
+      if (!response.ok) {
+        const status = response.status;
+        if (!Number.isInteger(status) || status < 100 || status > 599) throw diagnostic('github-response');
+        const specific = new Map([
+          [401, 'unauthorized'],
+          [403, 'forbidden'],
+          [404, 'not-found'],
+          [409, 'conflict'],
+          [422, 'invalid'],
+          [429, 'rate-limited'],
+        ]);
+        const category = specific.get(status) ?? (status >= 500 ? 'server' : 'other');
+        const error = diagnostic(`github-http-${category}`, 'github-api-failed');
+        error.status = status;
+        throw error;
+      }
+      const bytes = await responseBytes(response);
+      const isJson =
         body?.accept !== 'application/octet-stream' &&
         !route.endsWith('/zip') &&
-        response.headers.get('content-type')?.includes('json')
-          ? JSON.parse(bytes.toString('utf8'))
-          : bytes,
-    };
+        response.headers.get('content-type')?.includes('json');
+      if (!isJson) return { data: bytes };
+      try {
+        return { data: JSON.parse(bytes.toString('utf8')) };
+      } catch {
+        throw diagnostic('github-json');
+      }
+    } catch (error) {
+      if (refusalCode(error) !== 'release-unexpected') throw error;
+      throw contextual(error, 'github-request');
+    }
   };
 }
 async function registryVersion(version, fetcher = fetch) {
   if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(version)) fail('version');
-  const response = await fetcher(`https://registry.npmjs.org/foottrace/${version}`, {
-    signal: AbortSignal.timeout(30000),
-  });
+  const response = await registryFetch(`https://registry.npmjs.org/foottrace/${version}`, fetcher);
   if (response.status === 404) return null;
   if (!response.ok) fail('registry-unavailable');
-  const value = JSON.parse((await responseBytes(response, 2 * 1024 * 1024)).toString('utf8'));
+  const value = parseJson(
+    'registry-json',
+    (await responseBytes(response, 2 * 1024 * 1024, 'registry-body')).toString('utf8'),
+  );
   if (value.name !== 'foottrace' || value.version !== version || typeof value.dist?.integrity !== 'string')
     fail('registry-shape');
   return { ...value.dist, version: value.version };
@@ -562,7 +830,8 @@ async function verifyPublished(api, context, pinned, fetcher = fetch) {
   const assets = await pages(api, `${base}/releases/${release.id}/assets`),
     markers = assets.filter((a) => a.name === `publish-attempt-${pinned.version}.json`);
   if (markers.length !== 1 || markers[0].state !== 'uploaded' || markers[0].size > 4096) fail('journal-conflict');
-  const marker = JSON.parse(
+  const marker = parseJson(
+    'journal-json',
     Buffer.from(
       (await api('GET', `${base}/releases/assets/${markers[0].id}`, { accept: 'application/octet-stream' })).data,
     ).toString('utf8'),
@@ -575,18 +844,22 @@ async function verifyPublished(api, context, pinned, fetcher = fetch) {
     registry.tarball !== `https://registry.npmjs.org/foottrace/-/foottrace-${pinned.version}.tgz`
   )
     fail('registry-conflict');
-  const response = await fetcher(registry.tarball, { signal: AbortSignal.timeout(30000) });
+  const response = await registryFetch(registry.tarball, fetcher);
   if (!response.ok) fail('registry-unavailable');
-  const archive = require('./release-archive.cjs').inspectArchive(await responseBytes(response, 16 * 1024 * 1024), {
-    package: 'foottrace',
-    version: pinned.version,
-  });
+  const archive = require('./release-archive.cjs').inspectArchive(
+    await responseBytes(response, 16 * 1024 * 1024, 'registry-body'),
+    {
+      package: 'foottrace',
+      version: pinned.version,
+    },
+  );
   if (archive.integrity !== marker.integrity || archive.shasum !== registry.shasum) fail('registry-bytes');
-  const latestResponse = await fetcher('https://registry.npmjs.org/foottrace/latest', {
-    signal: AbortSignal.timeout(30000),
-  });
+  const latestResponse = await registryFetch('https://registry.npmjs.org/foottrace/latest', fetcher);
   if (!latestResponse.ok) fail('registry-unavailable');
-  const latest = JSON.parse((await responseBytes(latestResponse, 2 * 1024 * 1024)).toString('utf8'));
+  const latest = parseJson(
+    'registry-latest-json',
+    (await responseBytes(latestResponse, 2 * 1024 * 1024, 'registry-body')).toString('utf8'),
+  );
   return {
     state: latest.version === pinned.version ? 'verified' : 'pending-latest',
     version: pinned.version,
@@ -622,8 +895,8 @@ function environmentContext(env) {
   return context;
 }
 async function runStage(stage, { api, context, env, io, fetcher = fetch }) {
-  const pinned = env.PLAN_JSON ? JSON.parse(env.PLAN_JSON) : null;
-  const identity = env.IDENTITY_JSON ? JSON.parse(env.IDENTITY_JSON) : null;
+  const pinned = env.PLAN_JSON ? parseJson('plan-json', env.PLAN_JSON) : null;
+  const identity = env.IDENTITY_JSON ? parseJson('identity-json', env.IDENTITY_JSON) : null;
   const settings = { slug: env.APP_SLUG, clientId: env.APP_CLIENT_ID };
   const bound = () => {
     if (!pinned || pinned.sha !== context.sha || !control.sameRepo(pinned.repository, context.repository))
@@ -664,7 +937,12 @@ async function runStage(stage, { api, context, env, io, fetcher = fetch }) {
     const artifact = await readArtifact(api, context, pinned, Number(env.ARTIFACT_ID), 'prepare');
     return {
       proposal: JSON.stringify(
-        await writeProposal(api, context, JSON.parse(artifact.members['proposal.json'].toString('utf8')), pinned),
+        await writeProposal(
+          api,
+          context,
+          parseJson('artifact-json', artifact.members['proposal.json'].toString('utf8')),
+          pinned,
+        ),
       ),
     };
   }
@@ -681,8 +959,8 @@ async function runStage(stage, { api, context, env, io, fetcher = fetch }) {
   if (stage === 'build-manifest') {
     if (io.gitTree() !== pinned.tree) fail('build-tree');
     io.requireClean();
-    const pkg = JSON.parse(io.read('package.json')),
-      lock = JSON.parse(io.read('package-lock.json'));
+    const pkg = parseJson('package-json', io.read('package.json')),
+      lock = parseJson('lock-json', io.read('package-lock.json'));
     if (
       pkg.name !== pinned.package ||
       pkg.version !== pinned.version ||
@@ -690,7 +968,7 @@ async function runStage(stage, { api, context, env, io, fetcher = fetch }) {
       lock.packages?.[''].version !== pkg.version
     )
       fail('package-version');
-    const pack = JSON.parse(io.read('pack.json'));
+    const pack = parseJson('pack-json', io.read('pack.json'));
     if (!Array.isArray(pack) || pack.length !== 1 || pack[0].filename !== `foottrace-${pinned.version}.tgz`)
       fail('pack-identity');
     const bytes = io.read(pack[0].filename),
@@ -739,7 +1017,7 @@ async function runStage(stage, { api, context, env, io, fetcher = fetch }) {
       const grant = await releaseState(api, context, identity, archive, registry);
       return { grant: JSON.stringify(grant), fresh: String(grant.fresh) };
     }
-    const grant = JSON.parse(env.GRANT_JSON ?? 'null');
+    const grant = parseJson('grant-json', env.GRANT_JSON ?? 'null');
     await publishGrant(api, context, identity, archive, grant);
     if (registry) {
       if (registry.integrity !== archive.integrity) fail('registry-conflict');
@@ -753,6 +1031,9 @@ async function runStage(stage, { api, context, env, io, fetcher = fetch }) {
   fail('stage');
 }
 module.exports = {
+  refusalCode,
+  withRefusal,
+  withRefusalSync,
   sourceReleaseNotes,
   requireReleaseNotes,
   makeApi,
