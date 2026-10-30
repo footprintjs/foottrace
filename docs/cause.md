@@ -79,6 +79,25 @@ const finding = await explain(graph, selectedNodeId, {
 
 Query defaults are 100 nodes, depth 20, 1,000 edges, 1,000 calls and one second. Hard ceilings are 10,000 nodes, depth 1,000, 100,000 edges/calls and 30 seconds. The same budget covers both directions and ranking. Callbacks are trusted executable code: asynchronous waiting is bounded and receives an abort signal, while synchronous callbacks must cooperate. A late synchronous result is rejected after it returns. Hosts must use non-secret node and evidence IDs; the reader does not classify arbitrary ID strings for personal information.
 
+### Return backward evidence for a viewer
+
+Set the optional boolean `includeBackward: true` to return the reverse walk that `explain` already performed:
+
+```ts
+const finding = await explain(graph, selectedNodeId, {
+  includeBackward: true,
+  maxNodes: 50, maxDepth: 10, maxEdges: 100, maxCalls: 200, timeoutMs: 500,
+});
+// finding.backward: BackwardResult | undefined
+// { nodes, edges, confidence, gaps }
+```
+
+`backward.nodes` includes the selected node and admitted discovered ancestors. Discovery order is not a chain or execution order; a bounded or cancelled walk can discover a node without inspecting all its facts. Draw relationships only from `backward.edges`, which retain each admitted relationship's `kind`, `attribution` and evidence references, including parallel relationships and shared ancestors. Backward edge direction is **dependent → recorded parent**, the direction of investigation. Impact edges point **cause → dependent**. Neither direction is a structural flowchart transition, and a recorded read does not prove that a particular output was derived from it.
+
+The backward result is frozen and carries its own confidence and gaps, captured after backward traversal and root ranking, before impact traversal. A complete backward result can coexist with incomplete impact and top-level confidence. The existing `rootCause` rule is unchanged: one supported candidate and complete backward evidence are required, while a complete unmarked graph can still have no root. Partial evidence retains admitted links and named gaps; it never becomes an invented complete trail. Hosts must preserve those gaps and distinguish alternatives from a confirmed root.
+
+This option reuses the existing walk; it dispatches no additional graph/storage calls and adds no separate work allowance or deadline. Omitted or `false` keeps the existing result shape, bytes and graph-call order. Other values and accessor properties are refused before graph dispatch. Storage authorization, exact run/visit binding, ID privacy and application-specific labels remain the host's responsibility.
+
 ### Leave work capacity for impact
 
 For a query with many ancestors and a small downstream graph, setting only `backward` is usually enough. Impact then uses whatever remains of the total budget:
@@ -123,7 +142,7 @@ Foundations: [Weiser, *Program slicing* (1981)](https://dl.acm.org/doi/10.5555/8
 | Loading only queried graph nodes/scopes | **Demand-driven, or lazy, graph traversal** |
 | Default candidate selection | **Root-cause localisation on a dependency DAG**, using the earliest anomalous ancestor |
 
-These names describe the techniques, not a claim of complete language-level instrumentation. Findings are bounded by the dependencies the producer recorded. Cause queries share one deadline and node/edge/call budget across reverse traversal, ranking and forward impact; limits, cancellation and unavailable reads become gaps. Output carries references and fixed codes, never a serialized DAG or business payload. `/cause` supports ESM and CommonJS and remains `sideEffects: false`; its unused ESM import is tested to produce the same browser bundle as no import. The package has no runtime dependencies. The cause reader shipped in 1.2.0; later engine stamping, viewer integration and agent tools are separate changes.
+These names describe the techniques, not a claim of complete language-level instrumentation. Findings are bounded by the dependencies the producer recorded. Cause queries share one deadline and node/edge/call budget across reverse traversal, ranking and forward impact; limits, cancellation and unavailable reads become gaps. Output carries bounded references and fixed codes, never business payloads. `/cause` supports ESM and CommonJS and remains `sideEffects: false`; its unused ESM import is tested to produce the same browser bundle as no import. The package has no runtime dependencies. The cause reader shipped in 1.2.0; later engine stamping, viewer integration and agent tools are separate changes.
 
 Package verification uses strict automatic entrypoint discovery for every door with Are the Types Wrong’s `strict` profile. No entrypoint is excluded and no resolution error is ignored.
 

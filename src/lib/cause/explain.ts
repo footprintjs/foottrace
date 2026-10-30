@@ -1,6 +1,7 @@
 import type {
   AttentionListOptions,
   AttentionListResult,
+  BackwardResult,
   CauseGraph,
   CauseResult,
   ExplainOptions,
@@ -44,6 +45,14 @@ export async function explain(graph: CauseGraph, nodeId: NodeId, options: Explai
     if (stopped) missing.push(stopped);
     const causeComplete = missing.length === 0;
     const rootCause = causeComplete && candidates.length === 1 ? candidates[0] : undefined;
+    const backwardResult: BackwardResult | undefined = session.includeBackward
+      ? Object.freeze({
+          nodes: backward.nodes,
+          edges: backward.edges,
+          confidence: causeComplete ? 'complete' : 'incomplete',
+          gaps: uniqueGaps(missing),
+        })
+      : undefined;
     const forward = await walk(session, impactBudget, [nodeId], 'children');
     let impactNodes = Object.freeze(forward.nodes.filter((id) => id !== nodeId));
     const impactGaps = [...forward.gaps],
@@ -75,6 +84,7 @@ export async function explain(graph: CauseGraph, nodeId: NodeId, options: Explai
       ...(rootCause ? { rootCause } : {}),
       path: rootCause ? pathTo(backward.edges, nodeId, rootCause) : Object.freeze([]),
       alternatives: Object.freeze(rootCause ? [] : candidates),
+      ...(backwardResult ? { backward: backwardResult } : {}),
       impact,
       confidence: allGaps.length ? 'incomplete' : 'complete',
       gaps: allGaps,

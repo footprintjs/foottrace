@@ -11,6 +11,7 @@ type Method = 'parents' | 'children' | 'attention' | 'gaps' | 'roots';
 /** One deadline, memo table and work budget per public query, never per graph or store. */
 export class Session {
   readonly limits: Required<WalkLimits>;
+  readonly includeBackward: boolean;
   readonly context: GraphContext;
   readonly controller = new AbortController();
   private readonly cache = new Map<string, Promise<Read<unknown>>>();
@@ -27,6 +28,9 @@ export class Session {
       plain(options);
       this.budget = new QueryBudget(options);
       this.limits = this.budget.limits;
+      const includeBackward = graphOwn(options, 'includeBackward');
+      if (includeBackward !== undefined && typeof includeBackward !== 'boolean') throw new TypeError();
+      this.includeBackward = includeBackward === true;
       const rank = graphOwn(options, 'rankRoots');
       if (rank !== undefined && typeof rank !== 'function') throw new TypeError();
       const impactRank = graphOwn(options, 'rankImpact');
