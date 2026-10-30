@@ -1,8 +1,8 @@
 {
   "name": "foottrace",
-  "version": "1.8.0",
+  "version": "1.9.0",
   "type": "commonjs",
-  "description": "Execution records, replay, time travel and honest attribution \u2014 independent of the engine that produced them",
+  "description": "Execution records, replay, time travel and honest attribution — independent of the engine that produced them",
   "license": "MIT",
   "author": "Sanjay Krishna Anbalagan <sanjay@footprintjs.dev>",
   "repository": {

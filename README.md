@@ -35,7 +35,7 @@ and supported by this reader. Keep its gaps with the document. See the
 [export recipe and safety limits](https://github.com/footprintjs/foottrace/blob/main/docs/prov.md)
 and the [runnable example](https://github.com/footprintjs/foottrace/blob/main/examples/post-execution/prov/01-export-prov.ts).
 
-## Value-free trace metadata — unreleased
+## Value-free trace metadata (since 1.9.0)
 
 `readTraceMetadata` and `traceMetadata` on `foottrace/metadata` admit a bounded,
 value-free source and inspect its path occurrences and explicitly anchored read

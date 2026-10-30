@@ -159,5 +159,4 @@ Use the complete-record door for complete data and its established value-aware
 writer, replay and slicing semantics. Metadata may be less informative; it never
 contradicts them with a purported proven state effect.
 
-This is an unreleased additive entry point. The package version and existing
-record fixtures remain unchanged until a separately reviewed release.
+This additive entry point is included from FootTrace 1.9.0. Existing complete-record APIs and saved records retain their prior contracts.
