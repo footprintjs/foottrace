@@ -9,12 +9,28 @@ jobs:
         node: [22, 24]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          node-version: ${{ matrix.node }}
-      - run: npm install -g npm@11
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: ${{ matrix.node == 22 && '22.16.0' || '24.21.0' }}
+      - run: npm install -g npm@11.19.0
       - run: npm ci
       - run: npm run check
       - run: npm run test:coverage
       - run: git diff --exit-code -- test/fixtures/hcifootprint/transitions-2.6.1.json
+  tested-tree:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - id: tree
+        run: echo "sha=$(git rev-parse HEAD^{tree})" >> "$GITHUB_OUTPUT"
+      - name: tested tree ${{ steps.tree.outputs.sha }}
+        run: test -n "$TESTED_TREE"
+        env:
+          TESTED_TREE: ${{ steps.tree.outputs.sha }}
