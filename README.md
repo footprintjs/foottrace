@@ -19,7 +19,7 @@ Foottrace owns the record layer used by footprintjs 10. Older stored records rem
 
 Every declaration has one public entry point. Producer-facing `Attention` and `AttentionKind` are type-only root exports; the cause algorithms live only on `/cause`. Existing root, `/write` and `/paths` imports retain their ESM and CommonJS doors. There are no public deep imports or `/testing` entry point. FootPrint's engine, observer channels, recorders and stores remain in `footprintjs`.
 
-## PROV-O export — unreleased
+## PROV-O export (since 1.6.0)
 
 The optional `foottrace/prov` entry exports one record as JSON-LD using
 [PROV-O, a W3C Recommendation](https://www.w3.org/TR/prov-o/). The asynchronous

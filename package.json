@@ -115,7 +115,9 @@
     "lint": "eslint 'src/**/*.ts'",
     "format": "prettier --check 'src/**/*.ts' 'test/**/*.ts'",
     "test:examples": "tsc -p examples/tsconfig.json",
-    "check": "npm run build && npm run typecheck && npm test && npm run check:layering && npm run lint && npm run format && npm run check:package && npm run test:examples"
+    "check": "npm run build && npm run typecheck && npm test && npm run check:layering && npm run lint && npm run format && npm run check:package && npm run test:examples && npm run test:release && npm run check:release",
+    "test:release": "node --test test/release/*.test.mjs",
+    "check:release": "node scripts/changes.cjs && node scripts/render-release-workflow.cjs --check"
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "^0.18.1",
