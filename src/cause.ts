@@ -8,6 +8,7 @@ export type {
   AttentionListOptions,
   AttentionListResult,
   AttentionReason,
+  BackwardResult,
   CauseGraph,
   CauseResult,
   Confidence,

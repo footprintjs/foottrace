@@ -71,6 +71,15 @@ export interface ImpactResult {
   readonly confidence: Confidence;
   readonly gaps: readonly Gap[];
 }
+/** Bounded evidence already visited by the reverse walk. Edges point dependent → recorded parent. */
+export interface BackwardResult {
+  /** Includes the selected node and admitted discovered ancestors, even when coverage is incomplete. */
+  readonly nodes: readonly NodeId[];
+  readonly edges: readonly TraversedEdge[];
+  /** Backward coverage and root selection only; forward impact gaps are separate. */
+  readonly confidence: Confidence;
+  readonly gaps: readonly Gap[];
+}
 export interface CauseResult {
   readonly nodeId: NodeId;
   readonly attention: readonly Attention[];
@@ -79,6 +88,8 @@ export interface CauseResult {
   /** Selected node → candidate, following recorded dependency edges. */
   readonly path: readonly NodeId[];
   readonly alternatives: readonly NodeId[];
+  /** Included only when includeBackward is true; no extra graph traversal is performed. */
+  readonly backward?: BackwardResult;
   readonly impact: ImpactResult;
   readonly confidence: Confidence;
   readonly gaps: readonly Gap[];
@@ -106,6 +117,8 @@ export type RootStrategy = (
 /** Reorder all already discovered impact references; never inject or drop evidence. */
 export type ImpactStrategy = (nodes: readonly NodeId[], context: GraphContext) => MaybePromise<readonly NodeId[]>;
 export interface ExplainOptions extends WalkLimits {
+  /** Return the existing bounded reverse-walk evidence. Omitted/false keeps the existing result shape. */
+  readonly includeBackward?: boolean;
   /** Caps backward traversal and root ranking, without adding to the enclosing query budget. */
   readonly backward?: TraversalLimits;
   /** Caps forward traversal and impact ranking; shared cached reads do not consume another call. */
