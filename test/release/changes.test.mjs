@@ -4,7 +4,7 @@ import { call, read } from './helpers.mjs';
 const fragment = (type = 'fixed', bump = 'patch', body = '- Correct release behavior.') =>
   `---\ntype: ${type}\nbump: ${bump}\n---\n\n${body}\n`;
 test('fragments: the existing metadata note retains its explicit minor bump', () => {
-  const parsed = call('changes', 'parseFragment', 'metadata-query.md', read('.changes/metadata-query.md'));
+  const parsed = call('release-changes', 'parseFragment', 'metadata-query.md', read('.changes/metadata-query.md'));
   assert.equal(parsed.type, 'added');
   assert.equal(parsed.bump, 'minor');
   assert.match(parsed.body, /Optional `foottrace\/metadata`/);
@@ -20,27 +20,27 @@ for (const [name, text] of [
   test(`fragments refuse: ${name}`, () => {
     // Require the helper first, so missing implementation is recorded as red,
     // never mistaken for a successful malformed-fragment refusal.
-    const valid = call('changes', 'parseFragment', 'valid.md', fragment());
+    const valid = call('release-changes', 'parseFragment', 'valid.md', fragment());
     assert.equal(valid.bump, 'patch');
     assert.throws(
-      () => call('changes', 'parseFragment', 'bad.md', text),
+      () => call('release-changes', 'parseFragment', 'bad.md', text),
       (e) => e.code === 'invalid-fragment',
     );
   });
 test('fragments: strongest bump wins without lowering metadata minor', () => {
   assert.equal(
-    call('changes', 'selectBump', [
+    call('release-changes', 'selectBump', [
       { type: 'fixed', bump: 'patch' },
       { type: 'added', bump: 'minor' },
     ]),
     'minor',
   );
 });
-test('fragments: no fragments produce no release', () => assert.equal(call('changes', 'selectBump', []), null));
+test('fragments: no fragments produce no release', () => assert.equal(call('release-changes', 'selectBump', []), null));
 test('version: patch/minor/major increments remain deterministic', () => {
-  assert.equal(call('changes', 'nextVersion', '1.8.0', 'patch'), '1.8.1');
-  assert.equal(call('changes', 'nextVersion', '1.8.0', 'minor'), '1.9.0');
-  assert.equal(call('changes', 'nextVersion', '1.8.0', 'major'), '2.0.0');
+  assert.equal(call('release-changes', 'nextVersion', '1.8.0', 'patch'), '1.8.1');
+  assert.equal(call('release-changes', 'nextVersion', '1.8.0', 'minor'), '1.9.0');
+  assert.equal(call('release-changes', 'nextVersion', '1.8.0', 'major'), '2.0.0');
 });
 test('current README corrects published PROV without premature metadata release', () => {
   const text = read('README.md');
@@ -132,10 +132,10 @@ test('proposal: every selected note survives and historical bytes remain an exac
 test('declared fragment types and bumps are independent explicit schema choices', () => {
   for (const type of ['added', 'changed', 'deprecated', 'removed', 'fixed', 'security', 'documentation'])
     for (const bump of ['patch', 'minor', 'major']) {
-      const parsed = call('changes', 'parseFragment', 'explicit.md', fragment(type, bump));
+      const parsed = call('release-changes', 'parseFragment', 'explicit.md', fragment(type, bump));
       assert.equal(parsed.type, type);
       assert.equal(parsed.bump, bump);
     }
   for (const version of ['01.8.0', '1.8', '1.8.0-beta', '1.8.0 ', '9007199254740991.0.0'])
-    assert.throws(() => call('changes', 'nextVersion', version, 'major'), /invalid-version/);
+    assert.throws(() => call('release-changes', 'nextVersion', version, 'major'), /invalid-version/);
 });

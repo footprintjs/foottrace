@@ -296,7 +296,7 @@ async function writeProposal(api, context, payload, pinned) {
       title: `Release ${pinned.version}`,
       head: 'release/next',
       base: 'main',
-      body: `Release App proposal for foottrace ${pinned.version}.\n\n${rebuilt.prepared.notes}\nIndependent exact-head approval and all runtime/CodeQL checks are required. This PR does not publish until normally merged and the Release App route verifies its authority.`,
+      body: `Release App proposal for foottrace ${pinned.version}.\n\n${rebuilt.prepared.notes}\nAfter Claude's independent merge verdict for this exact head and all runtime/CodeQL checks pass, the repository owner must manually submit a GitHub Approve review on this final head using a human account with current API permission write or admin. An exchange verdict or comment is not that approval. This App-authored PR does not publish until normally merged and the Release App route verifies its authority. Owner App installation and npm trusted-publisher setup remain prerequisites; see docs/RELEASING.md.`,
     })
   ).data;
   if (!Number.isSafeInteger(pr.number)) fail('proposal-pr');

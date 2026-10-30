@@ -619,3 +619,35 @@ test('workflow outputs are admitted as one bounded UTF-16 block before any write
   assert.throws(() => call('release-control', 'outputLines', { identity: 'x'.repeat(32768) }), /output-limit/);
   assert.throws(() => call('release-control', 'outputLines', { identity: 'safe\ninjected=true' }), /output-shape/);
 });
+for (const permission of ['write', 'admin'])
+  test(`real approval accepts exact current permission ${permission}`, () => {
+    const w = authorityWorld();
+    w.reviewerPermissions[0].permission = permission;
+    assert.equal(call('release-control', 'decideAuthority', w).authorized, true);
+  });
+for (const [name, edit] of [
+  [
+    'ordinary review comment',
+    (w) => {
+      w.reviews[0].state = 'COMMENTED';
+      w.reviews[0].body = 'Verdict: merge';
+    },
+  ],
+  [
+    'raw role name instead of allowed base permission',
+    (w) => {
+      w.reviewerPermissions[0].permission = 'maintain';
+    },
+  ],
+  [
+    'permission login mismatch',
+    (w) => {
+      w.reviewerPermissions[0].user.login = 'different-user';
+    },
+  ],
+])
+  test(`real approval refuses ${name}`, () => {
+    const w = authorityWorld();
+    edit(w);
+    assert.equal(call('release-control', 'decideAuthority', w).authorized, false);
+  });

@@ -46,14 +46,7 @@ test('one exact archive is published with project lifecycle scripts disabled', (
 test('no automatic or force merge/rewrite path is introduced', () => {
   assert.doesNotMatch(publish, /--force(?:-with-lease)?\b|--admin\b|gh pr merge\b|enablePullRequestAutoMerge/);
 });
-// These initial interlocks deliberately remain small. Before workflow approval,
-// add actual generated-step execution with offline GitHub/npm stand-ins and
-// graph/permission/artifact checks, as required by the pinned implementation plan.
-import vm from 'node:vm';
-import { createRequire } from 'node:module';
-import { authorityApiFixture, root, actualControlProgram } from './helpers.mjs';
-const require = createRequire(import.meta.url);
-const renderer = require('../../scripts/render-release-workflow.cjs');
+import { authorityApiFixture, executeWorkflowStage } from './helpers.mjs';
 function jobBlock(name) {
   const marker = `  ${name}:\n`,
     start = publish.indexOf(marker);
@@ -62,18 +55,49 @@ function jobBlock(name) {
   const next = /^  [a-z][a-z-]*:\n/m.exec(rest);
   return rest.slice(0, next ? next.index : undefined);
 }
-test('the checked workflow is exactly generated from the tested trusted helper sources', () =>
-  assert.equal(publish, renderer.render(root)));
-test('privileged and API-only jobs neither install nor check out repository code', () => {
+test('controls check out exactly the event source, without persisted credentials or installs', () => {
   for (const name of ['plan', 'prepare', 'proposal', 'authority', 'verdict', 'release', 'publish', 'verify']) {
     const block = jobBlock(name);
-    assert.doesNotMatch(block, /uses: actions\/checkout@|run: npm ci|run: npm run|npm install/);
+    assert.equal((block.match(/uses: actions\/checkout@/g) ?? []).length, 1);
+    const checkout = block.slice(
+      block.indexOf('      - uses: actions/checkout@'),
+      block.indexOf('      - uses: actions/setup-node@'),
+    );
+    assert.equal(
+      checkout,
+      '      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1\n        with:\n          ref: ${{ github.sha }}\n          persist-credentials: false\n          submodules: false\n          lfs: false\n',
+    );
+    assert.match(
+      block,
+      /ref: \$\{\{ github\.sha \}\}\n          persist-credentials: false\n          submodules: false\n          lfs: false/,
+    );
+    assert.match(block, /package-manager-cache: false/);
+    assert.doesNotMatch(
+      block,
+      /npm ci|npm install|npm run|npx |uses: \.\/|core\.hooksPath|git submodule|git lfs|ssh-key:|allow-unsafe-pr-checkout: true/,
+    );
+    const commands = runBodies(block);
+    for (const command of commands)
+      assert(
+        command === `node scripts/release-runner.cjs ${name}` ||
+          (name === 'publish' &&
+            [
+              'test "$(npm --version)" = \'11.19.0\'',
+              'npm publish "$PACKAGE_FILE" --ignore-scripts --access public --registry=https://registry.npmjs.org',
+            ].includes(command)),
+        `Unexpected ${name} command: ${command}`,
+      );
   }
   assert.match(jobBlock('proposal'), /repositories: foottrace/);
   assert.match(jobBlock('proposal'), /owner: footprintjs/);
+  assert(
+    jobBlock('proposal').indexOf('actions/checkout@') <
+      jobBlock('proposal').indexOf('actions/create-github-app-token@'),
+  );
   assert.doesNotMatch(jobBlock('release'), /id-token: write|RELEASE_APP_PRIVATE_KEY/);
   assert.doesNotMatch(jobBlock('publish'), /contents: write|RELEASE_APP_PRIVATE_KEY/);
   assert.equal(publish.match(/secrets\.RELEASE_APP_PRIVATE_KEY/g)?.length, 1);
+  assert.equal(publish.match(/GH_TOKEN: \$\{\{ steps\.app\.outputs\.token \}\}/g)?.length, 1);
   for (const line of publish.split('\n').filter((l) => /^\s*- uses:/.test(l)))
     assert.match(line, /@[a-f0-9]{40}(?: |$)/);
 });
@@ -133,84 +157,56 @@ test('actual job conditions cannot promote failed, skipped or cancelled gates', 
   old.release.outputs.fresh = 'false';
   assert.equal(gate('publish', old), false);
 });
-async function executeInline(stage, fixture, extra = {}) {
-  let output = '',
-    failure = null;
+async function executeReadable(stage, fixture, extra = {}) {
   const w = fixture.w;
-  const env = {
-    REPO_ID: '123',
-    REPO_NAME: 'footprintjs/foottrace',
-    SOURCE_SHA: w.expected.mergeSha,
-    SOURCE_REF: 'refs/heads/main',
-    EVENT_NAME: 'push',
-    RUN_ID: '500',
-    RUN_ATTEMPT: '1',
-    APP_SLUG: 'release-app',
-    APP_CLIENT_ID: 'public-client-id',
-    PLAN_JSON: JSON.stringify({
-      repository: w.expected.repository,
-      sha: w.expected.mergeSha,
-      tree: w.expected.tree,
-      version: '1.9.0',
-      package: 'foottrace',
-    }),
-    IDENTITY_JSON: JSON.stringify(w.expected),
-    GITHUB_OUTPUT: 'outputs',
-    GH_TOKEN: 'offline-test-token',
-    ...extra,
-  };
-  const process = { env, exitCode: 0 };
-  const fetch = async (url, options) => {
-    const response = await fixture.api(options.method, new URL(url).pathname + new URL(url).search);
-    return new Response(JSON.stringify(response.data), { headers: { 'content-type': 'application/json' } });
-  };
-  const sandbox = {
-    Buffer,
-    TextDecoder,
-    AbortSignal,
-    fetch,
-    process,
-    console: { error: (x) => (failure = x) },
-    require: (name) =>
-      name === 'node:fs'
-        ? {
-            appendFileSync: (file, bytes) => {
-              assert.equal(file, 'outputs');
-              output += bytes;
-            },
-          }
-        : name === 'node:child_process'
-        ? { execFileSync: () => assert.fail('No installed code may run') }
-        : require(name),
-  };
-  const script = actualControlProgram(stage);
-  await vm.runInNewContext(script, sandbox);
-  return { output, exit: process.exitCode, failure };
+  return executeWorkflowStage(stage, {
+    api: fixture.api,
+    env: {
+      REPO_ID: '123',
+      REPO_NAME: 'footprintjs/foottrace',
+      SOURCE_SHA: w.expected.mergeSha,
+      SOURCE_REF: 'refs/heads/main',
+      EVENT_NAME: 'push',
+      RUN_ID: '500',
+      RUN_ATTEMPT: '1',
+      APP_SLUG: 'release-app',
+      APP_CLIENT_ID: 'public-client-id',
+      PLAN_JSON: JSON.stringify({
+        repository: w.expected.repository,
+        sha: w.expected.mergeSha,
+        tree: w.expected.tree,
+        version: '1.9.0',
+        package: 'foottrace',
+      }),
+      IDENTITY_JSON: JSON.stringify(w.expected),
+      ...extra,
+    },
+  });
 }
-test('the actual rendered authority step runs offline and yields the exact reviewed identity', async () => {
+test('the actual readable authority step runs offline and yields the exact reviewed identity', async () => {
   const f = authorityApiFixture(),
-    r = await executeInline('authority', f);
+    r = await executeReadable('authority', f);
   assert.equal(r.exit, 0);
   assert(r.output.includes('authorized=true\n'));
   assert(r.output.includes(`identity=${JSON.stringify(f.w.expected)}\n`));
   assert(f.calls.every((c) => c.method === 'GET'));
 });
-test('the actual rendered authority step emits no grant when review permission changes', async () => {
+test('the actual readable authority step emits no grant when review permission changes', async () => {
   const f = authorityApiFixture();
   f.w.reviewerPermissions[0].permission = 'read';
-  const r = await executeInline('authority', f);
+  const r = await executeReadable('authority', f);
   assert.equal(r.exit, 1);
   assert.equal(r.output, '');
   assert.match(r.failure, /authority-/);
 });
-test('the actual rendered fast-path step falls back on a stale attempt', async () => {
+test('the actual readable fast-path step falls back on a stale attempt', async () => {
   const f = authorityApiFixture();
   f.ci.jobs[0].run_attempt = 1;
-  const r = await executeInline('verdict', f);
+  const r = await executeReadable('verdict', f);
   assert.equal(r.exit, 0);
   assert.equal(r.output, 'tested=false\n');
 });
-test('generated workflow blank lines carry no trailing indentation', () => assert.doesNotMatch(publish, /^[ \t]+$/m));
+test('workflow blank lines carry no trailing indentation', () => assert.doesNotMatch(publish, /^[ \t]+$/m));
 function runBodies(yaml) {
   const lines = yaml.split('\n'),
     bodies = [];
@@ -228,7 +224,7 @@ function runBodies(yaml) {
   }
   return bodies;
 }
-test('every final emitted run body stays within the documented 21000-character limit', () => {
+test('every final readable run body stays within the documented 21000-character limit', () => {
   for (const file of ['.github/workflows/publish.yml', '.github/workflows/ci.yml', '.github/workflows/codeql.yml'])
     for (const body of runBodies(read(file))) assert(body.length <= 21000, `${file} run body is ${body.length}`);
 });
@@ -236,55 +232,58 @@ test('every final workflow stays below the documented 500 KB file limit', () => 
   for (const file of ['.github/workflows/publish.yml', '.github/workflows/ci.yml', '.github/workflows/codeql.yml'])
     assert(Buffer.byteLength(read(file)) <= 500000, `${file} exceeds conservative 500000-byte bound`);
 });
-test('actual emitted assembly refuses changed trusted-program hashes before any API or file access', async () => {
-  let touched = 0,
-    failure = null;
-  const process = { env: {}, exitCode: 0 };
-  const source = actualControlProgram('publish');
-  const changed = source.replace(/!=="[a-f0-9]{64}"/, '!=="' + '0'.repeat(64) + '"');
-  assert.notEqual(changed, source);
-  await vm.runInNewContext(changed, {
-    Buffer,
-    process,
-    console: { error: (x) => (failure = x) },
-    require: (name) => {
-      if (name === 'node:zlib' || name === 'node:crypto') return require(name);
-      touched++;
-      throw new Error('unexpected-access');
-    },
-  });
-  assert.equal(process.exitCode, 1);
-  assert.equal(touched, 0);
-  assert.equal(failure, 'trusted-program-integrity');
+
+test('publisher version check and one submission stay after archive selection and outside checkout', () => {
+  const block = jobBlock('publish');
+  assert(block.indexOf('node scripts/release-runner.cjs publish') < block.indexOf('Require the pinned bundled npm'));
+  assert.equal(
+    (
+      block.match(
+        /working-directory: \$\{\{ runner.temp \}\}\/foottrace-publish-\$\{\{ github.run_id \}\}-\$\{\{ github.run_attempt \}\}/g,
+      ) ?? []
+    ).length,
+    2,
+  );
+  assert.equal((block.match(/if: steps.control.outputs.submit == 'true'/g) ?? []).length, 2);
+  assert.match(block, /NODE_AUTH_TOKEN: ''/);
+  assert.match(publish, /  NODE_OPTIONS: ''\n  NODE_PATH: ''/);
 });
-test('generation refuses oversized trusted programs and workflow files instead of emitting them', () => {
-  const fs = require('node:fs'),
-    path = require('node:path'),
-    os = require('node:os'),
-    crypto = require('node:crypto');
-  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'foottrace-release-bounds-'));
-  try {
-    fs.mkdirSync(path.join(temp, 'scripts'));
-    for (const name of [
-      'changes.cjs',
-      'release-prepare.cjs',
-      'release-control.cjs',
-      'release-archive.cjs',
-      'release-github.cjs',
-      'release-workflow-template.yml',
-    ])
-      fs.copyFileSync(path.join(root, 'scripts', name), path.join(temp, 'scripts', name));
-    const module = path.join(temp, 'scripts/release-github.cjs'),
-      original = fs.readFileSync(module, 'utf8');
-    const varied = Array.from({ length: 2000 }, (_, i) =>
-      crypto.createHash('sha256').update(String(i)).digest('hex'),
-    ).join('');
-    fs.writeFileSync(module, original + '\n// ' + varied + '\n');
-    assert.throws(() => renderer.render(temp), /21000/);
-    fs.writeFileSync(module, original);
-    fs.appendFileSync(path.join(temp, 'scripts/release-workflow-template.yml'), '\n# ' + 'x'.repeat(500000) + '\n');
-    assert.throws(() => renderer.render(temp), /500 KB/);
-  } finally {
-    fs.rmSync(temp, { recursive: true, force: true });
+test('docs require the separate owner GitHub approval and list unverified setup', () => {
+  const guide = read('docs/RELEASING.md');
+  for (const term of [
+    'manually',
+    'Approve',
+    'write',
+    'admin',
+    'RELEASE_APP_CLIENT_ID',
+    'RELEASE_APP_SLUG',
+    'RELEASE_APP_PRIVATE_KEY',
+  ])
+    assert(guide.includes(term));
+  assert.match(guide, /exchange.*not.*approval/i);
+  assert.doesNotMatch(guide, /compressed literal|embedded program|generated.*template/);
+});
+
+test('trusted workflow triggers and context stay bound to the actual event', () => {
+  const triggers = /^on:\n([\s\S]*?)^permissions:/m.exec(publish)?.[1];
+  assert.equal(
+    triggers,
+    '  push:\n    branches: [main]\n  workflow_dispatch:\n    inputs:\n      verify_only:\n        description: Inspect the existing release without preparation or submission\n        type: boolean\n        default: false\n',
+  );
+  assert.equal(condition('plan'), "github.ref == 'refs/heads/main'");
+  for (const [name, field] of [
+    ['REPO_ID', 'repository_id'],
+    ['REPO_NAME', 'repository'],
+    ['SOURCE_SHA', 'sha'],
+    ['SOURCE_REF', 'ref'],
+    ['EVENT_NAME', 'event_name'],
+    ['RUN_ID', 'run_id'],
+    ['RUN_ATTEMPT', 'run_attempt'],
+  ]) {
+    assert.equal(
+      (publish.match(new RegExp(`^  ${name}: .+$`, 'gm')) ?? []).join(''),
+      `  ${name}: \u0024{{ github.${field} }}`,
+    );
+    assert.doesNotMatch(publish, new RegExp(`^ {4,}${name}:`, 'm'));
   }
 });

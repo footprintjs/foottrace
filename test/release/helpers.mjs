@@ -248,29 +248,25 @@ export function proposalApiFixture() {
     context: { repository, sha: base, ref: 'refs/heads/main', eventName: 'push', runId: 500, runAttempt: 1 },
   };
 }
-export function actualControlProgram(stage) {
+export function actualControlArgv(stage) {
   const yaml = read('.github/workflows/publish.yml');
-  const marker = `          # trusted-stage: ${stage}\n          node <<'FOOTTRACE_RELEASE'\n`;
-  const start = yaml.indexOf(marker);
-  assert(start >= 0, `Missing actual emitted stage ${stage}`);
-  assert.equal(yaml.indexOf(marker, start + marker.length), -1);
-  const end = yaml.indexOf('\n          FOOTTRACE_RELEASE', start + marker.length);
-  assert(end > start);
-  return yaml
-    .slice(start + marker.length, end)
-    .split('\n')
-    .map((line) => (line.startsWith('          ') ? line.slice(10) : line))
-    .join('\n');
+  const command = `        run: node scripts/release-runner.cjs ${stage}`;
+  const matches = yaml.split('\n').filter((line) => line === command);
+  assert.equal(matches.length, 1, `Missing/ambiguous actual readable stage ${stage}`);
+  return [stage];
 }
-export async function executeRenderedStage(stage, { env, api, fetcher }) {
-  const vm = await import('node:vm');
-  const script = actualControlProgram(stage);
+export async function executeWorkflowStage(stage, { env, api, fetcher }) {
+  const { runCli } = require('../../scripts/release-runner.cjs');
   let output = '',
-    failure = null;
+    failure = null,
+    summary = '';
   const writes = [];
-  const process = {
-    env: { ...env, GITHUB_OUTPUT: 'outputs', RUNNER_TEMP: '/offline', GH_TOKEN: 'offline-test-token' },
-    exitCode: 0,
+  const context = {
+    ...env,
+    GITHUB_OUTPUT: '/offline/outputs',
+    GITHUB_STEP_SUMMARY: '/offline/summary',
+    RUNNER_TEMP: '/offline/temp',
+    GH_TOKEN: 'offline-test-token',
   };
   const fetch = async (url, options = {}) => {
     if (url.startsWith('https://registry.npmjs.org/')) return fetcher(url, options);
@@ -293,26 +289,26 @@ export async function executeRenderedStage(stage, { env, api, fetcher }) {
       throw e;
     }
   };
-  await vm.runInNewContext(script, {
-    Buffer,
-    TextDecoder,
-    AbortSignal,
-    fetch,
-    process,
-    console: { error: (x) => (failure = x) },
-    require: (name) =>
-      name === 'node:fs'
-        ? {
-            appendFileSync: (file, bytes) => {
-              assert.equal(file, 'outputs');
-              output += bytes;
-            },
-            mkdirSync: () => {},
-            writeFileSync: (name, bytes) => writes.push({ name, bytes }),
-          }
-        : name === 'node:child_process'
-        ? { execFileSync: () => assert.fail('Privileged step may not execute project code') }
-        : require(name),
-  });
-  return { output, failure, exit: process.exitCode, writes };
+  const io = {
+    head: () => context.SOURCE_SHA,
+    read: () => assert.fail('Unexpected project read'),
+    gitTree: () => assert.fail('Unexpected build tree read'),
+    requireClean: () => assert.fail('Unexpected build cleanliness command'),
+    publishFile: (run, attempt) => `/offline/temp/foottrace-publish-${run}-${attempt}/package.tgz`,
+    write: (name, bytes) => writes.push({ name, bytes }),
+    appendOutput: (file, bytes) => {
+      assert.equal(file, context.GITHUB_OUTPUT);
+      output += bytes;
+    },
+    appendSummary: (file, bytes) => {
+      assert.equal(file, context.GITHUB_STEP_SUMMARY);
+      summary += bytes;
+    },
+  };
+  try {
+    await runCli(actualControlArgv(stage), { env: context, io, fetcher: fetch });
+  } catch (error) {
+    failure = error.code ?? error.message;
+  }
+  return { output, failure, exit: failure ? 1 : 0, writes, summary };
 }

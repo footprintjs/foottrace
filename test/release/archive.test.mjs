@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { gzipSync } from 'node:zlib';
 import { createHash } from 'node:crypto';
-import { call, sha, authorityApiFixture, executeRenderedStage } from './helpers.mjs';
+import { call, sha, authorityApiFixture, executeWorkflowStage } from './helpers.mjs';
 
 // Tiny synthetic USTAR fixture builder. Never extracts or executes its members.
 function tar(members) {
@@ -514,7 +514,7 @@ test('actual release/reservation/grant/registry path preserves checked bytes and
   assert.equal(writes.length, 1);
   assert.deepEqual(writes[0].value, bytes);
 
-  const rendered = await executeRenderedStage('publish', {
+  const workflow = await executeWorkflowStage('publish', {
     api,
     env: {
       REPO_ID: '123',
@@ -539,11 +539,11 @@ test('actual release/reservation/grant/registry path preserves checked bytes and
     },
     fetcher: async () => new Response('not-yet', { status: 404 }),
   });
-  assert.equal(rendered.exit, 0, rendered.failure);
-  assert(rendered.output.includes('submit=true\n'));
-  assert.equal(rendered.writes.length, 1);
-  assert.deepEqual(rendered.writes[0].bytes, bytes);
-  const renderedVerified = await executeRenderedStage('verify', {
+  assert.equal(workflow.exit, 0, workflow.failure);
+  assert(workflow.output.includes('submit=true\n'));
+  assert.equal(workflow.writes.length, 1);
+  assert.deepEqual(workflow.writes[0].bytes, bytes);
+  const workflowVerified = await executeWorkflowStage('verify', {
     api,
     env: {
       REPO_ID: '123',
@@ -563,12 +563,12 @@ test('actual release/reservation/grant/registry path preserves checked bytes and
     },
     fetcher,
   });
-  assert.equal(renderedVerified.exit, 0, renderedVerified.failure);
-  assert.equal(JSON.parse(renderedVerified.output.slice('verification='.length).trim()).state, 'verified');
+  assert.equal(workflowVerified.exit, 0, workflowVerified.failure);
+  assert.equal(JSON.parse(workflowVerified.output.slice('verification='.length).trim()).state, 'verified');
   const originalNotes = release.body,
     originalChangelog = changelog;
   for (const mode of ['wrong', 'missing', 'ambiguous'])
-    for (const path of ['writer', 'standalone', 'rendered'])
+    for (const path of ['writer', 'standalone', 'workflow'])
       await t.test(`${path} verification refuses ${mode} pinned notes`, async () => {
         release.body = originalNotes;
         changelog = originalChangelog;
@@ -586,7 +586,7 @@ test('actual release/reservation/grant/registry path preserves checked bytes and
             /release-notes|release-conflict/,
           );
         else {
-          const held = await executeRenderedStage('verify', {
+          const held = await executeWorkflowStage('verify', {
             api,
             env: {
               REPO_ID: '123',

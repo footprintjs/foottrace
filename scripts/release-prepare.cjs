@@ -1,5 +1,5 @@
 'use strict';
-const { TYPES, parseFragment, parseVersion, selectBump, nextVersion } = require('./changes.cjs');
+const { TYPES, parseFragment, parseVersion, selectBump, nextVersion } = require('./release-changes.cjs');
 const fail = (code) => {
   const e = new Error(code);
   e.code = code;

@@ -1,14 +1,26 @@
 # Releasing FootTrace
 
-Releases use the **Release App** workflow in `publish.yml`. A source PR never publishes by itself. Pending `.changes/*.md` fragments produce a normal `release/next` proposal with the strongest requested bump. A reviewer independently checks its exact head, its notes and the source tree, then records an approving GitHub review. A maintainer merges normally only after both Node 22/24 checks, `tested-tree`, and both CodeQL languages pass. No automatic merge or forced branch update exists.
+Releases use the **Release App** workflow in `publish.yml`. A source PR never publishes by itself. Pending `.changes/*.md` fragments produce a normal App-authored `release/next` proposal with the strongest declared bump.
+
+For each release proposal:
+
+1. Claude independently reviews the exact final head and records a merge verdict; both Node 22/24 checks, `tested-tree`, and both CodeQL languages must pass.
+2. The **repository owner manually submits an Approve pull-request review on GitHub** for that exact head using their human account. Its current repository-permission API value must be exactly `write` or `admin`. The Release App bot authors the PR; it is not the approving human.
+3. A maintainer merges normally. The workflow checks the actual GitHub approval and every other authority requirement before publication.
+
+An exchange verdict or ordinary GitHub comment is not the GitHub approval. The workflow does not read the private exchange or establish the identity of its reviewer. The independent verdict is a process requirement; the GitHub APPROVED review is a separate machine requirement. A changed head needs fresh independent review and a fresh exact-head approval. No automatic approval, merge or forced branch update exists.
 
 The merged head and final reviewed PR head must have identical trees. Publication holds if the base moved and introduced additional contents. Full tests cannot replace missing release authority. Exact-head CI reuse is an optimization only: incomplete, stale, failed or ambiguous proof runs both original runtime gate lanes. Both CodeQL checks remain mandatory. Every release still builds and checks the package, packs once and publishes those exact bytes with lifecycle scripts disabled.
 
 ## One-time owner setup
 
-An owner must install the release GitHub App for **only the selected FootTrace repository** and permit Contents write, Pull requests write and Actions read (with Metadata read). Set public repository variables `RELEASE_APP_CLIENT_ID` and `RELEASE_APP_SLUG`, and the repository secret named `RELEASE_APP_PRIVATE_KEY`. Do not put key material in files, logs or review requests. The workflow resolves the public App and bot user ID and checks that the release PR was authored by that App.
+These prerequisites are **not configured or verified by this source PR**. Missing setup holds/fails closed; it never falls back to manual token publication.
 
-Configure npm trusted publishing for package `foottrace`, owner `footprintjs`, repository `foottrace` and workflow `publish.yml`, with any environment restriction matching the workflow. No npm token fallback is provided. The checked-in route does not prove the App is installed or registry trust configured; setup is a separate owner action after code review. Never publish as an authentication test.
+- A GitHub owner installs the existing `agentfootprint-release` App for the selected `footprintjs/foottrace` repository, or creates and installs a suitable separate Release App. Required repository permissions are Contents write, Pull requests write, Actions read and Metadata read; no administration or broad extra repository scope is needed.
+- The owner sets public repository variables `RELEASE_APP_CLIENT_ID` and `RELEASE_APP_SLUG` for that same App. The route resolves the public App and bot identity and checks the PR author; a branch name or display name is insufficient.
+- The owner stores the App private key under the secret name `RELEASE_APP_PRIVATE_KEY` and handles the `.pem` privately. Never put key material in source, logs, chat or review requests.
+- An npm package owner configures/confirms trusted publishing (OIDC) for package `foottrace`, GitHub owner `footprintjs`, repository `foottrace` and workflow `publish.yml`. This workflow currently has no named environment; the trusted-publisher setting must match, or a later reviewed workflow change must introduce one explicitly. There is no npm token fallback. Never publish as an authentication test.
+- For every App-authored release proposal, the owner performs the separate exact-head GitHub Approve step above after the independent verdict and checks.
 
 ## Review and gate evidence
 
@@ -24,12 +36,18 @@ The main-only manual `verify_only` input is read-only. Use it while main still i
 
 Existing matching release branches and proposals are left alone. A different branch/base, orphaned proposal or multiple open release PRs holds for normal maintainer reconciliation. Branch cleanup is not performed by this workflow.
 
+## Readable helper and checkout boundary
+
+Every control job checks out the current repository at literal `${{ github.sha }}` using the pinned checkout action with `persist-credentials: false`, submodules disabled and LFS disabled. The runner checks HEAD against that event SHA before API access. Only main push/dispatch reaches the release graph; a PR, branch name, workflow input or downloaded artifact never chooses helper code. Current-main and independent head/merge-tree checks still decide authority separately.
+
+The workflow invokes the readable `scripts/release-runner.cjs` with one fixed stage. Its closed local module set is `release-github`, `release-control`, `release-prepare`, `release-changes` and `release-archive`; these use only explicit Node built-ins. Control jobs do not run installs, npx, package scripts, local actions or downloaded executables, and setup-node's automatic dependency cache is disabled there. The existing read-only gates/build jobs retain their installs and full checks. Checkout never receives the App token; that token is created afterward and exposed only to the proposal API step. Job permissions still bound the ordinary checkout token.
+
+The helper source and workflow share one trust root: the reviewed main event commit. This does not defend against an authorized malicious change to that commit or a compromised runner/action. It makes the executed program directly reviewable without pretending a self-authored checksum provides independent authority. No generator or encoded executable transport remains.
+
+The publisher's checked archive is written to a fixed absolute run/attempt directory under RUNNER_TEMP, outside checkout. Only after that selection do the bundled npm version check and single submission run from that archive-only directory. The submission uses the exact file, `--ignore-scripts`, public access and an explicit npmjs registry; it never extracts/rebuilds the package or loads checkout-local project configuration. The pinned setup-node user configuration supports OIDC; no key/token fallback is added.
+
 ## Implementation checks
 
-`npm run test:release` runs bounded, offline tests of fragments, proposal transformation, authority, CI evidence, API orchestration, artifact/archive admission and workflow wiring. `npm run check:release` checks fragments and verifies that `publish.yml` exactly matches the trusted inline code generated from its template and helpers. These are appended to the original full `check`; no existing gate is removed. The process helpers use Node builtins, and privileged jobs never check out, install or execute code supplied by an artifact.
-
-## Generated program transport and bounds
-
-The generator embeds a compressed literal of the reviewed helper program in each control step. The step bounds decompression and verifies the exact uncompressed source hash before executing it. This is checked-in workflow source, never code supplied by an artifact or fetched from a branch. Tests execute these actual emitted assembly steps with offline API stand-ins. Every emitted `run` stays within 21,000 characters and each workflow below 500,000 bytes; generation refuses growth past either bound. Output values are admitted together under a separate conservative 64 KiB UTF-16 budget before any output is written.
+`npm run test:release` runs bounded offline tests of fragments, transformations, source/review/CI/producer identity, archive/journal admission, the actual readable CLI adapter and every workflow sibling. `npm run check:release` validates fragments. Both remain in the full `check`; none of the original runtime, coverage, package or historical-fixture gates are removed. Tests inspect the final checkout/ref/permissions/command boundaries and execute the real helper adapter with offline API/IO fixtures. Those tests do not claim App installation, OIDC configuration or a hosted publication has been exercised.
 
 The change parser validates only explicit `type` and `bump` declarations and selects the strongest declared bump. It does not infer a breaking change or migration text. The reviewer checks those semantics. Standalone verification uses the same exact pinned changelog-section and release-note comparison as the release writer; missing, duplicate or changed release notes refuse verification.
