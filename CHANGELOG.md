@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.9.0 — 2026-10-30
+
+### Added
+
+- Optional `foottrace/metadata` ESM/CommonJS/type entry for detached value-free path occurrences and explicitly anchored candidate-read links. Metadata keeps unknown state effects, reads, ancestry and original row addresses visible; it never supplies replay state. The reader reuses the existing canonical path index and bounded traversal, with independent admission and logical work limits. Existing complete-record APIs and recorded bytes stay unchanged.
+
+### Changed
+
+- Prepare separately reviewed releases through a repository-scoped Release App. Publication requires exact-head approval, both CodeQL checks and the original Node 22/24 gates or a matching current-attempt CI proof. The checked archive is submitted once through npm trusted publishing; ambiguous prior attempts remain verification-only. Controls use readable built-in-only helpers at the same immutable event commit, without installs or artifact-supplied executables. The owner must submit a real exact-head GitHub approval after independent review, and complete App installation and trusted-publisher setup before use.
+
+### Documentation
+
+- Correct the README PROV-O heading to identify its already-published 1.6.0 entry point; metadata remains marked unreleased until its separate release proposal.
+
 ## 1.8.0 — 2026-10-26
 
 ### Added
