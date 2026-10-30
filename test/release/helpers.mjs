@@ -1,11 +1,33 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, lstatSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 const require = createRequire(import.meta.url);
 export const root = fileURLToPath(new URL('../../', import.meta.url));
 export const read = (path) => readFileSync(new URL(`../../${path}`, import.meta.url), 'utf8');
+
+/** Exact historical input; no fallback to the mutable checkout. Fresh objects per call. */
+export function loadReleaseSpecimen() {
+  const directory = new URL('./fixtures/pre-metadata-release/', import.meta.url);
+  const manifestBytes = readFileSync(new URL('manifest.json', directory));
+  assert.equal(createHash('sha256').update(manifestBytes).digest('hex'), '73d3c28e7e9b268a911a3cec9ea1c5e29d634100e4d0206264e0f6582baefc4d', 'Historical fixture manifest changed');
+  const manifest = JSON.parse(manifestBytes), files = {};
+  const names = ['package.json', 'package-lock.json', 'CHANGELOG.md', 'README.md', 'docs/metadata.md', '.changes/metadata-query.md'];
+  assert.deepEqual(Object.keys(manifest.files).sort(), [...names].sort());
+  assert.equal(manifest.sourceCommit, 'df87b324377b24802732023120a87242b9b94aa8');
+  for (const name of names) {
+    const path = new URL(name, directory), info = lstatSync(path), bytes = readFileSync(path), pinned = manifest.files[name];
+    assert(info.isFile() && !info.isSymbolicLink()); assert.equal(info.mode & 0o777, pinned.mode);
+    assert.equal(bytes.length, pinned.bytes); assert.equal(createHash('sha256').update(bytes).digest('hex'), pinned.sha256);
+    assert.equal(createHash('sha1').update(Buffer.concat([Buffer.from(`blob ${bytes.length}\0`), bytes])).digest('hex'), pinned.gitBlob);
+    files[name] = bytes.toString('utf8');
+  }
+  const fragments = { 'metadata-query.md': files['.changes/metadata-query.md'] };
+  delete files['.changes/metadata-query.md'];
+  return { files, fragments };
+}
+
 export function call(module, name, ...args) {
   const file = new URL(`../../scripts/${module}.cjs`, import.meta.url);
   assert(existsSync(file), `Release App feature absent on baseline: scripts/${module}.cjs`);
@@ -177,13 +199,8 @@ export function proposalApiFixture() {
   const repository = { id: 123, full_name: 'footprintjs/foottrace' },
     base = sha('1'),
     tree = sha('3');
-  const files = Object.fromEntries(
-    ['package.json', 'package-lock.json', 'CHANGELOG.md', 'README.md', 'docs/metadata.md'].map((name) => [
-      name,
-      read(name),
-    ]),
-  );
-  files['.changes/metadata-query.md'] = read('.changes/metadata-query.md');
+  const { files, fragments } = loadReleaseSpecimen();
+  files['.changes/metadata-query.md'] = fragments['metadata-query.md'];
   const calls = [],
     blobs = new Map();
   let created = false,

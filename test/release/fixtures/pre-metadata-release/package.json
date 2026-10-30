@@ -1,0 +1,137 @@
+{
+  "name": "foottrace",
+  "version": "1.8.0",
+  "type": "commonjs",
+  "description": "Execution records, replay, time travel and honest attribution \u2014 independent of the engine that produced them",
+  "license": "MIT",
+  "author": "Sanjay Krishna Anbalagan <sanjay@footprintjs.dev>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/footprintjs/foottrace.git"
+  },
+  "bugs": {
+    "url": "https://github.com/footprintjs/foottrace/issues"
+  },
+  "homepage": "https://github.com/footprintjs/foottrace#readme",
+  "engines": {
+    "node": ">=22"
+  },
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "module": "./dist/esm/index.js",
+  "types": "./dist/types/index.d.ts",
+  "files": [
+    "dist/"
+  ],
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/esm/index.d.ts",
+        "default": "./dist/esm/index.js"
+      },
+      "require": {
+        "types": "./dist/types/index.d.ts",
+        "default": "./dist/index.js"
+      }
+    },
+    "./write": {
+      "import": {
+        "types": "./dist/esm/write.d.ts",
+        "default": "./dist/esm/write.js"
+      },
+      "require": {
+        "types": "./dist/types/write.d.ts",
+        "default": "./dist/write.js"
+      }
+    },
+    "./paths": {
+      "import": {
+        "types": "./dist/esm/paths.d.ts",
+        "default": "./dist/esm/paths.js"
+      },
+      "require": {
+        "types": "./dist/types/paths.d.ts",
+        "default": "./dist/paths.js"
+      }
+    },
+    "./package.json": "./package.json",
+    "./cause": {
+      "import": {
+        "types": "./dist/esm/cause.d.ts",
+        "default": "./dist/esm/cause.js"
+      },
+      "require": {
+        "types": "./dist/types/cause.d.ts",
+        "default": "./dist/cause.js"
+      }
+    },
+    "./prov": {
+      "import": {
+        "types": "./dist/esm/prov.d.ts",
+        "default": "./dist/esm/prov.js"
+      },
+      "require": {
+        "types": "./dist/types/prov.d.ts",
+        "default": "./dist/prov.js"
+      }
+    },
+    "./metadata": {
+      "import": {
+        "types": "./dist/esm/metadata.d.ts",
+        "default": "./dist/esm/metadata.js"
+      },
+      "require": {
+        "types": "./dist/types/metadata.d.ts",
+        "default": "./dist/metadata.js"
+      }
+    }
+  },
+  "typesVersions": {
+    "*": {
+      "write": [
+        "dist/types/write.d.ts"
+      ],
+      "paths": [
+        "dist/types/paths.d.ts"
+      ],
+      "cause": [
+        "dist/types/cause.d.ts"
+      ],
+      "prov": [
+        "dist/types/prov.d.ts"
+      ],
+      "metadata": [
+        "dist/types/metadata.d.ts"
+      ]
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && tsc -p tsconfig.esm.json && node scripts/postbuild-esm.mjs",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "tsc -p tsconfig.test.json",
+    "check:layering": "node scripts/check-layering.mjs",
+    "check:package": "publint && attw --pack --profile strict && tsc -p test/consumer/cause/tsconfig.json && tsc -p test/consumer/prov/tsconfig.json && tsc -p test/consumer/metadata/tsconfig.json",
+    "lint": "eslint 'src/**/*.ts'",
+    "format": "prettier --check 'src/**/*.ts' 'test/**/*.ts'",
+    "test:examples": "tsc -p examples/tsconfig.json",
+    "check": "npm run build && npm run typecheck && npm test && npm run check:layering && npm run lint && npm run format && npm run check:package && npm run test:examples && npm run test:release && npm run check:release",
+    "test:release": "node --test --test-concurrency=4 test/release/*.test.mjs",
+    "check:release": "node scripts/release-changes.cjs"
+  },
+  "devDependencies": {
+    "@arethetypeswrong/cli": "^0.18.1",
+    "@types/node": "^22.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.71.1",
+    "@typescript-eslint/parser": "^8.71.1",
+    "@vitest/coverage-v8": "4.1.11",
+    "esbuild": "0.28.2",
+    "eslint": "^8.57.1",
+    "fast-check": "^4.4.0",
+    "jsonld": "9.0.0",
+    "prettier": "^2.8.1",
+    "publint": "^0.3.0",
+    "typescript": "~5.4.5",
+    "vitest": "4.1.11"
+  }
+}

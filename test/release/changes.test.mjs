@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { call, read } from './helpers.mjs';
+import { call, read, loadReleaseSpecimen } from './helpers.mjs';
 const fragment = (type = 'fixed', bump = 'patch', body = '- Correct release behavior.') =>
   `---\ntype: ${type}\nbump: ${bump}\n---\n\n${body}\n`;
 test('fragments: the existing metadata note retains its explicit minor bump', () => {
-  const parsed = call('release-changes', 'parseFragment', 'metadata-query.md', read('.changes/metadata-query.md'));
+  const parsed = call('release-changes', 'parseFragment', 'metadata-query.md', loadReleaseSpecimen().fragments['metadata-query.md']);
   assert.equal(parsed.type, 'added');
   assert.equal(parsed.bump, 'minor');
   assert.match(parsed.body, /Optional `foottrace\/metadata`/);
@@ -42,14 +42,15 @@ test('version: patch/minor/major increments remain deterministic', () => {
   assert.equal(call('release-changes', 'nextVersion', '1.8.0', 'minor'), '1.9.0');
   assert.equal(call('release-changes', 'nextVersion', '1.8.0', 'major'), '2.0.0');
 });
-test('current README corrects published PROV without premature metadata release', () => {
+test('current README retains the PROV 1.6.0 status', () => {
   const text = read('README.md');
   assert(text.includes('## PROV-O export (since 1.6.0)'));
-  assert(text.includes('## Value-free trace metadata — unreleased'));
-  assert(read('docs/metadata.md').includes('This is an unreleased additive entry point.'));
+  // Metadata pending/consumed/later states are checked against the actual checkout
+  // in repository-status.test.mjs, including all missing/contradictory cases.
 });
 test('release docs: only exact metadata markers change to the computed version', () => {
-  const documents = { 'README.md': read('README.md'), 'docs/metadata.md': read('docs/metadata.md') };
+  const captured = loadReleaseSpecimen().files;
+  const documents = { 'README.md': captured['README.md'], 'docs/metadata.md': captured['docs/metadata.md'] };
   const result = call('release-prepare', 'prepareReleaseDocs', {
     documents,
     version: '1.9.0',
@@ -71,7 +72,8 @@ test('release docs: only exact metadata markers change to the computed version',
   );
 });
 test('release docs: unselected metadata fragment leaves all status text intact', () => {
-  const documents = { 'README.md': read('README.md'), 'docs/metadata.md': read('docs/metadata.md') };
+  const captured = loadReleaseSpecimen().files;
+  const documents = { 'README.md': captured['README.md'], 'docs/metadata.md': captured['docs/metadata.md'] };
   assert.deepEqual(
     call('release-prepare', 'prepareReleaseDocs', {
       documents,
@@ -83,7 +85,8 @@ test('release docs: unselected metadata fragment leaves all status text intact',
 });
 for (const mode of ['missing', 'duplicate'])
   test(`release docs refuse ${mode} marker`, () => {
-    const documents = { 'README.md': read('README.md'), 'docs/metadata.md': read('docs/metadata.md') };
+    const captured = loadReleaseSpecimen().files;
+    const documents = { 'README.md': captured['README.md'], 'docs/metadata.md': captured['docs/metadata.md'] };
     call('release-prepare', 'prepareReleaseDocs', {
       documents,
       version: '1.9.0',
@@ -105,11 +108,9 @@ for (const mode of ['missing', 'duplicate'])
     );
   });
 test('proposal: every selected note survives and historical bytes remain an exact suffix', () => {
-  const files = Object.fromEntries(
-    ['package.json', 'package-lock.json', 'CHANGELOG.md', 'README.md', 'docs/metadata.md'].map((n) => [n, read(n)]),
-  );
+  const files = loadReleaseSpecimen().files;
   const fragments = {
-    'metadata-query.md': read('.changes/metadata-query.md'),
+    'metadata-query.md': loadReleaseSpecimen().fragments['metadata-query.md'],
     'second.md': fragment('fixed', 'patch', '- Exact second note.'),
   };
   const result = call('release-prepare', 'prepareRelease', { files, fragments, date: '2026-10-30' });
@@ -139,3 +140,15 @@ test('declared fragment types and bumps are independent explicit schema choices'
   for (const version of ['01.8.0', '1.8', '1.8.0-beta', '1.8.0 ', '9007199254740991.0.0'])
     assert.throws(() => call('release-changes', 'nextVersion', version, 'major'), /invalid-version/);
 });
+
+for (const mode of ['missing', 'duplicate'])
+  test(`release docs refuse ${mode} guide paragraph`, () => {
+    const captured = loadReleaseSpecimen().files;
+    const documents = { 'README.md': captured['README.md'], 'docs/metadata.md': captured['docs/metadata.md'] };
+    call('release-prepare', 'prepareReleaseDocs', { documents, version: '1.9.0', selectedFragments: ['metadata-query.md'] });
+    const marker = 'This is an unreleased additive entry point. The package version and existing\nrecord fixtures remain unchanged until a separately reviewed release.';
+    documents['docs/metadata.md'] = mode === 'missing'
+      ? documents['docs/metadata.md'].replace(marker, 'Changed status')
+      : documents['docs/metadata.md'] + '\n' + marker + '\n';
+    assert.throws(() => call('release-prepare', 'prepareReleaseDocs', { documents, version: '1.9.0', selectedFragments: ['metadata-query.md'] }), error => error.code === 'invalid-release-docs');
+  });
