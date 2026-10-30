@@ -1,0 +1,85 @@
+{
+  "availability": {
+    "ok": true
+  },
+  "commitLog": [
+    {
+      "stage": "pipeline/prepare/Child Seed",
+      "stageId": "pipeline/prepare/seed",
+      "runtimeStageId": "pipeline/prepare/seed#9",
+      "trace": [
+        {
+          "path": "items"
+        },
+        {
+          "path": "rate"
+        }
+      ]
+    },
+    {
+      "stage": "pipeline/prepare/Child Sum",
+      "stageId": "pipeline/prepare/sum",
+      "runtimeStageId": "pipeline/prepare/sum#10",
+      "trace": [
+        {
+          "path": "subtotal"
+        }
+      ]
+    },
+    {
+      "stage": "pipeline/prepare/Child Audit",
+      "stageId": "pipeline/prepare/audit",
+      "runtimeStageId": "pipeline/prepare/audit#11",
+      "trace": [
+        {
+          "path": "audit"
+        }
+      ]
+    },
+    {
+      "stage": "pipeline/prepare/Child Total",
+      "stageId": "pipeline/prepare/total",
+      "runtimeStageId": "pipeline/prepare/total#12",
+      "trace": [
+        {
+          "path": "total"
+        }
+      ]
+    }
+  ],
+  "executionTree": {
+    "runtimeStageId": "pipeline/prepare/seed#9",
+    "stageReads": {
+      "base": true
+    },
+    "next": {
+      "runtimeStageId": "pipeline/prepare/sum#10",
+      "stageReads": {
+        "items": true
+      },
+      "next": {
+        "runtimeStageId": "pipeline/prepare/audit#11",
+        "stageReads": {
+          "subtotal": true
+        },
+        "next": {
+          "runtimeStageId": "pipeline/prepare/total#12",
+          "stageReads": {
+            "subtotal": true,
+            "rate": true
+          }
+        }
+      }
+    }
+  },
+  "scope": {
+    "invocationPath": [
+      "pipeline/prepare#8"
+    ],
+    "mountLabels": {},
+    "readsAvailable": true,
+    "startKeys": [
+      "base"
+    ]
+  }
+}

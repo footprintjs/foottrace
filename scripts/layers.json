@@ -109,5 +109,10 @@
   "src/lib/read-sources/format.ts": 0,
   "src/lib/cause/recordSources.ts": 3,
   "src/lib/cause/recordSourceEdges.ts": 3,
-  "src/lib/prov/sourceReads.ts": 3
+  "src/lib/prov/sourceReads.ts": 3,
+  "src/metadata.ts": 4,
+  "src/lib/metadata/types.ts": 0,
+  "src/lib/metadata/errors.ts": 0,
+  "src/lib/metadata/admission.ts": 1,
+  "src/lib/metadata/query.ts": 3
 }
