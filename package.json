@@ -74,6 +74,16 @@
         "types": "./dist/types/prov.d.ts",
         "default": "./dist/prov.js"
       }
+    },
+    "./metadata": {
+      "import": {
+        "types": "./dist/esm/metadata.d.ts",
+        "default": "./dist/esm/metadata.js"
+      },
+      "require": {
+        "types": "./dist/types/metadata.d.ts",
+        "default": "./dist/metadata.js"
+      }
     }
   },
   "typesVersions": {
@@ -89,6 +99,9 @@
       ],
       "prov": [
         "dist/types/prov.d.ts"
+      ],
+      "metadata": [
+        "dist/types/metadata.d.ts"
       ]
     }
   },
@@ -98,7 +111,7 @@
     "test:coverage": "vitest run --coverage",
     "typecheck": "tsc -p tsconfig.test.json",
     "check:layering": "node scripts/check-layering.mjs",
-    "check:package": "publint && attw --pack --profile strict && tsc -p test/consumer/cause/tsconfig.json && tsc -p test/consumer/prov/tsconfig.json",
+    "check:package": "publint && attw --pack --profile strict && tsc -p test/consumer/cause/tsconfig.json && tsc -p test/consumer/prov/tsconfig.json && tsc -p test/consumer/metadata/tsconfig.json",
     "lint": "eslint 'src/**/*.ts'",
     "format": "prettier --check 'src/**/*.ts' 'test/**/*.ts'",
     "test:examples": "tsc -p examples/tsconfig.json",

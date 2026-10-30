@@ -87,7 +87,7 @@ export interface PathNode {
   readonly positions: number[];
   /** The subset of {@link positions} whose row here is a `set` or a `delete` (it decides the value alone). */
   readonly totals: number[];
-  /** Positions of commits whose row with a non-`delete` verb sits on this path (the rest are deletes only). */
+  /** Positions of commits with a recognized `set`, `merge` or `append` row exactly on this path. */
   readonly writes: number[];
   /** The next segment → its node. */
   readonly children: Map<string, PathNode>;
@@ -118,7 +118,9 @@ function pushOnce(list: number[], i: number): void {
  * One pass over `commitLog`: the path trie of every written path. Build it ONCE when a reader asks about
  * many keys (a causal walk, a forward slice) — or let `commitLogUtils · logModel` memoise it for a frozen log.
  */
-export function buildWriterIndex(commitLog: readonly CommitBundle[]): WriterIndex {
+export function buildWriterIndex(
+  commitLog: readonly { readonly trace: readonly { readonly path: string; readonly verb?: string }[] }[],
+): WriterIndex {
   const roots = new Map<string, PathNode>();
   for (let i = 0; i < commitLog.length; i++) {
     const trace = commitLog[i].trace;
@@ -140,7 +142,8 @@ export function buildWriterIndex(commitLog: readonly CommitBundle[]): WriterInde
       }
       pushOnce(node.positions, i);
       if (verb === 'set' || verb === 'delete') pushOnce(node.totals, i);
-      if (verb !== 'delete') pushOnce(node.writes, i);
+      // Value-free metadata contributes path positions only, never a fabricated write verb.
+      if (verb === 'set' || verb === 'merge' || verb === 'append') pushOnce(node.writes, i);
     }
   }
   return { roots };

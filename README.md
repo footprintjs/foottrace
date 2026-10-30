@@ -14,6 +14,7 @@ Foottrace owns the record layer used by footprintjs 10. Older stored records rem
 | `foottrace/write` | `SharedMemory`, `EventLog`, `RecordFrame`, encoding and write types, writer-owned freezing, the record sink port and `memorySink` |
 | `foottrace/paths` | Record-path encoding/decoding, nested access and safe diagnostic writes |
 | `foottrace/cause` | Optional bounded attention, cause and impact queries; in-memory and lazily loaded stored-record adapters |
+| `foottrace/metadata` | Optional bounded path-occurrence queries for value-free projections; candidate read links, no state replay |
 | `foottrace/prov` | Optional bounded, asynchronous export of one recorded scope as PROV-O JSON-LD, without values |
 
 Every declaration has one public entry point. Producer-facing `Attention` and `AttentionKind` are type-only root exports; the cause algorithms live only on `/cause`. Existing root, `/write` and `/paths` imports retain their ESM and CommonJS doors. There are no public deep imports or `/testing` entry point. FootPrint's engine, observer channels, recorders and stores remain in `footprintjs`.
@@ -33,6 +34,16 @@ visible, while their names and values are withheld. Every P1 export returns
 and supported by this reader. Keep its gaps with the document. See the
 [export recipe and safety limits](https://github.com/footprintjs/foottrace/blob/main/docs/prov.md)
 and the [runnable example](https://github.com/footprintjs/foottrace/blob/main/examples/post-execution/prov/01-export-prov.ts).
+
+## Value-free trace metadata — unreleased
+
+`readTraceMetadata` and `traceMetadata` on `foottrace/metadata` admit a bounded,
+value-free source and inspect its path occurrences and explicitly anchored read
+candidates. A recorded path occurrence is not a proven value change or origin.
+Unknown reads, overlaps and projection-local addresses remain explicit; metadata
+never supplies replay state. The reader uses the canonical path index and bounded
+walk, while complete-record APIs keep their established semantics. See the
+[metadata contract and limits](https://github.com/footprintjs/foottrace/blob/main/docs/metadata.md).
 
 ## Write and replay
 

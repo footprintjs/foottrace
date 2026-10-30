@@ -8,7 +8,14 @@ import { describe, expect, it } from 'vitest';
 
 const root = resolve(__dirname, '../..');
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
-const entries = { '.': 'index', './write': 'write', './paths': 'paths', './cause': 'cause', './prov': 'prov' } as const;
+const entries = {
+  '.': 'index',
+  './write': 'write',
+  './paths': 'paths',
+  './cause': 'cause',
+  './prov': 'prov',
+  './metadata': 'metadata',
+} as const;
 const config = ts.parseJsonConfigFileContent(
   ts.readConfigFile(join(root, 'tsconfig.json'), ts.sys.readFile).config,
   ts.sys,
@@ -51,7 +58,7 @@ function duplicates(doors: typeof exportsByDoor): string[][] {
 }
 
 describe('foottrace public ownership', () => {
-  it('has five code doors with matching public ESM and CommonJS targets', () => {
+  it('has six code doors with matching public ESM and CommonJS targets', () => {
     expect(
       Object.keys(pkg.exports)
         .filter((key) => key !== './package.json')
@@ -144,7 +151,7 @@ describe('foottrace public ownership', () => {
  * Every public name foottrace 1.0.3 shipped, by door — read off `main` at 1.0.3 with this file's own checker.
  * A minor keeps every one on the same door (1.1.0 only adds); only a major may drop or move one.
  */
-const SHIPPED_1_0_3: Record<Exclude<keyof typeof entries, './cause' | './prov'>, readonly string[]> = {
+const SHIPPED_1_0_3: Record<Exclude<keyof typeof entries, './cause' | './prov' | './metadata'>, readonly string[]> = {
   '.': [
     'ArrayProvenance',
     'AttributionBasis',
