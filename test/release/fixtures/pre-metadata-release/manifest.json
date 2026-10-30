@@ -1,0 +1,43 @@
+{
+  "sourceCommit": "df87b324377b24802732023120a87242b9b94aa8",
+  "sourceTree": "d48734d9eb3ee7f21b55a7ab77d57e9fc50e83c7",
+  "purpose": "Historical pre-release input, not a published package or supported reader floor",
+  "files": {
+    "package.json": {
+      "sha256": "c7d3e02ef0deed3c6a5d39ef68852f831234694228b14dd1f34ab7a908b743ef",
+      "gitBlob": "6ef73e7084d5a95d6290e9fcc11aaa4fd352172f",
+      "mode": 420,
+      "bytes": 4018
+    },
+    "package-lock.json": {
+      "sha256": "d1d62027827b83d826c850811d2f5ea3852703efd5d13af64d8285c33523b0e7",
+      "gitBlob": "d46bf99ad6ad0e7b290b9ccaa4dd8369510af566",
+      "mode": 420,
+      "bytes": 148248
+    },
+    "CHANGELOG.md": {
+      "sha256": "8245bf75ee8f2bd32cba9f49ca4a29112b97de877fc9be410e52e1e27dad32b8",
+      "gitBlob": "0ed02adb602004c2031a9c3510298af37366ba9c",
+      "mode": 420,
+      "bytes": 19684
+    },
+    "README.md": {
+      "sha256": "58ac2e5baea58fdf996bb47e06b8fd282e897c4fd193109be27d98175b44e15c",
+      "gitBlob": "2cfb3981525ee8643c38efb98fdc29432aa68669",
+      "mode": 420,
+      "bytes": 14988
+    },
+    "docs/metadata.md": {
+      "sha256": "a0d40250602b1c5a0ff5303d17383fc6f9a7c173ef8a6bbc45e1b5e6ed781bd9",
+      "gitBlob": "12f4340fa9c534630e2952f00e08b472fdb62aa4",
+      "mode": 420,
+      "bytes": 9599
+    },
+    ".changes/metadata-query.md": {
+      "sha256": "f0cb8459a2ef823c843348bf7e43fc0d18c494ebfa73926672d6d672d587b725",
+      "gitBlob": "0cb714aa90d80948d05b92dfd83d7ae0ae107b7c",
+      "mode": 420,
+      "bytes": 490
+    }
+  }
+}
