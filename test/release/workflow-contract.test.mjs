@@ -248,10 +248,17 @@ test('publisher version check and one submission stay after archive selection an
   assert.match(block, /NODE_AUTH_TOKEN: ''/);
   assert.match(publish, /  NODE_OPTIONS: ''\n  NODE_PATH: ''/);
 });
-test('docs require the separate owner GitHub approval and list unverified setup', () => {
+test('docs permit explicit owner delegation while retaining separate GitHub approval and setup', () => {
   const guide = read('docs/RELEASING.md');
   for (const term of [
-    'manually',
+    'explicitly authorize Codex or Claude',
+    'existing authorized User account',
+    'Standing authorization for FootTrace releases',
+    'names the submitting agent',
+    'recorded publicly',
+    'physical operator',
+    'cannot authenticate private authorization',
+    'does not submit approvals',
     'Approve',
     'write',
     'admin',
@@ -261,6 +268,10 @@ test('docs require the separate owner GitHub approval and list unverified setup'
   ])
     assert(guide.includes(term));
   assert.match(guide, /exchange.*not.*approval/i);
+  assert.match(guide, /No independent technical review is waived/);
+  assert.match(guide, /unavailable authentication or insufficient permission holds/i);
+  assert.doesNotMatch(guide, /owner (?:must |)(?:personally|manually) submit/i);
+  assert.doesNotMatch(guide, /approval[^\n]*by another human/i);
   assert.doesNotMatch(guide, /compressed literal|embedded program|generated.*template/);
 });
 

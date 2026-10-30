@@ -532,6 +532,27 @@ test('actual proposal path recomputes notes and creates only a normal App branch
       'package.json',
     ].sort(),
   );
+  const proposal = writes.find((c) => c.route.endsWith('/pulls'));
+  const prefix = `Release App proposal for foottrace ${plan.version}.\n\n${payload.prepared.notes}\n`;
+  assert(proposal.body.body.startsWith(prefix));
+  assert.equal(proposal.body.body.split(payload.prepared.notes).length, 2);
+  const policy = proposal.body.body.slice(prefix.length);
+  for (const term of [
+    "Claude's independent merge verdict for this exact head is recorded publicly",
+    'all current runtime/tested-tree/CodeQL checks pass',
+    'explicitly authorize Codex or Claude',
+    "owner's existing authorized User account",
+    'real GitHub APPROVED review on this final head',
+    'current API permission write or admin',
+    'names the submitting agent',
+    "owner's explicit authorization",
+    'Standing FootTrace authorization remains sufficient within its stated scope',
+    'An exchange verdict or comment is not that approval',
+    'No independent review is waived',
+    'No workflow auto-approval is added',
+  ]) assert(policy.includes(term), `Missing proposal policy: ${term}`);
+  assert.doesNotMatch(policy, /owner must (?:manually|personally) submit/);
+  assert(writes.every((c) => !/\/(?:reviews|merges?|dispatches)(?:$|[/?])/.test(c.route)));
   assert.equal((await call('release-github', 'writeProposal', f.api, f.context, payload, plan)).action, 'no-op');
   assert.equal(f.calls.filter((c) => c.route.endsWith('/git/refs') && c.method === 'POST').length, 1);
 });
@@ -625,6 +646,33 @@ for (const permission of ['write', 'admin'])
     w.reviewerPermissions[0].permission = permission;
     assert.equal(call('release-control', 'decideAuthority', w).authorized, true);
   });
+for (const permission of ['write', 'admin'])
+  test(`delegated submission retains real User approval with ${permission}`, () => {
+    const w = authorityWorld();
+    w.reviewerPermissions[0].permission = permission;
+    w.reviews[0].body = "Submitted by the authorized agent on the owner's explicit instruction.";
+    assert.equal(call('release-control', 'decideAuthority', w).authorized, true);
+  });
+test('review prose does not authenticate the operator or private delegation', () => {
+  for (const body of ['', 'Different review prose']) {
+    const w = authorityWorld();
+    w.reviews[0].body = body;
+    assert.equal(call('release-control', 'decideAuthority', w).authorized, true);
+  }
+});
+test('delegation prose cannot admit a non-author Bot approval', () => {
+  const w = authorityWorld();
+  w.reviews[0].user.type = 'Bot';
+  w.reviews[0].body = "Owner authorized this approval; submitted by an agent.";
+  assert.notEqual(w.reviews[0].user.id, w.pulls[0].user.id);
+  assert.equal(call('release-control', 'decideAuthority', w).authorized, false);
+});
+test('delegation prose in a comment is not real approval', () => {
+  const w = authorityWorld();
+  w.reviews[0].state = 'COMMENTED';
+  w.reviews[0].body = 'Owner authorized this; Verdict: merge';
+  assert.equal(call('release-control', 'decideAuthority', w).authorized, false);
+});
 for (const [name, edit] of [
   [
     'ordinary review comment',
