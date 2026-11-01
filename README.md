@@ -6,6 +6,20 @@ This package extracts FootPrint's established record layer. It does not introduc
 
 Foottrace owns the record layer used by footprintjs 10. Older stored records remain readable without installing their original engine.
 
+**Start here:** [Install](#install) · [Write and replay](#write-and-replay) · [Record contract](docs/guides/record-contract.md).
+Part of the [FootprintJS ecosystem](https://footprintjs.github.io/): this package owns execution records and their
+readers; workflow execution and user interfaces stay in separate packages.
+
+## Install
+
+```bash
+npm install foottrace
+```
+
+The published package is currently 1.8.0. The `foottrace/metadata` entry point documented below is on source main
+and is not available in that registry release. Use the documentation matching the version you install; source
+version numbers do not establish registry availability.
+
 ## Entry points
 
 | Import | Responsibility |
@@ -36,6 +50,8 @@ and supported by this reader. Keep its gaps with the document. See the
 and the [runnable example](https://github.com/footprintjs/foottrace/blob/main/examples/post-execution/prov/01-export-prov.ts).
 
 ## Value-free trace metadata (since 1.9.0)
+
+**Source main only; registry release pending.** This entry point is not in the published 1.8.0 package.
 
 `readTraceMetadata` and `traceMetadata` on `foottrace/metadata` admit a bounded,
 value-free source and inspect its path occurrences and explicitly anchored read
