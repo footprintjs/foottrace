@@ -131,6 +131,7 @@ export function authorityApiFixture() {
     conclusion: 'success',
   }));
   const routes = new Map([
+    [`/repos/footprintjs/foottrace/git/trees/${w.expected.tree}?recursive=1`, { sha: w.expected.tree, truncated: false, tree: [] }],
     ['/repos/footprintjs/foottrace/git/ref/heads/main', { object: { sha: w.expected.mergeSha } }],
     [`/repos/footprintjs/foottrace/git/commits/${w.expected.mergeSha}`, w.commit],
     [`/repos/footprintjs/foottrace/git/commits/${w.expected.headSha}`, w.headCommit],
@@ -195,75 +196,155 @@ export function authorityApiFixture() {
     settings: { slug: 'release-app', clientId: 'public-client-id' },
   };
 }
-export function proposalApiFixture() {
+// Complete synthetic managed-publication model. No IDs/receipts here assert that
+// a real historical publication existed; immutable legacy specimens stay exact.
+export function managedReleaseFixture({ version = '1.10.0', published = false, metadata = false } = {}) {
+  const pure = require('../../scripts/release-prepare.cjs');
   const repository = { id: 123, full_name: 'footprintjs/foottrace' },
-    base = sha('1'),
-    tree = sha('3');
-  const { files, fragments } = loadReleaseSpecimen();
-  files['.changes/metadata-query.md'] = fragments['metadata-query.md'];
-  const calls = [],
-    blobs = new Map();
-  let created = false,
-    currentMain = base,
-    pr = null;
+    bot = { id: 99, login: 'release-app[bot]', type: 'Bot' }, base = '/repos/footprintjs/foottrace';
+  const { files: initial, fragments } = loadReleaseSpecimen();
+  const pkg = JSON.parse(initial['package.json']), lock = JSON.parse(initial['package-lock.json']);
+  pkg.version = lock.version = lock.packages[''].version = version;
+  initial['package.json'] = JSON.stringify(pkg, null, 2) + '\n';
+  initial['package-lock.json'] = JSON.stringify(lock, null, 2) + '\n';
+  initial['CHANGELOG.md'] = `# Changelog\n\n## ${version} — 2026-11-01\n\n### Added\n\n- Existing package contents.\n`;
+  initial['src/index.ts'] = 'export const existing = true;\n';
+  const commits = new Map(), trees = new Map(), blobs = new Map(), pulls = [], releases = new Map(), tags = new Map(), registry = new Map(), calls = [];
+  let nextPR = 100, latest = '1.8.0', tip, remoteMain;
+  const makeInventory = (files) => new Map(Object.entries(files).map(([path, value]) => {
+    const bytes = Buffer.isBuffer(value) ? value : Buffer.from(value);
+    const row = { bytes, mode: '100644', sha: pure.gitObject('blob', bytes) };
+    blobs.set(row.sha, bytes); return [path, row];
+  }));
+  const storeTree = (inventory) => {
+    for (const row of inventory.values()) { assert.equal(pure.gitObject('blob', row.bytes), row.sha); blobs.set(row.sha, row.bytes); }
+    const id = pure.treeOid(inventory); trees.set(id, new Map(inventory)); return id;
+  };
+  const addCommit = (files, parents = [], treeId) => {
+    const tree = treeId ?? storeTree(files instanceof Map ? files : makeInventory(files));
+    const bytes = Buffer.from(`tree ${tree}\n${parents.map((p) => `parent ${p}\n`).join('')}author Model <model@example.invalid> 1793491200 +0000\ncommitter Model <model@example.invalid> 1793491200 +0000\n\nSynthetic ${commits.size}\n`);
+    const id = pure.gitObject('commit', bytes);
+    commits.set(id, { sha: id, tree: { sha: tree }, parents: parents.map((sha) => ({ sha })), committer: { date: '2026-11-01T00:00:00Z' } });
+    return id;
+  };
+  const root = addCommit(initial), originalHead = addCommit(initial, [root]), originalMerge = addCommit(initial, [root, originalHead]);
+  const makePR = (head, source, merged = false) => ({ id: nextPR + 1000, number: nextPR++, state: merged ? 'closed' : 'open',
+    merged, merged_at: merged ? '2026-11-01T00:00:00Z' : null, merge_commit_sha: source, user: { ...bot },
+    base: { ref: 'main', sha: merged ? root : context.sha, repo: repository }, head: { ref: 'release/next', sha: head, repo: repository } });
+  // context exists before the first unmerged PR is created.
+  const context = { repository, sha: originalMerge, ref: 'refs/heads/main', eventName: 'push', runId: 500, runAttempt: 1 };
+  const originalPR = makePR(originalHead, originalMerge, true); pulls.push(originalPR); tip = originalHead;
+  const queued = { ...initial, [metadata ? '.changes/metadata-query.md' : '.changes/helper-fix.md']:
+    metadata ? fragments['metadata-query.md'] : '---\ntype: fixed\nbump: patch\n---\n\n- Repair release preparation.\n' };
+  context.sha = addCommit(queued, [originalMerge]);
+  const missing = () => { throw Object.assign(new Error('synthetic-not-found'), { status: 404 }); };
+  const ancestors = (id, seen = new Set()) => {
+    if (seen.has(id)) return seen; seen.add(id);
+    for (const p of commits.get(id)?.parents ?? []) ancestors(p.sha, seen);
+    return seen;
+  };
   const api = async (method, route, body) => {
     calls.push({ method, route, body });
-    const missing = () => {
-      throw Object.assign(new Error('not-found'), { status: 404 });
-    };
+    const url = new URL('https://api.github.com' + route), path = url.pathname;
     if (method === 'GET') {
-      if (route === '/repos/footprintjs/foottrace') return { data: repository };
-      if (route.endsWith('/git/ref/heads/main')) return { data: { object: { sha: currentMain } } };
-      if (route === `/repos/footprintjs/foottrace/git/commits/${base}`)
-        return { data: { sha: base, tree: { sha: tree }, committer: { date: '2026-10-30T00:00:00Z' } } };
-      if (route === `/repos/footprintjs/foottrace/git/trees/${tree}?recursive=1`)
-        return {
-          data: { truncated: false, tree: [{ path: '.changes/metadata-query.md', type: 'blob', mode: '100644' }] },
-        };
-      if (route.includes('/contents/')) {
-        const name = route.split('/contents/')[1].split('?')[0];
-        assert(Object.hasOwn(files, name), name);
-        const bytes = Buffer.from(files[name]);
-        return { data: { type: 'file', encoding: 'base64', content: bytes.toString('base64'), size: bytes.length } };
+      if (path === base) return { data: repository };
+      if (path.endsWith('/git/ref/heads/main')) return { data: { object: { type: 'commit', sha: remoteMain ?? context.sha } } };
+      if (path.endsWith('/git/ref/heads/release/next')) return tip ? { data: { object: { type: 'commit', sha: tip } } } : missing();
+      if (path.includes('/git/ref/tags/')) { const value = tags.get(decodeURIComponent(path.split('/').at(-1))); return value ? { data: { object: { type: 'commit', sha: value } } } : missing(); }
+      if (path.includes('/releases/tags/')) { const value = releases.get(decodeURIComponent(path.split('/').at(-1))); return value ? { data: value } : missing(); }
+      if (path.includes('/git/commits/')) return { data: commits.get(path.split('/').at(-1)) ?? assert.fail('Unknown immutable commit') };
+      if (path.includes('/git/trees/')) {
+        const id = path.split('/').at(-1), inventory = trees.get(id); assert(inventory, id);
+        return { data: { sha: id, truncated: false, tree: [...inventory].map(([path, row]) => ({ path, mode: row.mode, sha: row.sha, type: 'blob', size: row.bytes.length })) } };
       }
-      if (route.endsWith('/git/ref/heads/release/next'))
-        return created ? { data: { object: { sha: sha('e') } } } : missing();
-      if (route.endsWith(`/git/commits/${sha('e')}`))
-        return { data: { sha: sha('e'), tree: { sha: sha('d') }, parents: [{ sha: base }] } };
-      if (route.includes('/pulls?state=open&head=')) return { data: pr ? [pr] : [] };
+      if (path.includes('/git/blobs/')) {
+        const id = path.split('/').at(-1), bytes = blobs.get(id); assert(bytes, id);
+        return { data: { sha: id, encoding: 'base64', size: bytes.length, content: bytes.toString('base64') } };
+      }
+      if (path.includes('/contents/')) {
+        const file = decodeURIComponent(path.split('/contents/')[1]), c = commits.get(url.searchParams.get('ref')),
+          row = trees.get(c?.tree.sha)?.get(file); assert(row, file);
+        return { data: { type: 'file', encoding: 'base64', content: row.bytes.toString('base64'), size: row.bytes.length } };
+      }
+      if (path.startsWith('/users/')) return { data: { ...bot } };
+      if (path.includes('/compare/')) {
+        const [from, to] = path.split('/compare/')[1].split('...'), old = ancestors(from), all = ancestors(to), ordered = [], seen = new Set();
+        const visit = (id) => { if (old.has(id) || seen.has(id)) return; seen.add(id); for (const p of commits.get(id).parents) visit(p.sha); ordered.push({ sha: id }); };
+        visit(to); const page = Number(url.searchParams.get('page'));
+        return { data: { status: from === to ? 'identical' : all.has(from) ? 'ahead' : 'diverged', ahead_by: ordered.length,
+          behind_by: all.has(from) ? 0 : 1, total_commits: ordered.length, base_commit: { sha: from }, merge_base_commit: { sha: all.has(from) ? from : root },
+          commits: ordered.slice((page - 1) * 100, page * 100) } };
+      }
+      if (/\/commits\/[a-f0-9]{40}\/pulls$/.test(path)) return { data: pulls.filter((p) => p.merge_commit_sha === path.split('/').at(-2)) };
+      if (/\/pulls\/\d+$/.test(path)) return { data: pulls.find((p) => p.number === Number(path.split('/').at(-1))) ?? assert.fail('Unknown PR') };
+      if (path.endsWith('/pulls')) return { data: pulls.filter((p) => p.state === url.searchParams.get('state')) };
+      if (/\/releases\/\d+\/assets$/.test(path)) return { data: [...releases.values()].find((r) => r.id === Number(path.split('/').at(-2)))?.assets ?? [] };
+      if (/\/releases\/assets\/\d+$/.test(path)) return { data: [...releases.values()].flatMap((r) => r.assets).find((a) => a.id === Number(path.split('/').at(-1))).raw };
     }
     if (method === 'POST') {
-      if (route.endsWith('/git/blobs')) {
-        const digest = createHash('sha1').update(body.content).digest('hex');
-        blobs.set(digest, body.content);
-        return { data: { sha: digest } };
+      if (path.endsWith('/git/blobs')) { const bytes = Buffer.from(body.content); const id = pure.gitObject('blob', bytes); blobs.set(id, bytes); return { data: { sha: id } }; }
+      if (path.endsWith('/git/trees')) {
+        const inventory = new Map(trees.get(body.base_tree)); assert(trees.has(body.base_tree));
+        for (const row of body.tree) { if (row.sha === null) inventory.delete(row.path); else inventory.set(row.path, { ...row, bytes: blobs.get(row.sha) }); }
+        return { data: { sha: storeTree(inventory) } };
       }
-      if (route.endsWith('/git/trees')) return { data: { sha: sha('d') } };
-      if (route.endsWith('/git/commits')) return { data: { sha: sha('e') } };
-      if (route.endsWith('/git/refs')) {
-        assert.equal(body.ref, 'refs/heads/release/next');
-        assert.equal(body.sha, sha('e'));
-        assert.equal(created, false);
-        created = true;
-        return { data: {} };
-      }
-      if (route.endsWith('/pulls')) {
-        pr = { id: 555, number: 100, state: 'open', head: { sha: sha('e') }, base: { ref: 'main' } };
-        return { data: pr };
-      }
+      if (path.endsWith('/git/commits')) return { data: { sha: addCommit(null, body.parents, body.tree) } };
+      if (path.endsWith('/pulls')) { const p = makePR(tip, null); pulls.push(p); return { data: p }; }
     }
-    assert.fail(`Unexpected ${method} ${route}`);
+    if (method === 'PATCH' && path.endsWith('/git/refs/heads/release/next')) {
+      assert.equal(body.force, false); assert(ancestors(body.sha).has(tip), 'Provider FF contract'); tip = body.sha;
+      return { data: { object: { type: 'commit', sha: tip } } };
+    }
+    assert.fail(`Unexpected synthetic ${method} ${route}`);
   };
-  return {
-    api,
-    calls,
-    blobs,
-    files,
-    moveMain: () => {
-      currentMain = sha('4');
+  const fetcher = async (url) => {
+    assert.equal(new URL(url).origin, 'https://registry.npmjs.org');
+    if (url === 'https://registry.npmjs.org/foottrace/latest') return Response.json({ name: 'foottrace', version: latest });
+    for (const [v, value] of registry) {
+      if (url === `https://registry.npmjs.org/foottrace/${v}`) return Response.json(value.metadata);
+      if (url === value.metadata.dist.tarball) return new Response(value.bytes);
+    }
+    return new Response('{}', { status: 404 });
+  };
+  const publish = (source, pending = false) => {
+    const inventory = trees.get(commits.get(source).tree.sha), pkg = JSON.parse(inventory.get('package.json').bytes), v = pkg.version;
+    const bytes = syntheticPackageArchive(v), info = require('../../scripts/release-archive.cjs').inspectArchive(bytes, { package: 'foottrace', version: v });
+    const raw = Buffer.from(JSON.stringify({ version: v, runId: 10, runAttempt: 1, sha: source, integrity: info.integrity }));
+    const changelog = inventory.get('CHANGELOG.md').bytes.toString(), notes = changelog.split('\n').slice(4).join('\n').trim() + '\n';
+    tags.set(`v${v}`, source); releases.set(`v${v}`, { id: 20, tag_name: `v${v}`, target_commitish: source, body: notes, draft: false, prerelease: false,
+      assets: [{ id: 21, name: `publish-attempt-${v}.json`, size: raw.length, state: 'uploaded', raw }] });
+    if (!pending) { registry.set(v, { bytes, metadata: { name: 'foottrace', version: v, dist: { integrity: info.integrity, shasum: info.shasum, tarball: `https://registry.npmjs.org/foottrace/-/foottrace-${v}.tgz` } } }); latest = v; }
+  };
+  if (published) publish(originalMerge);
+  const model = { api, calls, context, fetcher, options: { fetcher, settings: { slug: 'release-app', clientId: 'public-client-id' } },
+    files: queued, blobs, commits, trees, pulls, tags, releases, registry, repository, bot, originalHead, originalMerge, originalPR,
+    get tip() { return tip; }, set tip(value) { tip = value; }, get latest() { return latest; }, set latest(value) { latest = value; },
+    addCommit, makeInventory, publish,
+    merge: () => {
+      const p = pulls.find((p) => p.state === 'open'); assert(p);
+      const merged = addCommit(null, [context.sha, p.head.sha], commits.get(p.head.sha).tree.sha);
+      p.base.sha = context.sha; p.state = 'closed'; p.merged = true; p.merged_at = '2026-11-01T00:00:00Z'; p.merge_commit_sha = merged;
+      context.sha = merged; return merged;
     },
-    context: { repository, sha: base, ref: 'refs/heads/main', eventName: 'push', runId: 500, runAttempt: 1 },
+    advance: (change) => { const inventory = new Map(trees.get(commits.get(context.sha).tree.sha)); change(inventory); context.sha = addCommit(inventory, [context.sha]); return context.sha; },
+    moveMain: () => { remoteMain = sha('4'); },
   };
+  return model;
+}
+export function syntheticPackageArchive(version) {
+  const members = { 'package/package.json': JSON.stringify({ name: 'foottrace', version }), 'package/dist/index.js': 'export const synthetic = true;\n' }, chunks = [];
+  for (const [name, value] of Object.entries(members)) {
+    const bytes = Buffer.from(value), header = Buffer.alloc(512);
+    header.write(name, 0); header.write('0000644\0', 100); header.write('0000000\0', 108); header.write('0000000\0', 116);
+    header.write(bytes.length.toString(8).padStart(11, '0') + '\0', 124); header.write('00000000000\0', 136);
+    header.fill(32, 148, 156); header.write('0', 156); header.write('ustar\0', 257); header.write('00', 263);
+    header.write([...header].reduce((a, b) => a + b, 0).toString(8).padStart(6, '0') + '\0 ', 148);
+    chunks.push(header, bytes, Buffer.alloc((512 - bytes.length % 512) % 512));
+  }
+  return require('node:zlib').gzipSync(Buffer.concat([...chunks, Buffer.alloc(1024)]));
+}
+export function proposalApiFixture() {
+  return managedReleaseFixture({ version: '1.8.0', published: true, metadata: true });
 }
 export function actualControlArgv(stage) {
   const yaml = read('.github/workflows/publish.yml');

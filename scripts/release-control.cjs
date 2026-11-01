@@ -162,6 +162,20 @@ function decideProposalState(w) {
   )
     return no;
   if (!w.existing) return w.pulls.length ? no : { action: 'create', force: false };
+  if (w.predecessor) {
+    if (!validSha(w.expectedTree) || !validSha(w.predecessor.head) || w.predecessor.closedMerged !== true)
+      return no;
+    if (w.pulls.length === 0)
+      return w.existing.head === w.predecessor.head
+        ? { action: 'rollover', force: false, parents: [w.base, w.predecessor.head] }
+        : no;
+    if (!Array.isArray(w.existing.parents) || w.existing.parents.length !== 2 ||
+      w.existing.parents[0] !== w.base || w.existing.parents[1] !== w.predecessor.head ||
+      w.existing.tree !== w.expectedTree || !validSha(w.existing.head)) return no;
+    return w.pulls.length === 1 && w.pulls[0].head?.sha === w.existing.head &&
+      w.pulls[0].base?.ref === 'main' && w.pulls[0].state === 'open'
+      ? { action: 'no-op', force: false } : no;
+  }
   if (w.existing.parent !== w.base || w.existing.tree !== w.expectedTree || !validSha(w.existing.head)) return no;
   if (
     w.pulls.length !== 1 ||

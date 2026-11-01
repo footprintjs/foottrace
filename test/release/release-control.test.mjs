@@ -507,17 +507,20 @@ test('API calls never forward arbitrary destinations or retry a failed write', a
 import { proposalApiFixture } from './helpers.mjs';
 test('actual proposal path recomputes notes and creates only a normal App branch/PR', async () => {
   const f = proposalApiFixture();
-  const plan = await call('release-github', 'plan', f.api, f.context);
+  const plan = await call('release-github', 'plan', f.api, f.context, f.options);
   assert.equal(plan.mode, 'prepare');
   assert.equal(plan.version, '1.9.0');
-  const payload = await call('release-github', 'prepareProposal', f.api, f.context, plan);
-  const result = await call('release-github', 'writeProposal', f.api, f.context, payload, plan);
+  const payload = await call('release-github', 'prepareProposal', f.api, f.context, plan, f.options);
+  const result = await call('release-github', 'writeProposal', f.api, f.context, payload, plan, f.options);
   assert.equal(result.action, 'created');
   const writes = f.calls.filter((c) => c.method !== 'GET');
-  assert(writes.every((c) => c.method === 'POST'));
-  assert.equal(writes.filter((c) => c.route.endsWith('/git/refs')).length, 1);
+  assert(writes.every((c) => c.method === 'POST' || (c.method === 'PATCH' && c.route.endsWith('/git/refs/heads/release/next'))));
+  assert.equal(writes.filter((c) => c.route.endsWith('/git/refs') && c.method === 'POST').length, 0);
+  const refUpdate = writes.filter((c) => c.route.endsWith('/git/refs/heads/release/next'));
+  assert.equal(refUpdate.length, 1);
+  assert.equal(refUpdate[0].body.force, false);
   const commit = writes.find((c) => c.route.endsWith('/git/commits'));
-  assert.deepEqual(commit.body.parents, [f.context.sha]);
+  assert.deepEqual(commit.body.parents, [f.context.sha, f.originalHead]);
   const tree = writes.find((c) => c.route.endsWith('/git/trees'));
   assert.equal(tree.body.base_tree, plan.tree);
   assert(tree.body.tree.some((r) => r.path === '.changes/metadata-query.md' && r.sha === null));
@@ -553,34 +556,34 @@ test('actual proposal path recomputes notes and creates only a normal App branch
   ]) assert(policy.includes(term), `Missing proposal policy: ${term}`);
   assert.doesNotMatch(policy, /owner must (?:manually|personally) submit/);
   assert(writes.every((c) => !/\/(?:reviews|merges?|dispatches)(?:$|[/?])/.test(c.route)));
-  assert.equal((await call('release-github', 'writeProposal', f.api, f.context, payload, plan)).action, 'no-op');
-  assert.equal(f.calls.filter((c) => c.route.endsWith('/git/refs') && c.method === 'POST').length, 1);
+  assert.equal((await call('release-github', 'writeProposal', f.api, f.context, payload, plan, f.options)).action, 'no-op');
+  assert.equal(f.calls.filter((c) => c.route.endsWith('/git/refs/heads/release/next') && c.method === 'PATCH').length, 1);
 });
 test('actual proposal payload substitution is refused before the first API mutation', async () => {
   const f = proposalApiFixture(),
-    p = await call('release-github', 'plan', f.api, f.context),
-    payload = await call('release-github', 'prepareProposal', f.api, f.context, p);
+    p = await call('release-github', 'plan', f.api, f.context, f.options),
+    payload = await call('release-github', 'prepareProposal', f.api, f.context, p, f.options);
   payload.prepared.updates['.github/workflows/ci.yml'] = 'bad';
   await assert.rejects(
-    () => call('release-github', 'writeProposal', f.api, f.context, payload, p),
+    () => call('release-github', 'writeProposal', f.api, f.context, payload, p, f.options),
     /proposal-substitution/,
   );
   assert(f.calls.every((c) => c.method === 'GET'));
 });
 test('actual proposal path stops on main moving after preparation', async () => {
   const f = proposalApiFixture(),
-    p = await call('release-github', 'plan', f.api, f.context),
-    payload = await call('release-github', 'prepareProposal', f.api, f.context, p);
+    p = await call('release-github', 'plan', f.api, f.context, f.options),
+    payload = await call('release-github', 'prepareProposal', f.api, f.context, p, f.options);
   f.moveMain();
-  await assert.rejects(() => call('release-github', 'writeProposal', f.api, f.context, payload, p), /main-moved/);
+  await assert.rejects(() => call('release-github', 'writeProposal', f.api, f.context, payload, p, f.options), /main-moved/);
   assert(f.calls.every((c) => c.method === 'GET'));
 });
-test('verify-only refuses pending source rather than inspecting a nonexistent next version', async () => {
+test('verify-only inspects the historical current publication while preserving queued source', async () => {
   const f = proposalApiFixture();
-  await assert.rejects(
-    () => call('release-github', 'plan', f.api, { ...f.context, verify: true }),
-    /verify-unreleased-main/,
-  );
+  const plan = await call('release-github', 'plan', f.api, { ...f.context, verify: true }, f.options);
+  assert.equal(plan.mode, 'verify');
+  assert.equal(plan.version, '1.8.0');
+  assert.equal(plan.preparationKind, undefined);
   assert(f.calls.every((c) => c.method === 'GET'));
 });
 test('producer admission fetches and binds the current workflow run record', async () => {
