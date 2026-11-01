@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.10.0 — 2026-11-01
+
+### Added
+
+- Opt-in `explain(..., { includeBackward: true })` returns a `backward` evidence result and the `/cause` `BackwardResult` type. It exposes the existing admitted reverse walk, including dependent-to-parent edges with their attribution and evidence, plus independent backward confidence and gaps. No extra traversal or graph calls occur; omitted/false keeps existing result bytes and call order.
+
+### Fixed
+
+Release controls retain bounded, nonsecret failure codes across API, decoding and local IO boundaries, while preserving exact approval, source, artifact and publication safeguards. Failed or partial attempts remain held for the documented recovery process.
+Release run-envelope refusals identify the first failing predicate with a fixed `current-run-*` label. API values, paths, bodies and credentials are not included. The existing checks, order, single run lookup, job validation and fail-closed release behavior are unchanged; legacy `current-run` remains an admitted diagnostic. This reporting change does not diagnose a historical response or authorize a retry.
+
+### Documentation
+
+- Clarify that an explicitly owner-authorized agent may submit the real exact-head GitHub approval through the owner's existing User account after independent review and current checks. Identity, permission, release and publication safeguards are unchanged.
+
 ## 1.9.0 — 2026-10-30
 
 ### Added
