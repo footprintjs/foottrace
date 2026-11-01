@@ -67,3 +67,64 @@ The publisher's checked archive is written to a fixed absolute run/attempt direc
 `npm run test:release` runs bounded offline tests of fragments, transformations, source/review/CI/producer identity, archive/journal admission, the actual readable CLI adapter and every workflow sibling. `npm run check:release` validates fragments. Both remain in the full `check`; none of the original runtime, coverage, package or historical-fixture gates are removed. Tests inspect the final checkout/ref/permissions/command boundaries and execute the real helper adapter with offline API/IO fixtures. Those tests do not claim App installation, OIDC configuration or a hosted publication has been exercised.
 
 The change parser validates only explicit `type` and `bump` declarations and selects the strongest declared bump. It does not infer a breaking change or migration text. The reviewer checks those semantics. Standalone verification uses the same exact pinned changelog-section and release-note comparison as the release writer; missing, duplicate or changed release notes refuse verification.
+
+## Unpublished current versions and retained proposal history
+
+A process correction can reach main after the App's version PR has merged but before
+that version appears on npm. Pending fragments must not silently skip that version.
+The planner first classifies the **current** package version, keeping registry,
+GitHub release, reservation and source evidence separate. A partial release or
+uncertain response holds the route; it never deletes a marker or resubmits around
+registry processing.
+
+For an observed unpublished version, a recovery proposal is eligible only while
+its original package inputs remain unchanged. The comparison covers complete Git
+inventories, including build configuration, package/lock files, compiler inputs,
+postbuild code, README, license, modes and unexpected additions. Only the finite
+reviewed release-process differences and admitted nonpayload history are excepted.
+A new runtime or packed-input change holds recovery. The normal archive build and
+package checks still run on the new candidate; this comparison is not a promise of
+bit-reproducible builds.
+
+Recovery adds one canonical data record under
+`.release/recovery/<version>/<sequence>.json` (`001` through `100`). The record binds
+the repository, immutable proposal base, original and immediate predecessor App
+PRs, prior record digest, and the complete queue of raw fragment bytes and modes.
+It is descriptive evidence, not authentication. Existing records and queued
+fragments remain immutable. A later process correction before publication adds the
+next record; it cannot rewrite an earlier record to manufacture a PR delta.
+
+The App creates a **new** release PR for that version. Its commit has ordered
+parents `[current main, retained release head]`, and the existing release branch is
+updated with `force: false`. This preserves reachable history, including a prior
+squash merge's release head. It does not provide compare-and-swap or exclusivity.
+A missing known prior ref, conflicting open PR, changed base/queue, invalid intent,
+or ambiguous lineage holds before writes. An exact canonical open proposal is a
+read-only no-op. A response lost after a write leaves its evidence in place; there
+is no automatic rollback or retry.
+
+Every new recovery head needs its own independent Claude verdict recorded publicly
+before merge, current checks, and the real eligible User approval described above.
+An old version PR or review never approves the new source. Current authenticated
+App/client/Bot identity, reviewer permission and objection rules, CodeQL, trusted
+producer artifacts, exact archive, unique reservation, current-attempt grant and
+npm OIDC checks remain mandatory. The private App credential keeps its existing
+three-step scope; preparation and historical verification receive no private key.
+
+After publication, current helpers can verify an earlier immutable source as data:
+registry metadata and downloaded archive bytes, peeled tag, exact release notes,
+unique uploaded reservation, same-repository merged App PR/head tree, and complete
+bounded ancestry to current main must agree. Historical helpers are never executed.
+Only verified publication with matching `latest` permits a fresh normal preparation
+of the next version, consuming its queued fragments. Old valid intent records stay
+on main and become inert after the package version advances. A pinned selective
+rerun cannot promote an old preparation artifact into a different phase.
+
+Registry 404 and accessible missing tag/release responses are observations, not
+proof that publication never occurred or no request is processing. This route uses
+the existing trusted-main and cooperative reservation contract. It cannot detect a
+fully erased marker or an otherwise invisible privileged history reset. Known
+ambiguity holds for coordination; no extra control ref, historical Actions-run
+absence proof, new credential, manual publication or reservation reset is added.
+Unmanaged legacy publication without the complete witness requires separately
+reviewed bootstrap evidence and is held rather than guessed.

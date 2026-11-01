@@ -358,7 +358,7 @@ test('actual release/reservation/grant/registry path preserves checked bytes and
     eventName: 'push',
   };
   const identity = auth.w.expected,
-    pinned = { version: '1.9.0' };
+    pinned = { version: '1.9.0', mode: 'publish' };
   let changelog =
     '# Changelog\n\n## 1.9.0 — 2026-10-30\n\n### Added\n\n- Tested feature.\n\n## 1.8.0 — 2026-10-26\n\nOld notes.\n';
   const calls = [];
