@@ -37,6 +37,8 @@ export interface SliceForKeyOptions extends CausalChainOptions {
 /**
  * Backward slice for one state key: anchor at the key's last writer, then
  * walk read→write (and optional control) dependencies transitively.
+ * This state-key view retains `writer.trace[].readAttempts` but does not project
+ * those call sources into parents; empty parents do not rule out external ancestry.
  *
  * Honest-absence contract: a missing slice is a RESULT, not an error —
  * `missing: 'never-written'` tells a triage tool (or its LLM caller) that

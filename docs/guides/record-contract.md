@@ -28,7 +28,7 @@ One bundle is one stage's commit: what it wrote, as the log spells it.
 | Field | Type | Required | Rule |
 |---|---|---|---|
 | `runtimeStageId` | string | yes | The stage's address: `[subflowPath/]stageId#executionIndex`. Unique in the run. The reader splits on the LAST `#` and `/`. `~` is reserved. |
-| `trace` | array of rows | yes | The writes, in order. Each row is `{ path, verb, readKeys? }`. |
+| `trace` | array of rows | yes | The writes, in order. Each row is `{ path, verb, readKeys?, readAttempts? }`. |
 | `overwrite` | object | no | Values for `set` and `append` rows, keyed by path. Plain object. |
 | `updates` | object | no | Values for `merge` rows, keyed by path. Plain object. |
 | `redactedPaths` | array of strings | no | Paths a redaction policy cleared; the fold reports them. |

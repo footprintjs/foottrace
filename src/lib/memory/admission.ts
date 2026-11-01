@@ -23,10 +23,10 @@ import { deepEqual, DELIM, dryFold } from './utils.js';
 export type Rows = { overwrite: MemoryPatch; updates: MemoryPatch; trace: TraceEntry[] };
 
 /** One staged op, as `TransactionBuffer` records it. */
-export type StagedOp = { path: string; verb: string; readKeys?: string[] };
+export type StagedOp = { path: string; verb: string; readKeys?: string[]; readAttempts?: readonly string[] };
 
 /** A staged path in a {@link Family}, with its last op's read prefix. */
-export type Member = { path: string; readKeys?: string[] };
+export type Member = { path: string; readKeys?: string[]; readAttempts?: readonly string[] };
 
 /**
  * A family of TOUCHED paths: every staged path under its shallowest staged
@@ -104,10 +104,10 @@ export function touchedFamilies(ops: readonly StagedOp[]): {
   rootOf: Map<string, string>;
   families: Map<string, Family>;
 } {
-  const touches = new Map<string, { last: number; readKeys?: string[] }>();
+  const touches = new Map<string, { last: number; readKeys?: string[]; readAttempts?: readonly string[] }>();
   for (let i = 0; i < ops.length; i++) {
     touches.delete(ops[i].path); // re-insert: the Map's order is last-touch order
-    touches.set(ops[i].path, { last: i, readKeys: ops[i].readKeys });
+    touches.set(ops[i].path, { last: i, readKeys: ops[i].readKeys, readAttempts: ops[i].readAttempts });
   }
   const rootOf = new Map<string, string>();
   const families = new Map<string, Family>();
@@ -119,7 +119,7 @@ export function touchedFamilies(ops: readonly StagedOp[]): {
       family = { root, rootSegments: root.split(DELIM), members: [], slot: touch.last };
       families.set(root, family);
     }
-    family.members.push({ path, readKeys: touch.readKeys });
+    family.members.push({ path, readKeys: touch.readKeys, readAttempts: touch.readAttempts });
     if (touch.last > family.slot) family.slot = touch.last;
   }
   return { rootOf, families };

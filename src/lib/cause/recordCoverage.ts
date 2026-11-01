@@ -39,6 +39,12 @@ export function collectScopeCoverage(
   if (!scope.complete || scope.control === undefined || scope.marks === undefined) addGap('not-collected');
   if (bundle.untrackedSources?.length) addGap('untracked-input');
   if (bundle.redactedPaths.length) addGap('redacted');
+  // The native record adapter does not project external call nodes. A host adapter may add
+  // admitted call relations, but this view must not call their absence complete ancestry.
+  if (bundle.trace.some((row) => row.readAttempts?.length)) {
+    addGap('conservative');
+    addGap('not-collected');
+  }
 }
 
 /** A read-only identity has no new value life; unqualified executions retain written-key encounter order. */

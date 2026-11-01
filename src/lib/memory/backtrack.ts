@@ -338,6 +338,8 @@ function incompleteSourcesFragment(commit: CommitBundle): { incompleteSources?: 
 /**
  * Build the causal DAG rooted at `startId` by walking backwards
  * through read→write dependencies in the commit log.
+ * This state-key view does not project `TraceEntry.readAttempts`: empty parents
+ * do not rule out external ancestry. Inspect the saved trace or compose a host CauseGraph.
  *
  * Automatically selects the optimal writer lookup strategy:
  * - Linear scan for small logs (≤ 256 commits)
