@@ -137,6 +137,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PLAN_JSON: ${{ needs.plan.outputs.plan }}
+          APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
         run: node scripts/release-runner.cjs authority
   verdict:
     needs: [plan, authority]
@@ -251,6 +252,7 @@ jobs:
           PLAN_JSON: ${{ needs.plan.outputs.plan }}
           IDENTITY_JSON: ${{ needs.authority.outputs.identity }}
           ARTIFACT_ID: ${{ needs.build.outputs.artifact }}
+          APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
         run: node scripts/release-runner.cjs release
   publish:
     needs: [plan, authority, build, release]
@@ -281,6 +283,7 @@ jobs:
           IDENTITY_JSON: ${{ needs.authority.outputs.identity }}
           ARTIFACT_ID: ${{ needs.build.outputs.artifact }}
           GRANT_JSON: ${{ needs.release.outputs.grant }}
+          APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
         run: node scripts/release-runner.cjs publish
       - name: Require the pinned bundled npm
         if: steps.control.outputs.submit == 'true'

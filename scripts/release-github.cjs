@@ -1,6 +1,7 @@
 'use strict';
 const { prepareRelease } = require('./release-prepare.cjs');
 const control = require('./release-control.cjs');
+const { appRequest } = require('./release-app-auth.cjs');
 const fail = (code) => {
   const e = new Error(code);
   e.code = code;
@@ -146,6 +147,7 @@ const OPERATIONS = new Set([
   'registry-latest-json',
 ]);
 const REASONS = new Set([
+  'app-auth',
   'unexpected',
   'json',
   'github-transport',
@@ -750,7 +752,7 @@ async function responseBytes(response, max = 24 * 1024 * 1024, failure = 'github
     throw diagnostic(failure === 'registry-body' ? 'registry-body' : 'github-body');
   }
 }
-function makeApi(token, fetcher = fetch) {
+function makeApi(token, fetcher = fetch, appIdentity) {
   return async (method, route, body) => {
     try {
       if (
@@ -769,6 +771,13 @@ function makeApi(token, fetcher = fetch) {
         'x-github-api-version': '2022-11-28',
       };
       const options = { method, headers, signal: AbortSignal.timeout(30000) };
+      let url = route.startsWith('https:') ? route : `https://api.github.com${route}`;
+      if (route.startsWith('/apps/')) {
+        const request = appRequest(appIdentity, method, route, body);
+        url = request.url;
+        headers.authorization = request.authorization;
+        options.redirect = request.redirect;
+      }
       if (body?.raw) {
         headers['content-type'] = body.contentType;
         options.body = body.raw;
@@ -778,7 +787,7 @@ function makeApi(token, fetcher = fetch) {
       }
       let response;
       try {
-        response = await fetcher(route.startsWith('https:') ? route : `https://api.github.com${route}`, options);
+        response = await fetcher(url, options);
       } catch {
         throw diagnostic('github-transport');
       }

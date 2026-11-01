@@ -22,7 +22,9 @@ const fail = (code) => {
   throw error;
 };
 function createIo(env) {
-  const git = (args) => child.execFileSync('git', args, { cwd: ROOT, encoding: 'utf8', stdio: 'pipe' }).trim();
+  const gitEnv = { ...process.env };
+  delete gitEnv.APP_PRIVATE_KEY;
+  const git = (args) => child.execFileSync('git', args, { cwd: ROOT, encoding: 'utf8', stdio: 'pipe', env: gitEnv }).trim();
   const publishFile = (run, attempt) => {
     if (typeof env.RUNNER_TEMP !== 'string' || !path.isAbsolute(env.RUNNER_TEMP)) fail('publish-directory');
     const temp = path.resolve(env.RUNNER_TEMP),
@@ -65,11 +67,17 @@ async function runCli(argv, options = {}) {
     fail('runner-summary');
   const io = options.io ?? createIo(env);
   if (runtime.withRefusalSync('runner-checkout', () => io.head()) !== context.sha) fail('checkout-sha');
+  const appIdentity = ['authority', 'release', 'publish'].includes(stage)
+    ? { slug: env.APP_SLUG, clientId: env.APP_CLIENT_ID, privateKey: env.APP_PRIVATE_KEY }
+    : undefined;
+  const stageEnv = Object.create(null);
+  for (const name of Object.keys(env)) if (name !== 'APP_PRIVATE_KEY') stageEnv[name] = env[name];
+  if (env === process.env) delete process.env.APP_PRIVATE_KEY;
   const result = await runtime.withRefusal(`runner-${stage}`, () =>
     runtime.runStage(stage, {
-      api: options.api ?? runtime.makeApi(env.GH_TOKEN, options.fetcher),
+      api: options.api ?? runtime.makeApi(env.GH_TOKEN, options.fetcher, appIdentity),
       context,
-      env,
+      env: stageEnv,
       io,
       fetcher: options.fetcher,
     }),

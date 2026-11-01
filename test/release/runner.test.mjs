@@ -157,7 +157,8 @@ test('real IO adapter retains fixed checkout identity/tree and cleanliness reads
 test('production release helper closure is static, builtin-only and closed', () => {
   const closure = new Map([
     ['release-runner', ['release-github', 'release-control']],
-    ['release-github', ['release-prepare', 'release-control', 'release-archive']],
+    ['release-github', ['release-prepare', 'release-control', 'release-archive', 'release-app-auth']],
+    ['release-app-auth', []],
     ['release-prepare', ['release-changes']],
     ['release-changes', []],
     ['release-control', []],
