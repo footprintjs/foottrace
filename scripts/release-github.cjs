@@ -33,6 +33,18 @@ const LEGACY_CODES = new Set([
   'checkout-sha',
   'context',
   'current-run',
+  'current-run-id',
+  'current-run-attempt',
+  'current-run-sha',
+  'current-run-repository',
+  'current-run-head-repository',
+  'current-run-workflow',
+  'current-run-branch',
+  'current-run-event',
+  'current-run-ref',
+  'current-run-trigger',
+  'current-run-status',
+  'current-run-conclusion',
   'dirty-checkout',
   'event',
   'fragment-path',
@@ -542,21 +554,19 @@ async function writeProposal(api, context, payload, pinned) {
 }
 async function producerIdentity(api, context, name, completed = false) {
   const run = (await api('GET', `${prefix(context)}/actions/runs/${context.runId}`)).data;
-  if (
-    run.id !== context.runId ||
-    run.run_attempt !== context.runAttempt ||
-    run.head_sha !== context.sha ||
-    !control.sameRepo(run.repository, context.repository) ||
-    !control.sameRepo(run.head_repository, context.repository) ||
-    run.path !== '.github/workflows/publish.yml' ||
-    run.head_branch !== 'main' ||
-    run.event !== context.eventName ||
-    context.ref !== 'refs/heads/main' ||
-    !['push', 'workflow_dispatch'].includes(run.event) ||
-    run.status !== 'in_progress' ||
-    run.conclusion !== null
-  )
-    fail('current-run');
+  // Keep the original predicate order and short-circuit at the first refusal.
+  if (run.id !== context.runId) fail('current-run-id');
+  if (run.run_attempt !== context.runAttempt) fail('current-run-attempt');
+  if (run.head_sha !== context.sha) fail('current-run-sha');
+  if (!control.sameRepo(run.repository, context.repository)) fail('current-run-repository');
+  if (!control.sameRepo(run.head_repository, context.repository)) fail('current-run-head-repository');
+  if (run.path !== '.github/workflows/publish.yml') fail('current-run-workflow');
+  if (run.head_branch !== 'main') fail('current-run-branch');
+  if (run.event !== context.eventName) fail('current-run-event');
+  if (context.ref !== 'refs/heads/main') fail('current-run-ref');
+  if (!['push', 'workflow_dispatch'].includes(run.event)) fail('current-run-trigger');
+  if (run.status !== 'in_progress') fail('current-run-status');
+  if (run.conclusion !== null) fail('current-run-conclusion');
   const jobs = await pages(
     api,
     `${prefix(context)}/actions/runs/${context.runId}/attempts/${context.runAttempt}/jobs`,
