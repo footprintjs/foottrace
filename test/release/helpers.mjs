@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
+import { createHash, generateKeyPairSync, verify } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { existsSync, readFileSync, lstatSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -272,6 +272,7 @@ export function actualControlArgv(stage) {
   assert.equal(matches.length, 1, `Missing/ambiguous actual readable stage ${stage}`);
   return [stage];
 }
+let syntheticAppKeys;
 export async function executeWorkflowStage(stage, { env, api, fetcher }) {
   const { runCli } = require('../../scripts/release-runner.cjs');
   let output = '',
@@ -285,10 +286,35 @@ export async function executeWorkflowStage(stage, { env, api, fetcher }) {
     RUNNER_TEMP: '/offline/temp',
     GH_TOKEN: 'offline-test-token',
   };
+  if (['authority', 'release', 'publish'].includes(stage)) {
+    const yaml = read('.github/workflows/publish.yml'), start = yaml.indexOf(`  ${stage}:\n`),
+      rest = yaml.slice(start + `  ${stage}:\n`.length), next = /^  [a-z][a-z-]*:\n/m.exec(rest),
+      block = rest.slice(0, next?.index ?? rest.length);
+    assert(start >= 0);
+    assert.match(block, /APP_PRIVATE_KEY: \$\{\{ secrets\.RELEASE_APP_PRIVATE_KEY \}\}/);
+    syntheticAppKeys ??= generateKeyPairSync('rsa', { modulusLength: 2048 });
+    context.APP_PRIVATE_KEY = syntheticAppKeys.privateKey.export({ type: 'pkcs8', format: 'pem' });
+  }
   const fetch = async (url, options = {}) => {
     if (url.startsWith('https://registry.npmjs.org/')) return fetcher(url, options);
-    const parsed = new URL(url),
-      route = parsed.hostname === 'uploads.github.com' ? url : parsed.pathname + parsed.search;
+    const parsed = new URL(url);
+    let route = parsed.hostname === 'uploads.github.com' ? url : parsed.pathname + parsed.search;
+    if (url === 'https://api.github.com/app') {
+      assert.equal(options.method, 'GET');
+      assert.equal(options.redirect, 'error');
+      assert.equal(options.body, undefined);
+      const token = options.headers.authorization;
+      assert(typeof token === 'string' && token.startsWith('Bearer '), 'App JWT required');
+      const parts = token.slice(7).split('.');
+      assert.equal(parts.length, 3);
+      assert.deepEqual(JSON.parse(Buffer.from(parts[0], 'base64url')), { alg: 'RS256', typ: 'JWT' });
+      assert.equal(JSON.parse(Buffer.from(parts[1], 'base64url')).iss, context.APP_CLIENT_ID);
+      assert(verify('RSA-SHA256', Buffer.from(parts[0] + '.' + parts[1]), syntheticAppKeys.publicKey,
+        Buffer.from(parts[2], 'base64url')), 'Independent synthetic App signature verification');
+      route = `/apps/${context.APP_SLUG}`;
+    } else {
+      assert(options.headers.authorization === `Bearer ${context.GH_TOKEN}`, 'Workflow token stays on other API routes');
+    }
     const body = options.body
       ? Buffer.isBuffer(options.body)
         ? { raw: options.body, contentType: options.headers['content-type'] }
