@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.11.0 — 2026-11-02
+
+### Added
+
+- Bound per-write delivered call-source membership to the 32 most-recent distinct canonical IDs and record paired cumulative eviction counts. Preserve latest windows through delta/lossy reconstruction and saved reopening; CauseGraph and PROV disclose truncated ancestry. Legacy no-counter rows remain readable within existing budgets. Migration: retained duplicates now refresh source-window recency; readKeys keeps its existing state-read law. IDs remain whole, so the membership cap is not an absolute byte bound.
+Per-write traces can retain a disjoint `readAttempts` ceiling for delivered native call answers. The existing reads-prefix writer captures canonical attempt IDs independently of state paths, omits the field when empty/off, and clears it on discard. An offline host-adapter example reuses existing cause ports; recorded answer availability is conservative evidence, not proof of semantic use or external commitment.
+
+### Fixed
+
+- Verify private Release App identity with a short-lived authenticated App metadata read inside the existing Actions control steps. Keep repository permissions, exact-head approval, source/tree, security, archive and publication-reservation checks unchanged.
+- Recover an unpublished current version through a newly reviewed App proposal before consuming queued fragments, preserve retained release history with nonforce updates, and hold on package-input drift or ambiguous publication evidence.
+
+### Documentation
+
+- Clarify the standalone execution-record and replay role, installation guidance and ecosystem routing, and align package search keywords with those use cases.
+
 ## 1.10.0 — 2026-11-01
 
 ### Added
