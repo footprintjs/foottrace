@@ -74,7 +74,12 @@ export function dataField(value: unknown, key: string, budget: ProvBudget): unkn
   requireSpend(budget, 'fields');
   return ownData(value, key, refuse, descriptors);
 }
-export function dataList(value: unknown, maximum: number, budget: ProvBudget): readonly unknown[] {
+export function dataList(
+  value: unknown,
+  maximum: number,
+  budget: ProvBudget,
+  expectedLength?: number,
+): readonly unknown[] {
   return boundedList(
     value,
     maximum,
@@ -88,6 +93,7 @@ export function dataList(value: unknown, maximum: number, budget: ProvBudget): r
       freeze: false,
       descriptors,
       translateArrayErrors: true,
+      expectedLength,
     },
   );
 }

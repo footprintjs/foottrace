@@ -114,5 +114,6 @@
   "src/lib/metadata/types.ts": 0,
   "src/lib/metadata/errors.ts": 0,
   "src/lib/metadata/admission.ts": 1,
-  "src/lib/metadata/query.ts": 3
+  "src/lib/metadata/query.ts": 3,
+  "src/lib/evidence/readAttempts.ts": 0
 }

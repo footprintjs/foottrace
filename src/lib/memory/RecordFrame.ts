@@ -1,3 +1,4 @@
+import { READ_ATTEMPT_LIMIT } from '../evidence/readAttempts.js';
 import { parseAttemptId } from '../ids/attemptId.js';
 import { sourceOwner } from '../read-sources/admission.js';
 import { captureFor } from '../read-sources/bindings.js';
@@ -102,7 +103,9 @@ export class RecordFrame {
    * "last write's prefix == union" hold in delta mode.
    */
   private readKeys?: Set<string>;
+  /** Bounded recency window, independent of the monotonic state readKeys prefix. */
   private readAttempts?: Set<string>;
+  private readAttemptsOmitted?: number;
   #sourceFrame?: SourceFrame;
 
   constructor(state: SharedMemory, log?: EventLog, address: readonly string[] = []) {
@@ -239,7 +242,15 @@ export class RecordFrame {
           readKeysProvider,
           this._address,
           source,
-          readKeysProvider ? () => [...(this.readAttempts ?? [])] : undefined,
+          readKeysProvider
+            ? () =>
+                this.readAttempts?.size
+                  ? {
+                      readAttempts: [...this.readAttempts],
+                      ...(this.readAttemptsOmitted && { readAttemptsOmitted: this.readAttemptsOmitted }),
+                    }
+                  : undefined
+            : undefined,
         );
         // A getter may have constructed another buffer which this native assignment abandons.
         if (this.buffer || this.#sourceFrame?.staging !== source) {
@@ -401,7 +412,13 @@ export class RecordFrame {
   noteReadAttempt(attemptId: string): void {
     if (this.encoding?.writeProvenance !== 'reads-prefix') return;
     if (!parseAttemptId(attemptId)) throw new TypeError('noteReadAttempt requires a canonical attempt id');
-    (this.readAttempts ??= new Set()).add(attemptId);
+    const window = (this.readAttempts ??= new Set());
+    if (!window.delete(attemptId) && window.size === READ_ATTEMPT_LIMIT) {
+      window.delete(window.values().next().value!);
+      const omitted = this.readAttemptsOmitted ?? 0;
+      this.readAttemptsOmitted = omitted < Number.MAX_SAFE_INTEGER ? omitted + 1 : omitted;
+    }
+    window.add(attemptId);
   }
 
   /**
@@ -485,5 +502,6 @@ export class RecordFrame {
     }
     this.readKeys = undefined;
     this.readAttempts = undefined;
+    this.readAttemptsOmitted = undefined;
   }
 }

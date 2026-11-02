@@ -28,7 +28,7 @@ One bundle is one stage's commit: what it wrote, as the log spells it.
 | Field | Type | Required | Rule |
 |---|---|---|---|
 | `runtimeStageId` | string | yes | The stage's address: `[subflowPath/]stageId#executionIndex`. Unique in the run. The reader splits on the LAST `#` and `/`. `~` is reserved. |
-| `trace` | array of rows | yes | The writes, in order. Each row is `{ path, verb, readKeys?, readAttempts? }`. |
+| `trace` | array of rows | yes | The writes, in order. Each row is `{ path, verb, readKeys?, readAttempts?, readAttemptsOmitted? }`. |
 | `overwrite` | object | no | Values for `set` and `append` rows, keyed by path. Plain object. |
 | `updates` | object | no | Values for `merge` rows, keyed by path. Plain object. |
 | `redactedPaths` | array of strings | no | Paths a redaction policy cleared; the fold reports them. |
@@ -41,6 +41,32 @@ the record's own separator (U+001F between segments), and a foreign
 producer that writes only top-level keys never needs it.
 The validator does not coerce another type to a string or impose a new path
 syntax: empty strings and historical string spellings remain accepted.
+
+### Delivered-answer window
+
+Under `writeProvenance: 'reads-prefix'`, `RecordFrame.noteReadAttempt(id)` records a delivered
+canonical call ID separately from state `readKeys`. Each write snapshots the 32 most-recent
+distinct IDs (oldest retained first) and optional `readAttemptsOmitted` together. A retained
+duplicate refreshes recency; an evicted reentry may evict again. The cumulative eviction count
+is not a distinct missing-ancestor count. It saturates at `Number.MAX_SAFE_INTEGER`, meaning
+at least that many evictions. Delta and lossy reconstruction preserve the latest pair, not
+a union. `readKeys` retains its monotonic prefix law. `discard()` clears both source fields,
+leaving attempt notes; `release()` keeps the frame's prefix as before.
+
+Empty/off/zero writer fields are absent. CauseGraph/PROV admission accepts an own safe-integer
+zero and normalizes it away, preserving raw saved bytes. Present undefined, inherited,
+accessor, negative, fractional and unsafe counts are invalid. A positive count requires
+1..32 canonical retained IDs. Legacy rows without a counter retain existing reader budgets;
+absence means no cap recorded, never complete ancestry. This is a membership bound, not an
+absolute byte bound: IDs remain whole and the codec has no string-byte limit. Readers keep
+their own string/work budgets.
+
+A positive counter requires `truncated` coverage. The native record graph and value-free
+PROV do not project external calls and also report `conservative`/`not-collected`. A host
+that projects every retained call must preserve the omission gap; matching notes, references
+or times cannot recover evicted per-write witnesses. State-key-only slices do not project
+external call parents. Neither a retained ID nor an empty state-parent list proves semantic
+use, remote commitment or complete external ancestry.
 
 ## The laws a producer keeps
 

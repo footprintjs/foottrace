@@ -33,9 +33,15 @@ export interface TraceEntry {
    * "depended on no tracked reads" is information, not absence.
    */
   readKeys?: string[];
-  /** Canonical call-attempt answers delivered before this write: a conservative may-have-used ceiling.
-   * Separate from state paths. Absent when empty or writeProvenance is off; never proof of semantic use. */
+  /** Up to 32 most-recent distinct delivered canonical call IDs, oldest retained to newest.
+   * A conservative may-have-used window, not proof of semantic use or complete ancestry.
+   * Whole IDs are retained; membership is bounded, arbitrary identity bytes are not.
+   * Separate from state paths. Absent when empty or writeProvenance is off. */
   readAttempts?: readonly string[];
+  /** Cumulative window evictions since discard, not distinct missing ancestors. Zero is omitted.
+   * Saturates at Number.MAX_SAFE_INTEGER (at least that many); positive means incomplete.
+   * Paired with this write's retained window. Absence on legacy rows means no cap recorded. */
+  readAttemptsOmitted?: number;
   /**
    * - `'set'`    — hard overwrite; `overwrite[path]` holds the full final value.
    * - `'merge'`  — deep union merge; `updates[path]` holds the accumulated delta.
@@ -148,7 +154,8 @@ export type CommitPhase = 'exit' | 'repeat';
  *   `readKeys`: the keys tracked-read BEFORE that write (temporal-prefix
  *   attribution). Cost: one Set-to-array copy per write. Consumed by
  *   `causalChain`'s `edgeAttribution: 'per-write'` and the slice layer.
- *   Delivered call-answer sources use a separate optional `readAttempts` ceiling;
+ *   Delivered call-answer sources use a separate optional bounded `readAttempts` window
+ *   and cumulative `readAttemptsOmitted` eviction count;
  *   the producer records delivery, never transport settlement or semantic use.
  */
 export type WriteProvenanceMode = 'off' | 'reads-prefix';

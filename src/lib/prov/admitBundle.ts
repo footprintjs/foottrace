@@ -1,3 +1,4 @@
+import { readAttemptWindow } from '../evidence/readAttempts.js';
 import { parseAttemptId } from '../ids/attemptId.js';
 import type { CommitBundle, CommitPhase, TraceEntry, UntrackedSource } from '../memory/types.js';
 import { bundleRefusal, isCommitBundle } from '../time-travel/bundles.js';
@@ -63,11 +64,23 @@ export function admitBundle(
         const rawReads = dataField(rawRow, 'readKeys', budget);
         const readKeys = rawReads === undefined ? undefined : dataPaths(rawReads, budget);
         const rawAttempts = dataField(rawRow, 'readAttempts', budget);
+        const window = readAttemptWindow(
+          rawRow,
+          rawAttempts,
+          (value, key) => dataField(value, key, budget),
+          () => new ProvDataRefusal(),
+        );
+        const readAttemptsOmitted = window.omitted;
+        let readAttempts: string[] | undefined;
         if (rawAttempts !== undefined) {
-          const attempts = dataList(rawAttempts, budget.limits.maxReads, budget);
+          const attempts = dataList(rawAttempts, budget.limits.maxReads, budget, window.expectedLength);
           requireSpend(budget, 'reads', attempts.length);
+          readAttempts = [];
           for (const id of attempts) {
-            if (typeof id !== 'string' || !parseAttemptId(dataString(id, budget))) throw new ProvDataRefusal();
+            if (typeof id !== 'string') throw new ProvDataRefusal();
+            const admitted = dataString(id, budget);
+            if (!parseAttemptId(admitted)) throw new ProvDataRefusal();
+            readAttempts.push(admitted);
           }
           if (attempts.length) {
             // This value-free native projection has no external-operation translator.
@@ -75,12 +88,22 @@ export function admitBundle(
             budget.addGap({ code: 'not-collected', commitIdx, rowIdx });
           }
         }
-        rows.push({ commitIdx, rowIdx, path, verb, ...(readKeys === undefined ? {} : { readKeys }) });
+        rows.push({
+          commitIdx,
+          rowIdx,
+          path,
+          verb,
+          ...(readKeys === undefined ? {} : { readKeys }),
+          ...(readAttempts?.length ? { readAttempts } : {}),
+          ...(readAttemptsOmitted === undefined ? {} : { readAttemptsOmitted }),
+        });
       }
-      projected.trace = rows.map(({ path, verb, readKeys }) => ({
+      projected.trace = rows.map(({ path, verb, readKeys, readAttempts, readAttemptsOmitted }) => ({
         path,
         verb,
         ...(readKeys === undefined ? {} : { readKeys }),
+        ...(readAttempts?.length ? { readAttempts } : {}),
+        ...(readAttemptsOmitted === undefined ? {} : { readAttemptsOmitted }),
       }));
     } else projected.trace = rawTrace;
     if (!isCommitBundle(projected)) {

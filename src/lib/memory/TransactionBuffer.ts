@@ -95,7 +95,13 @@ export class TransactionBuffer {
 
   private overwritePatch: MemoryPatch = {};
   private updatePatch: MemoryPatch = {};
-  private opTrace: { path: string; verb: OpVerb; readKeys?: string[]; readAttempts?: readonly string[] }[] = [];
+  private opTrace: {
+    path: string;
+    verb: OpVerb;
+    readKeys?: string[];
+    readAttempts?: readonly string[];
+    readAttemptsOmitted?: number;
+  }[] = [];
   private redactedPaths = new Set<string>();
   /**
    * Paths whose `overwritePatch` value is the caller's own object (9.23.0):
@@ -176,7 +182,7 @@ export class TransactionBuffer {
     readKeysProvider?: () => string[],
     address: readonly string[] = [],
     sourceStaging?: SourceStaging,
-    private readonly readAttemptsProvider?: () => readonly string[],
+    private readonly readAttemptsProvider?: () => Pick<TraceEntry, 'readAttempts' | 'readAttemptsOmitted'> | undefined,
   ) {
     // `base` is the committed generation the stage first touched —
     // immutable-after-swap, the invariant the first-touch view already rests
@@ -199,10 +205,14 @@ export class TransactionBuffer {
     verb: OpVerb;
     readKeys?: string[];
     readAttempts?: readonly string[];
+    readAttemptsOmitted?: number;
   }): typeof op {
     if (this.readKeysProvider) op.readKeys = this.readKeysProvider();
     const attempts = this.readAttemptsProvider?.();
-    if (attempts?.length) op.readAttempts = [...attempts];
+    if (attempts?.readAttempts?.length) {
+      op.readAttempts = [...attempts.readAttempts];
+      if (attempts.readAttemptsOmitted) op.readAttemptsOmitted = attempts.readAttemptsOmitted;
+    }
     return op;
   }
 
@@ -801,7 +811,7 @@ export class TransactionBuffer {
     // the verb law (9.30.0: CLAUDE.md's verb-switch replicas lost two here).
     const emit = (s: Survivor): void => {
       const { path, segments, verbs, before } = s;
-      const prov = provenance(s.readKeys, s.readAttempts);
+      const prov = provenance(s.readKeys, s.readAttempts, s.readAttemptsOmitted);
       if ((byRoot.get(rootOf.get(path) as string) as Survivor[]).length > 1) {
         // Rule 3 — one coherent tree: every member a set of its value.
         trace.push({ path, verb: 'set', ...prov });
@@ -888,7 +898,7 @@ export class TransactionBuffer {
         continue;
       }
       if (!this.changedSinceBase(m.path.split(DELIM))) continue;
-      rows.trace.push({ path: m.path, verb: 'set', ...provenance(m.readKeys, m.readAttempts) });
+      rows.trace.push({ path: m.path, verb: 'set', ...provenance(m.readKeys, m.readAttempts, m.readAttemptsOmitted) });
       changed++;
     }
     const after = _get(this.workingCopy, family.rootSegments);
@@ -900,12 +910,16 @@ export class TransactionBuffer {
         family.rootSegments,
         before,
         after,
-        provenance(root.readKeys, root.readAttempts),
+        provenance(root.readKeys, root.readAttempts, root.readAttemptsOmitted),
         this.markedBelow(family.root),
       );
       return;
     }
-    rows.trace.push({ path: family.root, verb: 'set', ...provenance(root.readKeys, root.readAttempts) });
+    rows.trace.push({
+      path: family.root,
+      verb: 'set',
+      ...provenance(root.readKeys, root.readAttempts, root.readAttemptsOmitted),
+    });
     // The clone the check took (`admission.ts · foldsBack`), when it took one.
     _set(rows.overwrite, family.rootSegments, family.held !== undefined ? family.held.value : structuredClone(after));
   }
@@ -955,15 +969,28 @@ export class TransactionBuffer {
    * moves a re-touched path to the end of the Map's insertion order —
    * preserving last-writer-wins for nested/overlapping paths). Per-write
    * provenance (#P1): the LAST op's readKeys is kept — read prefixes only grow
-   * within a stage, so last == union across the path.
+   * within a stage, so last == union across the path. Delivered-answer windows instead
+   * retain only the last window/count pair; eviction never changes that state-read law.
    */
   private opsByPath(): Map<
     string,
-    { verbs: OpVerb[]; readKeys?: string[]; readAttempts?: readonly string[]; last: number }
+    {
+      verbs: OpVerb[];
+      readKeys?: string[];
+      readAttempts?: readonly string[];
+      readAttemptsOmitted?: number;
+      last: number;
+    }
   > {
     const byPath = new Map<
       string,
-      { verbs: OpVerb[]; readKeys?: string[]; readAttempts?: readonly string[]; last: number }
+      {
+        verbs: OpVerb[];
+        readKeys?: string[];
+        readAttempts?: readonly string[];
+        readAttemptsOmitted?: number;
+        last: number;
+      }
     >();
     for (let i = 0; i < this.opTrace.length; i++) {
       const op = this.opTrace[i];
@@ -972,14 +999,16 @@ export class TransactionBuffer {
         prev.verbs.push(op.verb);
         prev.last = i;
         if (op.readKeys !== undefined) prev.readKeys = op.readKeys;
-        if (op.readAttempts !== undefined) prev.readAttempts = op.readAttempts;
+        // Latest pair replaces the prior window; never union evicted witnesses back in.
+        prev.readAttempts = op.readAttempts;
+        prev.readAttemptsOmitted = op.readAttemptsOmitted;
         byPath.delete(op.path);
         byPath.set(op.path, prev);
       } else {
         byPath.set(op.path, {
           verbs: [op.verb],
           last: i,
-          ...provenance(op.readKeys, op.readAttempts),
+          ...provenance(op.readKeys, op.readAttempts, op.readAttemptsOmitted),
         });
       }
     }
@@ -988,15 +1017,24 @@ export class TransactionBuffer {
 
   /** The net-change filter — identical to 'full' ({@link changedSinceBase}). Survivors keep last-touch order. */
   private netChangeSurvivors(
-    byPath: Map<string, { verbs: OpVerb[]; readKeys?: string[]; readAttempts?: readonly string[]; last: number }>,
+    byPath: Map<
+      string,
+      {
+        verbs: OpVerb[];
+        readKeys?: string[];
+        readAttempts?: readonly string[];
+        readAttemptsOmitted?: number;
+        last: number;
+      }
+    >,
   ): Survivor[] {
     const survivors: Survivor[] = [];
-    for (const [path, { verbs, readKeys, readAttempts, last }] of byPath) {
+    for (const [path, { verbs, readKeys, readAttempts, readAttemptsOmitted, last }] of byPath) {
       const segments = path.split(DELIM);
       if (!this.changedSinceBase(segments)) continue; // no-op or write-then-revert → no net change
       const before = _get(this.baseSnapshot, segments);
       const after = _get(this.workingCopy, segments);
-      survivors.push({ path, segments, verbs, readKeys, readAttempts, last, before, after });
+      survivors.push({ path, segments, verbs, readKeys, readAttempts, readAttemptsOmitted, last, before, after });
     }
     return survivors;
   }
@@ -1028,9 +1066,10 @@ function flattenedTraceRow(op: {
   verb: OpVerb;
   readKeys?: string[];
   readAttempts?: readonly string[];
+  readAttemptsOmitted?: number;
 }): TraceEntry {
   return op.verb === 'delete'
-    ? { path: op.path, verb: 'set' as const, ...provenance(op.readKeys, op.readAttempts) }
+    ? { path: op.path, verb: 'set' as const, ...provenance(op.readKeys, op.readAttempts, op.readAttemptsOmitted) }
     : op;
 }
 
@@ -1038,7 +1077,12 @@ function flattenedTraceRow(op: {
 function provenance(
   readKeys: string[] | undefined,
   readAttempts?: readonly string[],
-): Pick<TraceEntry, 'readKeys' | 'readAttempts'> | undefined {
+  readAttemptsOmitted?: number,
+): Pick<TraceEntry, 'readKeys' | 'readAttempts' | 'readAttemptsOmitted'> | undefined {
   if (readKeys === undefined && !readAttempts?.length) return undefined;
-  return { ...(readKeys !== undefined && { readKeys }), ...(readAttempts?.length && { readAttempts }) };
+  return {
+    ...(readKeys !== undefined && { readKeys }),
+    ...(readAttempts?.length && { readAttempts }),
+    ...(readAttemptsOmitted && { readAttemptsOmitted }),
+  };
 }

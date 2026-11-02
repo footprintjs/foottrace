@@ -1,3 +1,4 @@
+import { readAttemptWindow } from '../evidence/readAttempts.js';
 import { parseAttemptId } from '../ids/attemptId.js';
 /** Admission before the existing readers touch untrusted record fields. Payloads never leave this module's graph. */
 import type { LogAddress } from '../memory/eventPosition.js';
@@ -19,18 +20,19 @@ const recordDescriptors = { translateTrapErrors: true, requireOwnValue: true };
 export function recordOwn(value: unknown, key: string): unknown {
   return ownData(value, key, refuseRecord, recordDescriptors);
 }
-export function names(value: unknown, maximum = 128, path = false): string[] {
-  return recordList(value, maximum).map((item) => recordName(item, path));
+export function names(value: unknown, maximum = 128, path = false, expectedLength?: number): string[] {
+  return recordList(value, maximum, expectedLength).map((item) => recordName(item, path));
 }
 export function recordName(value: unknown, path = false): string {
   return boundedName(value, 1024, refuseRecord, path);
 }
-export function recordList(value: unknown, maximum: number): readonly unknown[] {
+export function recordList(value: unknown, maximum: number, expectedLength?: number): readonly unknown[] {
   return boundedList(value, maximum, (item) => item, {
     refuse: refuseRecord,
     overflow: 'node-limit',
     freeze: false,
     descriptors: recordDescriptors,
+    expectedLength,
   });
 }
 export function addressOf(value: unknown): LogAddress {
@@ -109,13 +111,16 @@ export function bundleOf(value: unknown, idx: number, budget: { left: number }):
     if (!['set', 'merge', 'append', 'delete'].includes(verb as string)) throw new RecordRefusal();
     const readKeys = recordOwn(t, 'readKeys'),
       rawAttempts = recordOwn(t, 'readAttempts');
-    const readAttempts = rawAttempts === undefined ? undefined : names(rawAttempts, 128, true);
+    const window = readAttemptWindow(t, rawAttempts, recordOwn, refuseRecord);
+    const readAttemptsOmitted = window.omitted;
+    const readAttempts = rawAttempts === undefined ? undefined : names(rawAttempts, 128, true, window.expectedLength);
     if (readAttempts?.some((id) => !parseAttemptId(id))) throw new RecordRefusal();
     return {
       path,
       verb: verb as 'set',
       ...(readKeys === undefined ? {} : { readKeys: names(readKeys, 128, true) }),
       ...(readAttempts?.length ? { readAttempts } : {}),
+      ...(readAttemptsOmitted === undefined ? {} : { readAttemptsOmitted }),
     };
   });
   spend(
