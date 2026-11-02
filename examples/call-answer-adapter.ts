@@ -7,7 +7,9 @@ import { buildAttemptId, readStoredRecord, type LogAddress } from 'foottrace';
 import { createRecordGraph, explain, type CauseGraph, type GraphEdge } from 'foottrace/cause';
 import { EventLog, memorySink, RecordFrame, SharedMemory } from 'foottrace/write';
 
-export async function callAnswerAdapterExample() {
+export async function callAnswerAdapterExample(deliveries = 1) {
+  if (!Number.isSafeInteger(deliveries) || deliveries < 1 || deliveries > 1000)
+    throw new RangeError('example deliveries must be 1..1000');
   const address: LogAddress = { logRunId: 'example-run', drillPath: [] };
   const attemptId = buildAttemptId('fetch#0', 1, { ordinal: 1, attempt: 1 });
   const responseRef = 'artifact:response-1';
@@ -17,14 +19,19 @@ export async function callAnswerAdapterExample() {
   const frame = new RecordFrame(state, log);
   frame.useEncoding({ commitValues: 'full', writeProvenance: 'reads-prefix' });
 
-  // The host retained an invocation observation and an ended answer. Neither proves remote dispatch.
-  log.note('attempt-start', { series: 'fetch#0@1.1', attempt: 1, kind: 'call', inputRefs: ['artifact:query-1'] });
-  log.note('attempt', {
-    record: { series: 'fetch#0@1.1', attempt: 1, kind: 'call', outcome: 'ok' },
-    outputRefs: [responseRef],
-  });
-  // A real producer calls this ONLY when its facade delivered the answer in the live owning attempt.
-  frame.noteReadAttempt(attemptId);
+  // The host retained synthetic invocation observations and ended answers. None proves dispatch.
+  for (let ordinal = 1; ordinal <= deliveries; ordinal++) {
+    const series = `fetch#0@1.${ordinal}`;
+    log.note('attempt-start', { series, attempt: 1, kind: 'call', inputRefs: ['artifact:query-1'] });
+    log.note('attempt', {
+      record: { series, attempt: 1, kind: 'call', outcome: 'ok' },
+      outputRefs: [`artifact:response-${ordinal}`],
+    });
+    // A real producer calls this ONLY when its facade delivers the answer in its live owner.
+    frame.noteReadAttempt(buildAttemptId('fetch#0', 1, { ordinal, attempt: 1 }));
+  }
+  // With 34 deliveries the first response still has a matching note, but its per-write witness
+  // has been evicted. Matching references cannot reconstruct that missing delivery evidence.
   frame.write(frame.at([], 'responseRef'), responseRef, 'set');
   frame.commit(() => ({ stage: 'Fetch', stageId: 'fetch', runtimeStageId: 'fetch#0' }));
   frame.release();
@@ -83,6 +90,7 @@ export async function callAnswerAdapterExample() {
     call,
     relatedNotes: related.length,
     witness: [...witness],
+    readAttemptsOmitted: stored.commitLog[0].trace[0].readAttemptsOmitted,
     result,
     meaning: 'The write may have used this delivered answer; neither semantic use nor remote commitment is proved.',
     coverage: 'unknown: no producer delivery/coverage record was supplied',

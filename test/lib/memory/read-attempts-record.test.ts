@@ -28,7 +28,7 @@ describe('per-write call-answer ceilings', () => {
       });
       expect(attempts(bundle.trace.find((r) => r.path === 'before'))).toBeUndefined();
       expect(attempts(bundle.trace.find((r) => r.path === 'middle'))).toEqual([first]);
-      expect(attempts(bundle.trace.find((r) => r.path === 'after'))).toEqual([first, second]);
+      expect(attempts(bundle.trace.find((r) => r.path === 'after'))).toEqual([second, first]);
       expect(bundle.trace.find((r) => r.path === 'middle')?.readKeys).toEqual([first]);
       expect(bundle.trace.find((r) => r.path === 'after')?.readKeys).toEqual([first]);
       const later = run.step('later', (s) => s.set('independent', 3));

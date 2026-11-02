@@ -1,3 +1,4 @@
+import { readAttemptOmissions } from '../evidence/readAttempts.js';
 import { parseAttemptId } from '../ids/attemptId.js';
 /** Admission before the existing readers touch untrusted record fields. Payloads never leave this module's graph. */
 import type { LogAddress } from '../memory/eventPosition.js';
@@ -109,6 +110,7 @@ export function bundleOf(value: unknown, idx: number, budget: { left: number }):
     if (!['set', 'merge', 'append', 'delete'].includes(verb as string)) throw new RecordRefusal();
     const readKeys = recordOwn(t, 'readKeys'),
       rawAttempts = recordOwn(t, 'readAttempts');
+    const readAttemptsOmitted = readAttemptOmissions(t, rawAttempts, recordOwn, refuseRecord);
     const readAttempts = rawAttempts === undefined ? undefined : names(rawAttempts, 128, true);
     if (readAttempts?.some((id) => !parseAttemptId(id))) throw new RecordRefusal();
     return {
@@ -116,6 +118,7 @@ export function bundleOf(value: unknown, idx: number, budget: { left: number }):
       verb: verb as 'set',
       ...(readKeys === undefined ? {} : { readKeys: names(readKeys, 128, true) }),
       ...(readAttempts?.length ? { readAttempts } : {}),
+      ...(readAttemptsOmitted === undefined ? {} : { readAttemptsOmitted }),
     };
   });
   spend(

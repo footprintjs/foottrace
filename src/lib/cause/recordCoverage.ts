@@ -41,6 +41,7 @@ export function collectScopeCoverage(
   if (bundle.redactedPaths.length) addGap('redacted');
   // The native record adapter does not project external call nodes. A host adapter may add
   // admitted call relations, but this view must not call their absence complete ancestry.
+  if (bundle.trace.some((row) => row.readAttemptsOmitted)) addGap('truncated');
   if (bundle.trace.some((row) => row.readAttempts?.length)) {
     addGap('conservative');
     addGap('not-collected');

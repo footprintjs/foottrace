@@ -28,6 +28,7 @@ export type Survivor = {
   verbs: OpVerb[];
   readKeys?: string[];
   readAttempts?: readonly string[];
+  readAttemptsOmitted?: number;
   /** Index in `opTrace` of this path's last op (its last touch). */
   last: number;
   /** Value at this path when the stage began (the append/diff base). */
@@ -54,7 +55,7 @@ export function pushValueRow(
   segments: string[],
   before: unknown,
   value: unknown,
-  prov: Pick<TraceEntry, 'readKeys' | 'readAttempts'> | undefined,
+  prov: Pick<TraceEntry, 'readKeys' | 'readAttempts' | 'readAttemptsOmitted'> | undefined,
   marked = false,
 ): void {
   if (!marked && isStrictArrayPrefix(before, value)) {
