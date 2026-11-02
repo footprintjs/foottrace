@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.10.1 — 2026-11-02
+
+### Fixed
+
+- Verify private Release App identity with a short-lived authenticated App metadata read inside the existing Actions control steps. Keep repository permissions, exact-head approval, source/tree, security, archive and publication-reservation checks unchanged.
+- Recover an unpublished current version through a newly reviewed App proposal before consuming queued fragments, preserve retained release history with nonforce updates, and hold on package-input drift or ambiguous publication evidence.
+
+### Documentation
+
+- Clarify the standalone execution-record and replay role, installation guidance and ecosystem routing, and align package search keywords with those use cases.
+
 ## 1.10.0 — 2026-11-01
 
 ### Added
