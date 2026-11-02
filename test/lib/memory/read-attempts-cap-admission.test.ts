@@ -1,3 +1,6 @@
+import { admitBundle } from '../../../src/lib/prov/admitBundle.js';
+import { ProvBudget } from '../../../src/lib/prov/budget.js';
+import { provOptions } from '../../../src/lib/prov/options.js';
 import { expect, it } from 'vitest';
 import { buildAttemptId } from '../../../src/index.js';
 import { createRecordGraph, explain, type CauseGraph } from '../../../src/cause.js';
@@ -126,4 +129,41 @@ it('keeps an omission gap even when a host projects every retained source', asyn
   const result = await explain(host, writer, { includeBackward: true });
   expect(result.confidence).toBe('incomplete');
   expect(result.gaps.map((g) => g.code)).toContain('truncated');
+});
+
+it.each([33, 0])('Cause refuses a capped list whose admitted length changes from32 to%s', (laterLength) => {
+  const sources = ids(33);
+  let reads = 0;
+  const changing = new Proxy(sources, {
+    getOwnPropertyDescriptor(target, key) {
+      const descriptor = Reflect.getOwnPropertyDescriptor(target, key);
+      return key === 'length' ? { ...descriptor!, value: ++reads === 1 ? 32 : laterLength } : descriptor;
+    },
+  });
+  const f = fixture(changing, 1);
+  expect(() => bundleOf(f.bundle, 0, { left: 10000 })).toThrow();
+});
+
+it.each([33, 0])('PROV refuses a capped list whose admitted length changes from32 to%s', (laterLength) => {
+  const sources = ids(33);
+  let reads = 0;
+  const changing = new Proxy(sources, {
+    getOwnPropertyDescriptor(target, key) {
+      const descriptor = Reflect.getOwnPropertyDescriptor(target, key);
+      return key === 'length' ? { ...descriptor!, value: ++reads === 1 ? 32 : laterLength } : descriptor;
+    },
+  });
+  const f = fixture(changing, 1);
+  const budget = new ProvBudget(provOptions({ base: 'urn:example:cap/' }));
+  expect(admitBundle(f.bundle, 0, [], budget)).toBeUndefined();
+  expect(budget.gaps.some((g) => g.code === 'invalid-data')).toBe(true);
+});
+
+it.each([1, 31, 32])('admits a stable positive window of%s IDs without fixing its length to32', async (length) => {
+  const f = fixture(ids(length), 1);
+  expect(() => bundleOf(f.bundle, 0, { left: 10000 })).not.toThrow();
+  expect(bundleOf(f.bundle, 0, { left: 10000 }).trace[0].readAttempts).toHaveLength(length);
+  const projected = await exportProv(f.snapshot, { base: 'urn:example:cap/' });
+  expect(projected.gaps.some((g) => g.code === 'invalid-data')).toBe(false);
+  expect(projected.gaps.some((g) => g.code === 'truncated')).toBe(true);
 });

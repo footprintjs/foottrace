@@ -1,4 +1,4 @@
-import { readAttemptOmissions } from '../evidence/readAttempts.js';
+import { readAttemptWindow } from '../evidence/readAttempts.js';
 import { parseAttemptId } from '../ids/attemptId.js';
 import type { CommitBundle, CommitPhase, TraceEntry, UntrackedSource } from '../memory/types.js';
 import { bundleRefusal, isCommitBundle } from '../time-travel/bundles.js';
@@ -64,15 +64,16 @@ export function admitBundle(
         const rawReads = dataField(rawRow, 'readKeys', budget);
         const readKeys = rawReads === undefined ? undefined : dataPaths(rawReads, budget);
         const rawAttempts = dataField(rawRow, 'readAttempts', budget);
-        const readAttemptsOmitted = readAttemptOmissions(
+        const window = readAttemptWindow(
           rawRow,
           rawAttempts,
           (value, key) => dataField(value, key, budget),
           () => new ProvDataRefusal(),
         );
+        const readAttemptsOmitted = window.omitted;
         let readAttempts: string[] | undefined;
         if (rawAttempts !== undefined) {
-          const attempts = dataList(rawAttempts, budget.limits.maxReads, budget);
+          const attempts = dataList(rawAttempts, budget.limits.maxReads, budget, window.expectedLength);
           requireSpend(budget, 'reads', attempts.length);
           readAttempts = [];
           for (const id of attempts) {

@@ -2,12 +2,12 @@
 export const READ_ATTEMPT_LIMIT = 32;
 
 /** An own encoded zero is normalized away; positive means a capped, incomplete window. */
-export function readAttemptOmissions(
+export function readAttemptWindow(
   row: unknown,
   attempts: unknown,
   readOwn: (value: unknown, key: string) => unknown,
   refuse: () => Error,
-): number | undefined {
+): { readonly omitted?: number; readonly expectedLength?: number } {
   const count = readOwn(row, 'readAttemptsOmitted');
   if (count === undefined) {
     // Missing is legacy; present undefined and inherited fields are malformed, not missing.
@@ -16,10 +16,10 @@ export function readAttemptOmissions(
     } catch {
       throw refuse();
     }
-    return undefined;
+    return {};
   }
   if (typeof count !== 'number' || !Number.isSafeInteger(count) || count < 0) throw refuse();
-  if (count === 0) return undefined;
+  if (count === 0) return {};
   let array: boolean;
   try {
     array = Array.isArray(attempts);
@@ -30,5 +30,6 @@ export function readAttemptOmissions(
   const length = readOwn(attempts, 'length');
   if (typeof length !== 'number' || !Number.isSafeInteger(length) || length < 1 || length > READ_ATTEMPT_LIMIT)
     throw refuse();
-  return count;
+  // The bounded copy must read the same admitted length, not a later untrusted value.
+  return { omitted: count, expectedLength: length };
 }
