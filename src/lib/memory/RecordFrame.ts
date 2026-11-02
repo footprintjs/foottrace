@@ -1,3 +1,4 @@
+import { parseAttemptId } from '../ids/attemptId.js';
 import { sourceOwner } from '../read-sources/admission.js';
 import { captureFor } from '../read-sources/bindings.js';
 /**
@@ -101,6 +102,7 @@ export class RecordFrame {
    * "last write's prefix == union" hold in delta mode.
    */
   private readKeys?: Set<string>;
+  private readAttempts?: Set<string>;
   #sourceFrame?: SourceFrame;
 
   constructor(state: SharedMemory, log?: EventLog, address: readonly string[] = []) {
@@ -237,6 +239,7 @@ export class RecordFrame {
           readKeysProvider,
           this._address,
           source,
+          readKeysProvider ? () => [...(this.readAttempts ?? [])] : undefined,
         );
         // A getter may have constructed another buffer which this native assignment abandons.
         if (this.buffer || this.#sourceFrame?.staging !== source) {
@@ -393,6 +396,14 @@ export class RecordFrame {
     }
   }
 
+  /** Record a delivered answer's native identity under the existing reads-prefix dial.
+   * The producer owns live-stage/attempt attribution; this port checks canonical grammar only. */
+  noteReadAttempt(attemptId: string): void {
+    if (this.encoding?.writeProvenance !== 'reads-prefix') return;
+    if (!parseAttemptId(attemptId)) throw new TypeError('noteReadAttempt requires a canonical attempt id');
+    (this.readAttempts ??= new Set()).add(attemptId);
+  }
+
   /**
    * Live committed state at `key`: at the frame's address, else at the root — never the stage's own
    * view. Typed as `SharedMemory · getValue` types it, which `StageContext · getRoot` hands on.
@@ -473,5 +484,6 @@ export class RecordFrame {
       captureFor(this.log)?.poison();
     }
     this.readKeys = undefined;
+    this.readAttempts = undefined;
   }
 }

@@ -33,6 +33,9 @@ export interface TraceEntry {
    * "depended on no tracked reads" is information, not absence.
    */
   readKeys?: string[];
+  /** Canonical call-attempt answers delivered before this write: a conservative may-have-used ceiling.
+   * Separate from state paths. Absent when empty or writeProvenance is off; never proof of semantic use. */
+  readAttempts?: readonly string[];
   /**
    * - `'set'`    — hard overwrite; `overwrite[path]` holds the full final value.
    * - `'merge'`  — deep union merge; `updates[path]` holds the accumulated delta.
@@ -145,6 +148,8 @@ export type CommitPhase = 'exit' | 'repeat';
  *   `readKeys`: the keys tracked-read BEFORE that write (temporal-prefix
  *   attribution). Cost: one Set-to-array copy per write. Consumed by
  *   `causalChain`'s `edgeAttribution: 'per-write'` and the slice layer.
+ *   Delivered call-answer sources use a separate optional `readAttempts` ceiling;
+ *   the producer records delivery, never transport settlement or semantic use.
  */
 export type WriteProvenanceMode = 'off' | 'reads-prefix';
 

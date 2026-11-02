@@ -23,5 +23,19 @@ explain(graph, 1);
 
 import type { RecordReadSources, RecordScope } from 'foottrace/cause';
 declare const sources: RecordReadSources;
-const sourceScope: RecordScope = { address: { logRunId: 'run', drillPath: [] }, commitLog: [], initialState: {}, readSources: sources };
+const sourceScope: RecordScope = {
+  address: { logRunId: 'run', drillPath: [] },
+  commitLog: [],
+  initialState: {},
+  readSources: sources,
+};
 void sourceScope;
+
+import type { TraceEntry } from 'foottrace';
+import { RecordFrame } from 'foottrace/write';
+declare const answerFrame: RecordFrame;
+answerFrame.noteReadAttempt('fetch#0@1.1@1');
+const answerRow: TraceEntry = { path: 'result', verb: 'set', readAttempts: ['fetch#0@1.1@1'] };
+// @ts-expect-error Answer ceilings are immutable through the public record type.
+answerRow.readAttempts?.push('fetch#0@1.2@1');
+void answerRow;

@@ -148,6 +148,16 @@ parseAttemptId('charge#4'); // undefined — a stage execution, not an attempt
 
 The parser reads from the right, so a stage ID may contain `@` or `.` and no character is newly reserved. See [ids/](src/lib/ids/README.md#attempt-ids-110).
 
+### Delivered call-answer ceilings
+
+`TraceEntry.readAttempts?: readonly string[]` keeps canonical call-attempt IDs separate from the state paths in `readKeys`. Under the existing `writeProvenance: 'reads-prefix'` dial, a producer calls `RecordFrame.noteReadAttempt(id)` when its facade delivers the answer to the live owning stage attempt. Each later write snapshots that prefix. Empty/off fields are absent, and `discard()` clears the prefix. A later stage starts its own prefix and follows ordinary state reads instead.
+
+The producer owns delivery and scope attribution: transport settlement alone does not establish delivery. A delivered but unused answer may over-approximate; this is **may have used**, never proof of semantic use, successful work, receiver commitment or a write count. IDs are qualified by their actual log address; format admission is not authentication.
+
+The [offline host-adapter example](examples/call-answer-adapter.ts) reopens stored observations and uses existing `CauseGraph` ports. It is a local synthetic producer fixture with no provider calls. Missing producer evidence stays unknown. The native record graph and value-free PROV projection disclose unprojected call ancestry rather than inventing external nodes. Stored notes remain opaque, and `memorySink` supplies no durability guarantee.
+
+`causalChain` and `sliceForKey` remain **state-key-only** views: they do not project `readAttempts` into parents. An empty `parents` array therefore does **not** rule out external dependencies. Inspect the saved writer's `trace[].readAttempts` and use a host `CauseGraph` adapter for call context; the example retains `conservative` and `not-collected` gaps.
+
 ## Paths are not interchangeable
 
 - `idPathSegments` (root entry) splits runtime IDs on `/` and drops empty segments. `isExecutionKey` detects `#`; it is not a complete validator.

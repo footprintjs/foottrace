@@ -1,3 +1,4 @@
+import { parseAttemptId } from '../ids/attemptId.js';
 import type { CommitBundle, CommitPhase, TraceEntry, UntrackedSource } from '../memory/types.js';
 import { bundleRefusal, isCommitBundle } from '../time-travel/bundles.js';
 import {
@@ -61,6 +62,19 @@ export function admitBundle(
         const path = dataPath(dataField(rawRow, 'path', budget), budget);
         const rawReads = dataField(rawRow, 'readKeys', budget);
         const readKeys = rawReads === undefined ? undefined : dataPaths(rawReads, budget);
+        const rawAttempts = dataField(rawRow, 'readAttempts', budget);
+        if (rawAttempts !== undefined) {
+          const attempts = dataList(rawAttempts, budget.limits.maxReads, budget);
+          requireSpend(budget, 'reads', attempts.length);
+          for (const id of attempts) {
+            if (typeof id !== 'string' || !parseAttemptId(dataString(id, budget))) throw new ProvDataRefusal();
+          }
+          if (attempts.length) {
+            // This value-free native projection has no external-operation translator.
+            budget.addGap({ code: 'conservative', commitIdx, rowIdx });
+            budget.addGap({ code: 'not-collected', commitIdx, rowIdx });
+          }
+        }
         rows.push({ commitIdx, rowIdx, path, verb, ...(readKeys === undefined ? {} : { readKeys }) });
       }
       projected.trace = rows.map(({ path, verb, readKeys }) => ({

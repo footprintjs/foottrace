@@ -1,3 +1,4 @@
+import { parseAttemptId } from '../ids/attemptId.js';
 /** Admission before the existing readers touch untrusted record fields. Payloads never leave this module's graph. */
 import type { LogAddress } from '../memory/eventPosition.js';
 import type { CommitBundle } from '../memory/types.js';
@@ -106,10 +107,21 @@ export function bundleOf(value: unknown, idx: number, budget: { left: number }):
       path = recordName(recordOwn(t, 'path'), true),
       verb = recordOwn(t, 'verb');
     if (!['set', 'merge', 'append', 'delete'].includes(verb as string)) throw new RecordRefusal();
-    const readKeys = recordOwn(t, 'readKeys');
-    return { path, verb: verb as 'set', ...(readKeys === undefined ? {} : { readKeys: names(readKeys, 128, true) }) };
+    const readKeys = recordOwn(t, 'readKeys'),
+      rawAttempts = recordOwn(t, 'readAttempts');
+    const readAttempts = rawAttempts === undefined ? undefined : names(rawAttempts, 128, true);
+    if (readAttempts?.some((id) => !parseAttemptId(id))) throw new RecordRefusal();
+    return {
+      path,
+      verb: verb as 'set',
+      ...(readKeys === undefined ? {} : { readKeys: names(readKeys, 128, true) }),
+      ...(readAttempts?.length ? { readAttempts } : {}),
+    };
   });
-  spend(budget, trace.length + trace.reduce((n, t) => n + (t.readKeys?.length ?? 0), 0) + 1);
+  spend(
+    budget,
+    trace.length + trace.reduce((n, t) => n + (t.readKeys?.length ?? 0) + (t.readAttempts?.length ?? 0), 0) + 1,
+  );
   const overwrite = dataCopy(recordOwn(value, 'overwrite'), budget),
     updates = dataCopy(recordOwn(value, 'updates'), budget);
   if (

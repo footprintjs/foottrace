@@ -9,6 +9,7 @@
  */
 
 import type { Rows } from './admission.js';
+import type { TraceEntry } from './types.js';
 import { nativeSet as _set } from './pathOps.js';
 import { deepEqual, DELIM } from './utils.js';
 
@@ -26,6 +27,7 @@ export type Survivor = {
   segments: string[];
   verbs: OpVerb[];
   readKeys?: string[];
+  readAttempts?: readonly string[];
   /** Index in `opTrace` of this path's last op (its last touch). */
   last: number;
   /** Value at this path when the stage began (the append/diff base). */
@@ -52,7 +54,7 @@ export function pushValueRow(
   segments: string[],
   before: unknown,
   value: unknown,
-  prov: { readKeys: string[] } | undefined,
+  prov: Pick<TraceEntry, 'readKeys' | 'readAttempts'> | undefined,
   marked = false,
 ): void {
   if (!marked && isStrictArrayPrefix(before, value)) {
