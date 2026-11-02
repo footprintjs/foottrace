@@ -94,9 +94,11 @@ test('controls check out exactly the event source, without persisted credentials
     jobBlock('proposal').indexOf('actions/checkout@') <
       jobBlock('proposal').indexOf('actions/create-github-app-token@'),
   );
-  assert.doesNotMatch(jobBlock('release'), /id-token: write|RELEASE_APP_PRIVATE_KEY/);
-  assert.doesNotMatch(jobBlock('publish'), /contents: write|RELEASE_APP_PRIVATE_KEY/);
-  assert.equal(publish.match(/secrets\.RELEASE_APP_PRIVATE_KEY/g)?.length, 1);
+  assert.doesNotMatch(jobBlock('release'), /id-token: write/);
+  assert.doesNotMatch(jobBlock('publish'), /contents: write/);
+  // The private identity read is step-scoped in all three fresh-authority consumers.
+  // app-identity.test.mjs separately pins every placement and unchanged permission map.
+  assert.equal(publish.match(/secrets\.RELEASE_APP_PRIVATE_KEY/g)?.length, 4);
   assert.equal(publish.match(/GH_TOKEN: \$\{\{ steps\.app\.outputs\.token \}\}/g)?.length, 1);
   for (const line of publish.split('\n').filter((l) => /^\s*- uses:/.test(l)))
     assert.match(line, /@[a-f0-9]{40}(?: |$)/);

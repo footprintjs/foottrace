@@ -1,6 +1,6 @@
 {
   "name": "foottrace",
-  "version": "1.9.0",
+  "version": "1.10.0",
   "type": "commonjs",
   "description": "Execution records, replay, time travel and honest attribution — independent of the engine that produced them",
   "license": "MIT",
@@ -133,5 +133,19 @@
     "publint": "^0.3.0",
     "typescript": "~5.4.5",
     "vitest": "4.1.11"
-  }
+  },
+  "keywords": [
+    "typescript",
+    "execution-record",
+    "execution-trace",
+    "provenance",
+    "replay",
+    "time-travel",
+    "debugging",
+    "causal-slice",
+    "data-lineage",
+    "json-ld",
+    "prov-o",
+    "footprintjs"
+  ]
 }
