@@ -16,9 +16,8 @@ readers; workflow execution and user interfaces stay in separate packages.
 npm install foottrace
 ```
 
-The published package is currently 1.8.0. The `foottrace/metadata` entry point documented below is on source main
-and is not available in that registry release. Use the documentation matching the version you install; source
-version numbers do not establish registry availability.
+Use the documentation matching the version you install. A source checkout may describe later additions;
+source version numbers alone do not establish npm availability.
 
 ## Entry points
 
@@ -50,8 +49,6 @@ and supported by this reader. Keep its gaps with the document. See the
 and the [runnable example](https://github.com/footprintjs/foottrace/blob/main/examples/post-execution/prov/01-export-prov.ts).
 
 ## Value-free trace metadata (since 1.9.0)
-
-**Source main only; registry release pending.** This entry point is not in the published 1.8.0 package.
 
 `readTraceMetadata` and `traceMetadata` on `foottrace/metadata` admit a bounded,
 value-free source and inspect its path occurrences and explicitly anchored read
