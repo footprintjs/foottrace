@@ -6,6 +6,19 @@ This package extracts FootPrint's established record layer. It does not introduc
 
 Foottrace owns the record layer used by footprintjs 10. Older stored records remain readable without installing their original engine.
 
+**Start here:** [Install](#install) · [Write and replay](#write-and-replay) · [Record contract](docs/guides/record-contract.md).
+Part of the [FootprintJS ecosystem](https://footprintjs.github.io/): this package owns execution records and their
+readers; workflow execution and user interfaces stay in separate packages.
+
+## Install
+
+```bash
+npm install foottrace
+```
+
+Use the documentation matching the version you install. A source checkout may describe later additions;
+source version numbers alone do not establish npm availability.
+
 ## Entry points
 
 | Import | Responsibility |
