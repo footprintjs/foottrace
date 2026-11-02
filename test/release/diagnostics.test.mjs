@@ -518,16 +518,16 @@ test('diagnostic dirty-checkout and native EEXIST remain exact direct-call contr
   }
 });
 test('diagnostic verify retains prior output if the subsequent summary fails', async () => {
-  const f = authorityApiFixture(),
+  const f = proposalApiFixture(),
     effects = [];
-  const api = async () => {
-    throw Object.assign(new Error('not-found'), { status: 404 });
-  };
+  f.tags.clear(); f.releases.clear(); f.registry.clear(); f.latest = '1.7.0';
+  const pinned = await runtime.plan(f.api, { ...f.context, verify: true }, f.options);
   await rejectCode(
     () =>
       runner.runCli(['verify'], {
-        env: env(f),
-        api,
+        env: { ...env(f), VERIFY_ONLY: 'true', PLAN_JSON: JSON.stringify(pinned) },
+        api: f.api,
+        fetcher: f.fetcher,
         io: {
           head: () => f.context.sha,
           appendOutput: (p, b) => effects.push(b),
@@ -899,7 +899,7 @@ for (const [role, change, stage, code] of [
   });
 test('diagnostic prepare retains first artifact after second write fails', async () => {
   const f = proposalApiFixture(),
-    pinned = await runtime.plan(f.api, f.context),
+    pinned = await runtime.plan(f.api, f.context, f.options),
     effects = [];
   const api = async (m, r, b) => {
     if (r.endsWith('/actions/runs/500'))
@@ -929,8 +929,9 @@ test('diagnostic prepare retains first artifact after second write fails', async
   await rejectCode(
     () =>
       runner.runCli(['prepare'], {
-        env: { ...env(f), PLAN_JSON: JSON.stringify(pinned) },
+        env: { ...env(f), APP_SLUG: f.options.settings.slug, APP_CLIENT_ID: f.options.settings.clientId, PLAN_JSON: JSON.stringify(pinned) },
         api,
+        fetcher: f.fetcher,
         io: {
           head: () => f.context.sha,
           write: (name, bytes) => {

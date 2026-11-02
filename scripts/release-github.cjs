@@ -1,5 +1,6 @@
 'use strict';
-const { prepareRelease } = require('./release-prepare.cjs');
+const preparation = require('./release-prepare.cjs');
+const { prepareRelease } = preparation;
 const control = require('./release-control.cjs');
 const { appRequest } = require('./release-app-auth.cjs');
 const fail = (code) => {
@@ -104,6 +105,14 @@ const LEGACY_CODES = new Set([
   'tag-shape',
   'verify-unreleased-main',
   'version',
+  'recovery-source',
+  'recovery-intent',
+  'recovery-queue',
+  'recovery-payload',
+  'recovery-lineage',
+  'recovery-state',
+  'recovery-phase',
+  'recovery-ancestry',
 ]);
 const OPERATIONS = new Set([
   'authority-main',
@@ -281,66 +290,321 @@ async function content(api, context, path) {
     fail('source-content');
   }
 }
-async function sourceInput(api, context) {
-  const commit = (await api('GET', `${prefix(context)}/git/commits/${context.sha}`)).data;
-  if (commit.sha !== context.sha || !control.validSha(commit.tree?.sha)) fail('source-commit');
-  const tree = (await api('GET', `${prefix(context)}/git/trees/${commit.tree.sha}?recursive=1`)).data;
-  if (tree.truncated !== false || !Array.isArray(tree.tree)) fail('source-tree');
-  const files = {};
-  for (const path of ['package.json', 'package-lock.json', 'CHANGELOG.md', 'README.md', 'docs/metadata.md'])
-    files[path] = await content(api, context, path);
-  const fragments = {};
-  for (const row of tree.tree.filter((x) => x.path.startsWith('.changes/') && x.path !== '.changes/README.md')) {
-    const name = row.path.slice(9);
-    if (
-      row.type !== 'blob' ||
-      row.mode !== '100644' ||
-      !/^[a-z0-9][a-z0-9-]*\.md$/.test(name) ||
-      Object.keys(fragments).length >= 100
-    )
-      fail('fragment-path');
-    fragments[name] = await content(api, context, row.path);
-  }
-  const date = new Date(commit.committer?.date).toISOString().slice(0, 10);
-  const prepared = prepareRelease({ files, fragments, date });
-  return { commit, files, fragments, date, prepared };
+// A view caches immutable objects only during one read phase. Every mutation phase
+// creates a fresh view and repeats current-main and publication checks.
+function sourceView(api, context) {
+  const commits = new Map(), blobs = new Map(), inventories = new Map();
+  const rawPaths = new Set(['package.json', 'package-lock.json', 'CHANGELOG.md', 'README.md', 'docs/metadata.md',
+    '.github/workflows/publish.yml', 'scripts/release-app-auth.cjs', 'scripts/release-runner.cjs',
+    'test/release/app-identity.test.mjs', 'test/release/archive.test.mjs', 'test/release/diagnostics.test.mjs']);
+  let totalBytes = 0;
+  const commit = async (id) => {
+    if (!control.validSha(id)) fail('source-sha');
+    if (!commits.has(id)) {
+      if (commits.size >= 512) fail('recovery-source');
+      const value = (await api('GET', `${prefix(context)}/git/commits/${id}`)).data;
+      if (value.sha !== id || !control.validSha(value.tree?.sha) || !Array.isArray(value.parents) ||
+        value.parents.length > 2 || value.parents.some((p) => !control.validSha(p.sha))) fail('source-commit');
+      commits.set(id, value);
+    }
+    return commits.get(id);
+  };
+  const inventory = async (id) => {
+    if (inventories.has(id)) return inventories.get(id);
+    const c = await commit(id), result = new Map();
+    const tree = (await api('GET', `${prefix(context)}/git/trees/${c.tree.sha}?recursive=1`)).data;
+    if (tree.sha !== c.tree.sha || tree.truncated !== false || !Array.isArray(tree.tree) || tree.tree.length > 4096)
+      fail('source-tree');
+    const seen = new Set();
+    for (const row of tree.tree) {
+      if (typeof row.path !== 'string' || seen.has(row.path) || !control.validSha(row.sha)) fail('source-tree');
+      seen.add(row.path);
+      if (row.type === 'tree' && row.mode === '040000') continue;
+      if (row.type !== 'blob' || !['100644', '100755'].includes(row.mode)) fail('source-tree');
+      // The complete immutable path/OID/mode inventory is the existing Git
+      // source identity basis. Fetch raw bytes only for semantic admission and
+      // the finite byte-transition exceptions, never a compare.files subset.
+      const needsBytes = rawPaths.has(row.path) || row.path.startsWith('.changes/') || row.path.startsWith('.release/');
+      if (needsBytes && !blobs.has(row.sha)) {
+        const value = (await api('GET', `${prefix(context)}/git/blobs/${row.sha}`)).data;
+        if (value.sha !== row.sha || value.encoding !== 'base64' || typeof value.content !== 'string' ||
+          !Number.isSafeInteger(value.size) || value.size < 0 || value.size > 2 * 1024 * 1024 ||
+          !/^[A-Za-z0-9+/=\r\n]*$/.test(value.content) || value.content.length > 3 * 1024 * 1024) fail('source-content');
+        const bytes = Buffer.from(value.content, 'base64');
+        totalBytes += bytes.length;
+        if (bytes.length !== value.size || totalBytes > 128 * 1024 * 1024 ||
+          preparation.gitObject('blob', bytes) !== row.sha) fail('source-content');
+        blobs.set(row.sha, bytes);
+      }
+      result.set(row.path, { sha: row.sha, mode: row.mode, ...(needsBytes ? { bytes: blobs.get(row.sha) } : {}) });
+    }
+    if (preparation.treeOid(result) !== c.tree.sha) fail('source-tree');
+    inventories.set(id, result);
+    return result;
+  };
+  return { commit, inventory };
 }
-async function plan(api, context) {
-  if (
-    !['push', 'workflow_dispatch'].includes(context.eventName) ||
-    context.ref !== 'refs/heads/main' ||
-    !control.validSha(context.sha)
-  )
-    fail('event');
+function packageIdentity(inventory, version) {
+  const raw = (name) => {
+    const row = inventory.get(name);
+    if (!row || row.mode !== '100644') fail('package-version');
+    return preparation.decodeRaw(row.bytes);
+  };
+  const pkg = parseJson('package-json', raw('package.json')),
+    lock = parseJson('lock-json', raw('package-lock.json'));
+  preparation.parseVersion(pkg.version);
+  if (pkg.name !== 'foottrace' || lock.name !== pkg.name || lock.version !== pkg.version ||
+    lock.packages?.['']?.name !== pkg.name || lock.packages[''].version !== pkg.version ||
+    (version !== undefined && pkg.version !== version)) fail('package-version');
+  return pkg;
+}
+async function sourceInput(api, context, view = sourceView(api, context)) {
+  const commit = await view.commit(context.sha), inventory = await view.inventory(context.sha), files = {}, fragments = {};
+  for (const path of ['package.json', 'package-lock.json', 'CHANGELOG.md', 'README.md', 'docs/metadata.md']) {
+    const row = inventory.get(path);
+    if (!row || row.mode !== '100644') fail('source-content');
+    files[path] = preparation.decodeRaw(row.bytes);
+  }
+  const pkg = packageIdentity(inventory), queue = preparation.fragmentQueue(inventory);
+  for (const row of queue) fragments[row.path.slice(9)] = preparation.decodeRaw(inventory.get(row.path).bytes);
+  const intents = preparation.admitIntentNamespace(inventory, pkg.version, context.repository);
+  const date = new Date(commit.committer?.date).toISOString().slice(0, 10);
+  return { commit, inventory, files, fragments, queue, intents, date, pkg, view };
+}
+async function requireAncestor(api, context, from, to) {
+  if (![from, to].every(control.validSha)) fail('recovery-ancestry');
+  const seen = new Set(); let counts;
+  for (let page = 1; page <= 10; page++) {
+    const value = (await api('GET', `${prefix(context)}/compare/${from}...${to}?per_page=100&page=${page}`)).data;
+    const tuple = [value.status, value.ahead_by, value.behind_by, value.total_commits];
+    if (value.base_commit?.sha !== from || value.merge_base_commit?.sha !== from ||
+      value.behind_by !== 0 || !Number.isSafeInteger(value.ahead_by) || value.ahead_by < 0 || value.ahead_by > 1000 ||
+      value.total_commits !== value.ahead_by || !Array.isArray(value.commits) || value.commits.length > 100 ||
+      (counts && JSON.stringify(counts) !== JSON.stringify(tuple))) fail('recovery-ancestry');
+    counts = tuple;
+    if (from === to) {
+      if (page !== 1 || value.status !== 'identical' || value.ahead_by !== 0 || value.commits.length) fail('recovery-ancestry');
+      return;
+    }
+    if (value.status !== 'ahead' || value.ahead_by === 0) fail('recovery-ancestry');
+    for (const c of value.commits) {
+      if (!control.validSha(c.sha) || c.sha === from || seen.has(c.sha)) fail('recovery-ancestry');
+      seen.add(c.sha);
+    }
+    if (seen.size > value.total_commits) fail('recovery-ancestry');
+    if (seen.size === value.total_commits) {
+      if (value.commits.at(-1)?.sha !== to) fail('recovery-ancestry');
+      return;
+    }
+    if (value.commits.length !== 100) fail('recovery-ancestry');
+  }
+  fail('recovery-ancestry');
+}
+async function publicBot(api, settings) {
+  if (!/^[a-z0-9-]+$/.test(settings?.slug ?? '')) fail('app-settings');
+  const bot = (await api('GET', `/users/${enc(settings.slug + '[bot]')}`)).data;
+  if (bot.login !== settings.slug + '[bot]' || bot.type !== 'Bot' || !Number.isSafeInteger(bot.id) || bot.id <= 0)
+    fail('recovery-lineage');
+  return bot;
+}
+async function mergedLineage(api, context, view, bot, prNumber, version) {
+  if (!Number.isSafeInteger(prNumber) || prNumber <= 0) fail('recovery-lineage');
+  const p = (await api('GET', `${prefix(context)}/pulls/${prNumber}`)).data;
+  if (p.number !== prNumber || p.state !== 'closed' || !p.merged_at || p.merged !== true ||
+    !control.sameRepo(p.base?.repo, context.repository) || !control.sameRepo(p.head?.repo, context.repository) ||
+    p.base.ref !== 'main' || p.head.ref !== 'release/next' || p.user?.id !== bot.id ||
+    p.user.type !== 'Bot' || p.user.login !== bot.login || !control.validSha(p.merge_commit_sha) ||
+    !control.validSha(p.head.sha) || !control.validSha(p.base.sha)) fail('recovery-lineage');
+  const h = await view.commit(p.head.sha), s = await view.commit(p.merge_commit_sha);
+  if (h.tree.sha !== s.tree.sha) fail('recovery-lineage');
+  packageIdentity(await view.inventory(p.head.sha), version);
+  packageIdentity(await view.inventory(p.merge_commit_sha), version);
+  return { pr: p.number, head: h.sha, tree: h.tree.sha, merge: s.sha };
+}
+async function linkedLineage(api, context, view, bot, source, version) {
+  const rows = await pages(api, `${prefix(context)}/commits/${source}/pulls`);
+  const matches = rows.filter((p) => p.merge_commit_sha === source && p.head?.ref === 'release/next');
+  if (matches.length !== 1) fail('recovery-lineage');
+  return mergedLineage(api, context, view, bot, matches[0].number, version);
+}
+function exactData(a, b, code = 'recovery-intent') {
+  if (JSON.stringify(a) !== JSON.stringify(b)) fail(code);
+}
+function addedInventory(base, path, bytes) {
+  if (base.has(path)) fail('recovery-intent');
+  return new Map([...base, [path, { mode: '100644', sha: preparation.gitObject('blob', bytes), bytes }]]);
+}
+// Every active record is rebound to its immutable proposal base and App lineage.
+// Valid old-version records are schema/chain checked but confer no authority.
+async function activeHistory(api, context, input, bot) {
+  const chain = input.intents.active;
+  for (let i = 0; i < chain.length; i++) {
+    const record = chain[i], d = record.data, base = await input.view.inventory(d.base.sha),
+      c = await input.view.commit(d.base.sha);
+    if (c.tree.sha !== d.base.tree) fail('recovery-intent');
+    const baseRecords = preparation.admitIntentNamespace(base, d.version, context.repository);
+    if (baseRecords.active.length !== i) fail('recovery-intent');
+    for (let j = 0; j < i; j++) {
+      if (baseRecords.active[j].path !== chain[j].path || baseRecords.active[j].sha256 !== chain[j].sha256) fail('recovery-intent');
+    }
+    exactData(preparation.fragmentQueue(base), d.queuedFragments, 'recovery-queue');
+    const predecessor = await mergedLineage(api, context, input.view, bot, d.predecessor.pr, d.version);
+    exactData(predecessor, d.predecessor);
+    const origin = await mergedLineage(api, context, input.view, bot, d.origin.pr, d.version);
+    exactData(origin, d.origin);
+    await requireAncestor(api, context, predecessor.merge, d.base.sha);
+    if (i) {
+      preparation.requireQueueSubset(chain[i - 1].data.queuedFragments, d.queuedFragments);
+      // Immediate predecessor must be the App merge of the preceding intent.
+      await requireRecoveryMerge(api, context, input.view, bot, chain[i - 1], predecessor);
+    }
+    const original = await input.view.inventory(origin.head);
+    preparation.requirePublicationClosure(original, base, new Set(baseRecords.records.map((x) => x.path)));
+  }
+}
+async function requireRecoveryMerge(api, context, view, bot, record, lineage) {
+  const d = record.data, head = await view.commit(lineage.head), merged = await view.commit(lineage.merge),
+    base = await view.inventory(d.base.sha), candidate = await view.inventory(head.sha);
+  exactData(head.parents.map((p) => p.sha), [d.base.sha, d.predecessor.head]);
+  const expected = addedInventory(base, record.path, preparation.intentBytes(d, context.repository));
+  if (preparation.treeOid(expected) !== head.tree.sha || merged.tree.sha !== head.tree.sha ||
+    preparation.treeOid(candidate) !== head.tree.sha) fail('recovery-intent');
+  const pr = (await api('GET', `${prefix(context)}/pulls/${lineage.pr}`)).data;
+  if (pr.base.sha !== d.base.sha) fail('recovery-lineage');
+  await requireAncestor(api, context, d.base.sha, lineage.merge);
+}
+async function retainedProposal(api, context, view, bot, version) {
+  const base = prefix(context), ref = await optional(api, `${base}/git/ref/heads/release/next`);
+  const pulls = await pages(api, `${base}/pulls?state=open&head=footprintjs:release/next&base=main`);
+  if (!ref || ref.object?.type !== 'commit' || !control.validSha(ref.object.sha) || pulls.length > 1) fail('proposal-existing');
+  const head = await view.commit(ref.object.sha);
+  if (pulls.length) {
+    const p = pulls[0];
+    if (p.state !== 'open' || p.head?.sha !== head.sha || p.base?.sha !== context.sha ||
+      p.head.ref !== 'release/next' || p.base.ref !== 'main' || p.user?.id !== bot.id || p.user.type !== 'Bot' ||
+      p.user.login !== bot.login || !control.sameRepo(p.head.repo, context.repository) || !control.sameRepo(p.base.repo, context.repository)) fail('proposal-existing');
+    return { head, open: p };
+  }
+  const closed = await pages(api, `${base}/pulls?state=closed&head=footprintjs:release/next&base=main`);
+  const matches = closed.filter((p) => p.head?.sha === head.sha && p.merged_at);
+  if (matches.length !== 1) fail('proposal-existing');
+  const predecessor = await mergedLineage(api, context, view, bot, matches[0].number, version);
+  if (predecessor.head !== head.sha) fail('proposal-existing');
+  await requireAncestor(api, context, predecessor.merge, context.sha);
+  return { head, predecessor };
+}
+async function recoveryPreparation(api, context, input, bot) {
+  await activeHistory(api, context, input, bot);
+  const prior = input.intents.active.at(-1), retained = await retainedProposal(api, context, input.view, bot, input.pkg.version);
+  // An exact open recovery head describes its predecessor inside the new record.
+  let predecessor = retained.predecessor;
+  if (retained.open) {
+    const candidate = await input.view.inventory(retained.head.sha), records = preparation.admitIntentNamespace(candidate, input.pkg.version, context.repository);
+    const record = records.active.at(-1);
+    if (!record || record.data.sequence !== (prior?.data.sequence ?? 0) + 1) fail('proposal-existing');
+    predecessor = await mergedLineage(api, context, input.view, bot, record.data.predecessor.pr, input.pkg.version);
+  }
+  const origin = prior?.data.origin ?? predecessor;
+  if (prior) {
+    await requireRecoveryMerge(api, context, input.view, bot, prior, predecessor);
+    preparation.requireQueueSubset(prior.data.queuedFragments, input.queue);
+  }
+  const original = await input.view.inventory(origin.head);
+  preparation.requirePublicationClosure(original, input.inventory, new Set(input.intents.records.map((x) => x.path)));
+  if (!input.queue.length) fail('recovery-queue');
+  const prepared = preparation.prepareRecovery({ repository: context.repository, sha: context.sha,
+    tree: input.commit.tree.sha, version: input.pkg.version, origin, predecessor, previous: prior,
+    queue: input.queue, notes: await sourceReleaseNotes(api, context, input.pkg.version) });
+  const [[path, text]] = Object.entries(prepared.updates), expectedTree = preparation.treeOid(addedInventory(input.inventory, path, Buffer.from(text)));
+  if (retained.open) {
+    exactData(retained.head.parents.map((p) => p.sha), [context.sha, predecessor.head], 'proposal-existing');
+    if (retained.head.tree.sha !== expectedTree) fail('proposal-existing');
+  }
+  return { prepared, expectedTree, predecessor, retained };
+}
+async function currentRecovery(api, context, input, bot) {
+  const record = input.intents.active.at(-1);
+  if (!record) return false;
+  await activeHistory(api, context, input, bot);
+  const lineage = await linkedLineage(api, context, input.view, bot, context.sha, input.pkg.version);
+  await requireRecoveryMerge(api, context, input.view, bot, record, lineage);
+  exactData(input.queue, record.data.queuedFragments, 'recovery-queue');
+  preparation.requirePublicationClosure(await input.view.inventory(record.data.origin.head), input.inventory,
+    new Set(input.intents.records.map((x) => x.path)));
+  return true;
+}
+async function requireRecoverySource(api, context, identity, options) {
+  // Ordinary releases retain their original authority/grant contracts. A complete
+  // immutable tree decides whether additional recovery-data obligations exist;
+  // neither a plan flag nor artifact omission can suppress those obligations.
+  const tree = (await api('GET', `${prefix(context)}/git/trees/${identity.tree}?recursive=1`)).data;
+  if (tree.sha !== identity.tree || tree.truncated !== false || !Array.isArray(tree.tree) || tree.tree.length > 4096)
+    fail('source-tree');
+  const paths = new Set();
+  for (const row of tree.tree) {
+    if (typeof row.path !== 'string' || Buffer.byteLength(row.path) > 1024 || /[\x00-\x1f\x7f\\]/.test(row.path) ||
+      row.path.split('/').some((part) => !part || part === '.' || part === '..') || paths.has(row.path) || !control.validSha(row.sha) ||
+      !((row.type === 'blob' && ['100644', '100755'].includes(row.mode)) ||
+        (row.type === 'tree' && row.mode === '040000'))) fail('source-tree');
+    paths.add(row.path);
+  }
+  if (![...paths].some((path) => path.startsWith('.release/'))) return false;
+  const input = await sourceInput(api, context);
+  if (input.commit.tree.sha !== identity.tree || input.pkg.version !== identity.version) fail('identity-changed');
+  if (input.intents.active.length) await currentRecovery(api, context, input, await publicBot(api, options.settings));
+  await assertCurrentMain(api, context);
+  return input.intents.active.length > 0;
+}
+async function plan(api, context, options = {}) {
+  if (!['push', 'workflow_dispatch'].includes(context.eventName) || context.ref !== 'refs/heads/main' || !control.validSha(context.sha)) fail('event');
   const repo = (await api('GET', prefix(context))).data;
   if (!control.sameRepo(repo, context.repository)) fail('repository');
   await assertCurrentMain(api, context);
-  const input = await sourceInput(api, context),
-    pkg = parseJson('package-json', input.files['package.json']);
-  if (pkg.name !== 'foottrace') fail('package');
-  if (context.verify === true && input.prepared) fail('verify-unreleased-main');
-  const mode = context.verify === true ? 'verify' : input.prepared ? 'prepare' : 'publish';
-  return {
-    mode,
-    repository: context.repository,
-    sha: context.sha,
-    tree: input.commit.tree.sha,
-    version: input.prepared?.version ?? pkg.version,
-    package: pkg.name,
-    date: input.date,
-  };
-}
-async function prepareProposal(api, context, pinned) {
-  await assertCurrentMain(api, context);
   const input = await sourceInput(api, context);
-  if (
-    !input.prepared ||
-    input.commit.tree.sha !== pinned.tree ||
-    input.prepared.version !== pinned.version ||
-    input.date !== pinned.date
-  )
-    fail('proposal-plan');
-  return { base: context.sha, tree: pinned.tree, repository: context.repository, prepared: input.prepared };
+  if (input.intents.active.length) await activeHistory(api, context, input, await publicBot(api, options.settings));
+  const classification = await publicationState(api, context, input, options);
+  let mode, preparationKind;
+  if (context.verify === true || classification.state === 'pending') mode = 'verify';
+  else if (classification.state === 'published') {
+    if (input.queue.length) { mode = 'prepare'; preparationKind = 'next'; }
+    else mode = 'verify';
+  } else if (classification.state === 'absent') {
+    if (input.intents.active.length) {
+      // A later process-only main can continue the chain; only an actual current
+      // recovery merge may publish. No missing linked-PR read is caught as absence.
+      const last = input.intents.active.at(-1);
+      const linked = await pages(api, `${prefix(context)}/commits/${context.sha}/pulls`);
+      const current = linked.filter((p) => p.merge_commit_sha === context.sha && p.head?.ref === 'release/next');
+      if (current.length > 1) fail('recovery-lineage');
+      if (current.length === 1) {
+        const bot = await publicBot(api, options.settings);
+        await currentRecovery(api, context, input, bot); mode = 'publish';
+      } else {
+        if (last.data.base.sha === context.sha) fail('recovery-intent');
+        await recoveryPreparation(api, context, input, await publicBot(api, options.settings));
+        mode = 'prepare'; preparationKind = 'recovery';
+      }
+    } else if (input.queue.length) {
+      await recoveryPreparation(api, context, input, await publicBot(api, options.settings));
+      mode = 'prepare'; preparationKind = 'recovery';
+    } else mode = 'publish';
+  } else fail('recovery-state');
+  const prepared = preparationKind === 'next' ? prepareRelease({ files: input.files, fragments: input.fragments, date: input.date }) : null;
+  await assertCurrentMain(api, context);
+  return { mode, ...(preparationKind ? { preparationKind } : {}), repository: context.repository, sha: context.sha,
+    tree: input.commit.tree.sha, version: prepared?.version ?? input.pkg.version, package: input.pkg.name, date: input.date };
+}
+async function prepareProposal(api, context, pinned, options = {}) {
+  const fresh = await plan(api, context, options);
+  exactData(fresh, pinned, 'proposal-plan');
+  if (pinned.mode !== 'prepare' || !['next', 'recovery'].includes(pinned.preparationKind)) fail('proposal-plan');
+  const input = await sourceInput(api, context);
+  let prepared;
+  if (pinned.preparationKind === 'next') prepared = prepareRelease({ files: input.files, fragments: input.fragments, date: input.date });
+  else prepared = (await recoveryPreparation(api, context, input, await publicBot(api, options.settings))).prepared;
+  if (!prepared || prepared.version !== pinned.version || input.commit.tree.sha !== pinned.tree || input.date !== pinned.date) fail('proposal-plan');
+  await assertCurrentMain(api, context);
+  return { base: context.sha, tree: pinned.tree, repository: context.repository, prepared };
 }
 async function collectAuthority(api, context, settings) {
   await withRefusal('authority-main', () => assertCurrentMain(api, context));
@@ -498,61 +762,108 @@ async function optional(api, route) {
     throw contextual(e, 'optional');
   }
 }
-async function writeProposal(api, context, payload, pinned) {
+async function proposalPreflight(api, context, payload, pinned, options) {
   if (payload?.base !== context.sha || !control.sameRepo(payload.repository, context.repository)) fail('proposal-base');
-  const rebuilt = await prepareProposal(api, context, pinned);
-  if (JSON.stringify(payload) !== JSON.stringify(rebuilt)) fail('proposal-substitution');
+  const rebuilt = await prepareProposal(api, context, pinned, options);
+  exactData(payload, rebuilt, 'proposal-substitution');
+  const input = await sourceInput(api, context), bot = await publicBot(api, options.settings);
+  const candidate = new Map(input.inventory);
+  for (const [path, text] of Object.entries(rebuilt.prepared.updates)) {
+    const bytes = Buffer.from(text);
+    candidate.set(path, { bytes, mode: '100644', sha: preparation.gitObject('blob', bytes) });
+  }
+  for (const path of rebuilt.prepared.deletions) candidate.delete(path);
+  const expectedTree = preparation.treeOid(candidate);
+  let retained, predecessor;
+  if (pinned.preparationKind === 'recovery') {
+    const recovery = await recoveryPreparation(api, context, input, bot);
+    retained = recovery.retained; predecessor = recovery.predecessor;
+    if (expectedTree !== recovery.expectedTree) fail('proposal-tree');
+  } else {
+    retained = await retainedProposal(api, context, input.view, bot, input.pkg.version);
+    predecessor = retained.predecessor;
+    if (retained.open) {
+      const parents = retained.head.parents;
+      if (parents.length === 1 && parents[0].sha === context.sha) {
+        // Preserve the explicitly supported legacy exact-open NEXT proposal.
+        // Its already existing head is data, never a new rollover authority.
+        const state = control.decideProposalState({ base: context.sha, currentMain: context.sha, expectedTree,
+          existing: { head: retained.head.sha, tree: retained.head.tree.sha, parent: parents[0].sha },
+          pulls: [retained.open], complete: true });
+        if (state.action !== 'no-op') fail('proposal-existing');
+        await assertCurrentMain(api, context);
+        return { rebuilt, expectedTree, predecessor: null, retained, state, bot };
+      }
+      if (parents.length !== 2 || parents[0].sha !== context.sha) fail('proposal-existing');
+      const closed = await pages(api, `${prefix(context)}/pulls?state=closed&head=footprintjs:release/next&base=main`);
+      const previous = closed.filter((p) => p.head?.sha === parents[1].sha && p.merged_at);
+      if (previous.length !== 1) fail('proposal-existing');
+      predecessor = await mergedLineage(api, context, input.view, bot, previous[0].number, input.pkg.version);
+      await requireAncestor(api, context, predecessor.merge, context.sha);
+    }
+  }
+  if (predecessor.head === context.sha) fail('proposal-existing');
+  const state = control.decideProposalState({ base: context.sha, currentMain: context.sha, expectedTree,
+    existing: { head: retained.head.sha, tree: retained.head.tree.sha, parents: retained.head.parents.map((p) => p.sha) },
+    pulls: retained.open ? [retained.open] : [], complete: true,
+    predecessor: { head: predecessor.head, closedMerged: true } });
+  if (!['rollover', 'no-op'].includes(state.action)) fail('proposal-existing');
   await assertCurrentMain(api, context);
-  const base = prefix(context),
-    entries = [];
+  return { rebuilt, expectedTree, predecessor, retained, state, bot };
+}
+async function writeProposal(api, context, payload, pinned, options = {}) {
+  // The App writer's readable role repeats ALL publication/lineage/closure reads
+  // before the FIRST blob/tree mutation. A planning-token 404 grants no write.
+  const before = await proposalPreflight(api, context, payload, pinned, options),
+    { rebuilt, expectedTree, predecessor, bot } = before, base = prefix(context);
+  if (before.state.action === 'no-op') return { action: 'no-op', pr: before.retained.open.number };
+  const entries = [];
   for (const [path, content] of Object.entries(rebuilt.prepared.updates)) {
     const blob = (await api('POST', `${base}/git/blobs`, { content, encoding: 'utf-8' })).data;
-    if (!control.validSha(blob.sha)) fail('blob');
+    if (blob.sha !== preparation.gitObject('blob', Buffer.from(content))) fail('blob');
     entries.push({ path, mode: '100644', type: 'blob', sha: blob.sha });
   }
   for (const path of rebuilt.prepared.deletions) entries.push({ path, mode: '100644', type: 'blob', sha: null });
   const tree = (await api('POST', `${base}/git/trees`, { base_tree: pinned.tree, tree: entries })).data;
-  if (!control.validSha(tree.sha)) fail('proposal-tree');
-  const ref = await optional(api, `${base}/git/ref/heads/release/next`);
-  const existing = ref ? (await api('GET', `${base}/git/commits/${ref.object.sha}`)).data : null;
-  const pulls = await pages(api, `${base}/pulls?state=open&head=footprintjs:release/next&base=main`);
-  const state = control.decideProposalState({
-    base: context.sha,
-    currentMain: context.sha,
-    expectedTree: tree.sha,
-    existing: existing
-      ? {
-          head: existing.sha,
-          parent: existing.parents?.length === 1 ? existing.parents[0].sha : null,
-          tree: existing.tree?.sha,
-        }
-      : null,
-    pulls,
-    complete: true,
-  });
-  if (state.action === 'hold') fail('proposal-existing');
-  if (state.action === 'no-op') return { action: 'no-op', pr: pulls[0].number };
-  const commit = (
-    await api('POST', `${base}/git/commits`, {
-      message: `chore: release ${pinned.version}`,
-      tree: tree.sha,
-      parents: [context.sha],
-    })
-  ).data;
+  if (tree.sha !== expectedTree) fail('proposal-tree');
+  const commit = (await api('POST', `${base}/git/commits`, {
+    message: `chore: release ${pinned.version}`, tree: expectedTree, parents: [context.sha, predecessor.head],
+  })).data;
   if (!control.validSha(commit.sha)) fail('proposal-commit');
+  const actual = (await api('GET', `${base}/git/commits/${commit.sha}`)).data;
+  if (actual.sha !== commit.sha || actual.tree?.sha !== expectedTree) fail('proposal-commit');
+  exactData(actual.parents?.map((p) => p.sha), [context.sha, predecessor.head], 'proposal-commit');
+  const fresh = await proposalPreflight(api, context, payload, pinned, options);
+  if (fresh.state.action !== 'rollover' || fresh.retained.head.sha !== before.retained.head.sha ||
+    fresh.expectedTree !== expectedTree) fail('proposal-existing');
+  // Provider-enforced FF preserves ancestry. It is deliberately not a CAS or
+  // exclusivity claim; any partial effect/error is retained, never rolled back.
+  const updated = (await api('PATCH', `${base}/git/refs/heads/release/next`, { sha: commit.sha, force: false })).data;
+  if (updated.object?.sha !== commit.sha) fail('proposal-existing');
   await assertCurrentMain(api, context);
-  await api('POST', `${base}/git/refs`, { ref: 'refs/heads/release/next', sha: commit.sha });
-  await assertCurrentMain(api, context);
-  const pr = (
-    await api('POST', `${base}/pulls`, {
-      title: `Release ${pinned.version}`,
-      head: 'release/next',
-      base: 'main',
+  const current = (await api('GET', `${base}/git/ref/heads/release/next`)).data;
+  if (current.object?.sha !== commit.sha) fail('proposal-existing');
+  const pr = (await api('POST', `${base}/pulls`, {
+      title: `Release ${pinned.version}`, head: 'release/next', base: 'main',
       body: `Release App proposal for foottrace ${pinned.version}.\n\n${rebuilt.prepared.notes}\nAfter Claude's independent merge verdict for this exact head is recorded publicly and all current runtime/tested-tree/CodeQL checks pass, reconcile main/head/tested tree. The owner may submit personally or explicitly authorize Codex or Claude to submit the real GitHub APPROVED review on this final head through the owner's existing authorized User account, distinct from the App author, with current API permission write or admin. A delegated review names the submitting agent and the owner's explicit authorization. Standing FootTrace authorization remains sufficient within its stated scope; a changed head still requires fresh independent review, current checks and a fresh approval. An exchange verdict or comment is not that approval. No independent review is waived. No workflow auto-approval is added. This App-authored PR does not publish until normally merged and the Release App route verifies its authority. Owner App installation and npm trusted-publisher setup remain prerequisites; see docs/RELEASING.md.`,
-    })
-  ).data;
-  if (!Number.isSafeInteger(pr.number)) fail('proposal-pr');
-  return { action: 'created', pr: pr.number, head: commit.sha, tree: tree.sha };
+    })).data;
+  const requireCreated = (value) => {
+    if (!Number.isSafeInteger(value.number) || value.number <= 0 || value.number !== pr.number || value.state !== 'open' ||
+      value.head?.sha !== commit.sha || value.base?.sha !== context.sha ||
+      value.user?.id !== bot.id || value.user.type !== 'Bot' || value.user.login !== bot.login ||
+      !control.sameRepo(value.head?.repo, context.repository) || !control.sameRepo(value.base?.repo, context.repository) ||
+      value.head.ref !== 'release/next' || value.base.ref !== 'main') fail('proposal-pr');
+  };
+  // A returned inconsistency is permanent evidence for this attempt. Never
+  // erase it because a subsequent read happens to look healthy again.
+  requireCreated(pr);
+  const created = (await api('GET', `${base}/pulls/${pr.number}`)).data;
+  requireCreated(created);
+  await assertCurrentMain(api, context);
+  const finalRef = (await api('GET', `${base}/git/ref/heads/release/next`)).data;
+  if (finalRef.object?.sha !== commit.sha) fail('proposal-existing');
+  await assertCurrentMain(api, context);
+  return { action: 'created', pr: pr.number, head: commit.sha, tree: expectedTree };
 }
 async function producerIdentity(api, context, name, completed = false) {
   const run = (await api('GET', `${prefix(context)}/actions/runs/${context.runId}`)).data;
@@ -829,7 +1140,7 @@ async function registryVersion(version, fetcher = fetch) {
   if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(version)) fail('version');
   const response = await registryFetch(`https://registry.npmjs.org/foottrace/${version}`, fetcher);
   if (response.status === 404) return null;
-  if (!response.ok) fail('registry-unavailable');
+  if (!response.ok || response.status !== 200) fail('registry-unavailable');
   const value = parseJson(
     'registry-json',
     (await responseBytes(response, 2 * 1024 * 1024, 'registry-body')).toString('utf8'),
@@ -837,6 +1148,67 @@ async function registryVersion(version, fetcher = fetch) {
   if (value.name !== 'foottrace' || value.version !== version || typeof value.dist?.integrity !== 'string')
     fail('registry-shape');
   return { ...value.dist, version: value.version };
+}
+function markerData(bytes, expectedVersion, source, size) {
+  if (!Buffer.isBuffer(bytes) || bytes.length !== size || bytes.length > 4096) fail('journal-conflict');
+  const value = parseJson('journal-json', preparation.decodeRaw(bytes));
+  if (!value || typeof value !== 'object' || Array.isArray(value) ||
+    Object.keys(value).sort().join(',') !== 'integrity,runAttempt,runId,sha,version' ||
+    value.version !== expectedVersion || value.sha !== source ||
+    !Number.isSafeInteger(value.runId) || value.runId <= 0 || !Number.isSafeInteger(value.runAttempt) || value.runAttempt <= 0 ||
+    typeof value.integrity !== 'string' || !/^sha512-[A-Za-z0-9+/]{86}==$/.test(value.integrity)) fail('journal-conflict');
+  return value;
+}
+// Current helpers inspect a historical data source. This never retargets current
+// authority/reservation/grant functions and does not execute historical helpers.
+async function publicationState(api, context, input, { fetcher = fetch, settings } = {}) {
+  const version = input.pkg.version, tag = `v${version}`, base = prefix(context),
+    registry = await registryVersion(version, fetcher), source = await peeledTag(api, context, tag),
+    release = await optional(api, `${base}/releases/tags/${enc(tag)}`);
+  if (!source && !release) {
+    if (registry) fail('recovery-state');
+    await requireUnpublishedLatest(version, fetcher);
+    return { state: 'absent', version };
+  }
+  if (!source || !release || !Number.isSafeInteger(release.id) || release.id <= 0) fail('recovery-state');
+  const historical = { ...context, sha: source }, sourceInventory = await input.view.inventory(source);
+  packageIdentity(sourceInventory, version);
+  const bot = await publicBot(api, settings), lineage = await linkedLineage(api, context, input.view, bot, source, version);
+  if (lineage.merge !== source) fail('recovery-lineage');
+  await requireAncestor(api, context, source, context.sha);
+  const notes = await sourceReleaseNotes(api, historical, version);
+  requireReleaseNotes(release, historical, tag, notes);
+  const assets = await pages(api, `${base}/releases/${release.id}/assets`),
+    markers = assets.filter((a) => a.name === `publish-attempt-${version}.json`);
+  if (markers.length !== 1 || markers[0].state !== 'uploaded' || !Number.isSafeInteger(markers[0].size) ||
+    markers[0].size < 1 || markers[0].size > 4096) fail('journal-conflict');
+  const raw = Buffer.from((await api('GET', `${base}/releases/assets/${markers[0].id}`, { accept: 'application/octet-stream' })).data),
+    marker = markerData(raw, version, source, markers[0].size);
+  if (!registry) return { state: 'pending', reason: 'pending-registry', version, sha: source };
+  if (registry.integrity !== marker.integrity || !/^[a-f0-9]{40}$/.test(registry.shasum ?? '') ||
+    registry.tarball !== `https://registry.npmjs.org/foottrace/-/foottrace-${version}.tgz`) fail('registry-conflict');
+  const response = await registryFetch(registry.tarball, fetcher);
+  if (!response.ok || response.status !== 200) fail('registry-unavailable');
+  const archive = require('./release-archive.cjs').inspectArchive(await responseBytes(response, 16 * 1024 * 1024, 'registry-body'),
+    { package: 'foottrace', version });
+  if (archive.integrity !== marker.integrity || archive.shasum !== registry.shasum) fail('registry-bytes');
+  const latestResponse = await registryFetch('https://registry.npmjs.org/foottrace/latest', fetcher);
+  if (!latestResponse.ok || latestResponse.status !== 200) fail('registry-unavailable');
+  const latest = parseJson('registry-latest-json', (await responseBytes(latestResponse, 2 * 1024 * 1024, 'registry-body')).toString('utf8'));
+  if (latest.name !== 'foottrace') fail('registry-shape');
+  const order = preparation.versionOrder(latest.version, version);
+  if (order > 0) fail('recovery-state');
+  return { state: order < 0 ? 'pending' : 'published', reason: order < 0 ? 'pending-latest' : 'verified',
+    version, latest: latest.version, sha: source, tree: (await input.view.commit(source)).tree.sha,
+    integrity: archive.integrity, shasum: archive.shasum, sha256: archive.sha256,
+    provenance: registry.attestations ?? null, provenanceCryptographicallyVerified: false,
+    docs: 'No separate FootTrace docs deployment is configured.' };
+}
+async function requireUnpublishedLatest(version, fetcher) {
+  const response = await registryFetch('https://registry.npmjs.org/foottrace/latest', fetcher);
+  if (!response.ok || response.status !== 200) fail('registry-unavailable');
+  const latest = parseJson('registry-latest-json', (await responseBytes(response, 2 * 1024 * 1024, 'registry-body')).toString('utf8'));
+  if (latest.name !== 'foottrace' || preparation.versionOrder(latest.version, version) >= 0) fail('recovery-state');
 }
 async function verifyPublished(api, context, pinned, fetcher = fetch) {
   const tag = `v${pinned.version}`,
@@ -917,6 +1289,7 @@ async function runStage(stage, { api, context, env, io, fetcher = fetch }) {
   const pinned = env.PLAN_JSON ? parseJson('plan-json', env.PLAN_JSON) : null;
   const identity = env.IDENTITY_JSON ? parseJson('identity-json', env.IDENTITY_JSON) : null;
   const settings = { slug: env.APP_SLUG, clientId: env.APP_CLIENT_ID };
+  const phaseOptions = { settings, fetcher };
   const bound = () => {
     if (!pinned || pinned.sha !== context.sha || !control.sameRepo(pinned.repository, context.repository))
       fail('plan-substitution');
@@ -927,12 +1300,12 @@ async function runStage(stage, { api, context, env, io, fetcher = fetch }) {
     await requireSecurity(api, fresh);
   };
   if (stage === 'plan') {
-    const p = await plan(api, context);
+    const p = await plan(api, context, phaseOptions);
     return { plan: JSON.stringify(p), mode: p.mode };
   }
   bound();
   if (stage === 'prepare') {
-    const proposal = await prepareProposal(api, context, pinned),
+    const proposal = await prepareProposal(api, context, pinned, phaseOptions),
       job = await producerIdentity(api, context, 'prepare');
     io.write('release-artifact/proposal.json', Buffer.from(JSON.stringify(proposal) + '\n'));
     io.write(
@@ -961,6 +1334,7 @@ async function runStage(stage, { api, context, env, io, fetcher = fetch }) {
           context,
           parseJson('artifact-json', artifact.members['proposal.json'].toString('utf8')),
           pinned,
+          phaseOptions,
         ),
       ),
     };
@@ -969,6 +1343,7 @@ async function runStage(stage, { api, context, env, io, fetcher = fetch }) {
     const id = await collectAuthority(api, context, settings);
     if (id.tree !== pinned.tree || id.version !== pinned.version) fail('authority-plan');
     await requireSecurity(api, id);
+    await requireRecoverySource(api, context, id, phaseOptions);
     return { identity: JSON.stringify(id), authorized: 'true' };
   }
   if (stage === 'verdict') {
@@ -1033,10 +1408,18 @@ async function runStage(stage, { api, context, env, io, fetcher = fetch }) {
       fail('archive-manifest');
     const registry = await registryVersion(pinned.version, fetcher);
     if (stage === 'release') {
+      if (await requireRecoverySource(api, context, identity, phaseOptions)) {
+        if (!registry) await requireUnpublishedLatest(pinned.version, fetcher);
+      }
       const grant = await releaseState(api, context, identity, archive, registry);
       return { grant: JSON.stringify(grant), fresh: String(grant.fresh) };
     }
     const grant = parseJson('grant-json', env.GRANT_JSON ?? 'null');
+    // Rebind recovery source independently of any plan flag. The unchanged
+    // current-attempt grant and registry checks below own submission authority.
+    if (await requireRecoverySource(api, context, identity, phaseOptions)) {
+      if (!registry) await requireUnpublishedLatest(pinned.version, fetcher);
+    }
     await publishGrant(api, context, identity, archive, grant);
     if (registry) {
       if (registry.integrity !== archive.integrity) fail('registry-conflict');
@@ -1046,7 +1429,19 @@ async function runStage(stage, { api, context, env, io, fetcher = fetch }) {
     io.write(file, bytes);
     return { submit: 'true', file };
   }
-  if (stage === 'verify') return { verification: JSON.stringify(await verifyPublished(api, context, pinned, fetcher)) };
+  if (stage === 'verify') {
+    // The publication workflow verifies its own exact current-source release
+    // with the existing strict target/marker check. A standalone verify plan
+    // uses the complete historical data witness; neither path grants submission.
+    if (pinned.mode === 'publish')
+      return { verification: JSON.stringify(await verifyPublished(api, context, pinned, fetcher)) };
+    if (pinned.mode !== 'verify') fail('recovery-phase');
+    const input = await sourceInput(api, context);
+    if (input.commit.tree.sha !== pinned.tree || input.pkg.version !== pinned.version) fail('plan-substitution');
+    const result = await publicationState(api, context, input, phaseOptions);
+    await assertCurrentMain(api, context);
+    return { verification: JSON.stringify({ ...result, state: result.reason ?? 'pending-release' }) };
+  }
   fail('stage');
 }
 module.exports = {
@@ -1078,4 +1473,12 @@ module.exports = {
   ciVerdict,
   requireSecurity,
   reserveAttempt,
+  sourceView,
+  requireAncestor,
+  publicationState,
+  activeHistory,
+  recoveryPreparation,
+  currentRecovery,
+  proposalPreflight,
+  requireRecoverySource,
 };
