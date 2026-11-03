@@ -312,6 +312,10 @@ function buildCausalChain(
     depth: number,
   ): void {
     budget.check(1);
+    if (depth >= maxDepth) {
+      truncatedByDepth = true;
+      return;
+    }
     const parentId = parentCommit.runtimeStageId;
     if (
       node.parentEdges.some((edge) => edge.parent.runtimeStageId === parentId && edge.kind === kind && edge.key === key)
@@ -416,15 +420,6 @@ function buildCausalChain(
     budget.check(1);
     const [node, commitIdx, depth, keysToExpand] = queue.shift()!;
     queryWork.units += 1 + keysToExpand.length;
-
-    if (depth >= maxDepth) {
-      // D4: only a node that still HAD something to expand counts as a cut
-      // (a leaf at the horizon truncates nothing).
-      if (keysToExpand.length > 0 || controlDeps?.(node.runtimeStageId) !== undefined) {
-        truncatedByDepth = true;
-      }
-      continue;
-    }
 
     // Data edges: for each key in this expansion's read-set, find who wrote
     // it. Under 'stage' this is the node's full read-set (historical

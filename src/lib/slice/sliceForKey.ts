@@ -57,6 +57,7 @@ export function sliceForKey(
   budget.admit(commitLog);
   const source = resolveKeysReadSource(keysRead);
   const normalisedKey = normaliseStateKey(key);
+  budget.check(normalisedKey.length);
   const base: Pick<VariableSlice, 'key' | 'before' | 'keysReadKind' | 'readsCoverage'> = {
     key: normalisedKey,
     ...(options?.before !== undefined && { before: options.before }),
@@ -64,7 +65,7 @@ export function sliceForKey(
     ...(source.coverage !== undefined && { readsCoverage: source.coverage }),
   };
 
-  if (commitLog.length === 0) return { ...base, missing: 'empty-log' };
+  if (commitLog.length === 0) return budget.finish({ ...base, missing: 'empty-log' });
 
   const { writer, basis } = findLastWriterWithBasis(commitLog, normalisedKey, options?.before);
   // F4b: what the value at the slice's point rests on, from the value twin — a redaction, the pre-run base.
@@ -73,11 +74,11 @@ export function sliceForKey(
   budget.check();
   if (!writer) {
     // 'never-written' already says the value came from before the run; a redaction that hid the write does not.
-    return {
+    return budget.finish({
       ...base,
       missing: 'never-written',
       ...(value.includes('redacted') && { notes: [redactedValueNote(normalisedKey)] }),
-    };
+    });
   }
   // A writer that reached the key only through rows inside it made part of the value — say so.
   const notes = basis.includes('nested-rows') ? [nestedRowsNote(normalisedKey, [commitLog.indexOf(writer)])] : [];
@@ -110,5 +111,5 @@ export function sliceForKey(
     },
     budget,
   )!;
-  return { ...base, writer, root, ...(notes.length > 0 && { notes }) };
+  return budget.finish({ ...base, writer, root, ...(notes.length > 0 && { notes }) });
 }

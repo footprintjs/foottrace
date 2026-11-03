@@ -75,6 +75,7 @@ export function keyTimeline(
   budget.admit(commitLog);
   const source = resolveKeysReadSource(keysRead);
   const normalisedKey = normaliseStateKey(key);
+  budget.check(normalisedKey.length);
   const base: Pick<KeyTimeline, 'key' | 'before' | 'keysReadKind' | 'readsCoverage'> = {
     key: normalisedKey,
     ...(options?.before !== undefined && { before: options.before }),
@@ -82,7 +83,7 @@ export function keyTimeline(
     ...(source.coverage !== undefined && { readsCoverage: source.coverage }),
   };
 
-  if (commitLog.length === 0) return { ...base, missing: 'empty-log', notes: [] };
+  if (commitLog.length === 0) return budget.finish({ ...base, missing: 'empty-log', notes: [] });
 
   const index = buildKeyIndex(commitLog, source.lookup, budget);
   const readsRecorded = hasRecordedReads(index);
@@ -91,7 +92,7 @@ export function keyTimeline(
   // Same typo guard as the forward walk — one rule, both doors.
   if (!index.isKnown(normalisedKey)) {
     notes.push(unknownKeyNote(index, normalisedKey));
-    if (readsRecorded) return { ...base, missing: 'never-written', notes };
+    if (readsRecorded) return budget.finish({ ...base, missing: 'never-written', notes });
   }
   if (!readsRecorded) notes.push(readsNotRecordedNote());
 
@@ -153,5 +154,5 @@ export function keyTimeline(
   const cut = w < writes.length || r < reads.length;
   if (cut)
     notes.push({ code: 'truncated', detail: 'timeline truncated (maxMoments reached) — later moments were omitted.' });
-  return { ...base, moments, notes, ...(cut && { truncated: { byMoments: true as const } }) };
+  return budget.finish({ ...base, moments, notes, ...(cut && { truncated: { byMoments: true as const } }) });
 }

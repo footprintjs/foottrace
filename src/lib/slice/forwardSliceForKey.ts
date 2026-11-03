@@ -172,6 +172,7 @@ export function forwardSliceForKey(
   budget.admit(commitLog);
   const source = resolveKeysReadSource(keysRead);
   const normalisedKey = normaliseStateKey(key);
+  budget.check(normalisedKey.length);
   const base: Pick<ForwardSlice, 'key' | 'before' | 'keysReadKind' | 'readsCoverage'> = {
     key: normalisedKey,
     ...(options?.before !== undefined && { before: options.before }),
@@ -179,7 +180,7 @@ export function forwardSliceForKey(
     ...(source.coverage !== undefined && { readsCoverage: source.coverage }),
   };
 
-  if (commitLog.length === 0) return { ...base, missing: 'empty-log', notes: [] };
+  if (commitLog.length === 0) return budget.finish({ ...base, missing: 'empty-log', notes: [] });
 
   const index = buildKeyIndex(commitLog, source.lookup, budget);
   const readsRecorded = hasRecordedReads(index);
@@ -194,7 +195,7 @@ export function forwardSliceForKey(
   const known = index.isKnown(normalisedKey);
   if (!known) {
     notes.push(unknownKeyNote(index, normalisedKey));
-    if (readsRecorded) return { ...base, missing: 'never-written', notes };
+    if (readsRecorded) return budget.finish({ ...base, missing: 'never-written', notes });
   }
   if (!readsRecorded) notes.push(readsNotRecordedNote());
 
@@ -320,10 +321,10 @@ export function forwardSliceForKey(
     notes.push(truncatedNote(truncatedByDepth, truncatedByNodes, truncatedByEdges, truncatedByReads));
   }
 
-  return {
+  return budget.finish({
     ...base,
     ...(anchorIdx !== undefined && { writer: commitLog[anchorIdx] }),
     root,
     notes,
-  };
+  });
 }

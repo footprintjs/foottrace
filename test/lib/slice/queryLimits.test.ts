@@ -214,3 +214,46 @@ describe('stops across preparation, callbacks and composition', () => {
     expect(() => causalChain([], 's', lookup, { maxWork })).toThrow(TypeError);
   });
 });
+
+describe('depth cuts describe resolved dependencies', () => {
+  it('does not claim omitted ancestors for pre-run reads or unknown controls', () => {
+    const result = causalChain(log.slice(0, 1), 's0#0', () => ['preRun'], {
+      maxDepth: 0,
+      controlDeps: () => ({ deciderId: 'not-in-log' }),
+    });
+    expect(result?.truncated).toBeUndefined();
+    expect(result?.preRunReads).toEqual({ code: 'pre-run-origin', keys: ['preRun'] });
+  });
+  it('marks a real data edge beyond the depth horizon', () => {
+    const result = causalChain(log, 's3#3', lookup, { maxDepth: 0 });
+    expect(result?.parentEdges).toEqual([]);
+    expect(result?.truncated).toEqual({ byDepth: true, byNodes: false });
+  });
+  it('marks a real control edge beyond the depth horizon', () => {
+    const result = causalChain(log, 's3#3', () => [], {
+      maxDepth: 0,
+      controlDeps: () => ({ deciderId: 's0#0' }),
+    });
+    expect(result?.parentEdges).toEqual([]);
+    expect(result?.truncated).toEqual({ byDepth: true, byNodes: false });
+  });
+});
+
+it.each([forwardSliceForKey, keyTimeline])('checks the deadline after unknown-key diagnostic preparation', (ask) => {
+  const input = logOf(1);
+  input[0].trace = Array.from({ length: 20 }, (_, i) => ({ path: `k${i}`, verb: 'set' }));
+  input[0].overwrite = Object.fromEntries(input[0].trace.map((row) => [row.path, 1]));
+  let now = 0;
+  const clock = vi.spyOn(performance, 'now').mockImplementation(() => now);
+  const original = Array.prototype.sort;
+  const sorting = vi.spyOn(Array.prototype, 'sort').mockImplementation(function (this: unknown[], compare) {
+    if (this.length === 20 && typeof this[0] === 'string') now = 11;
+    return original.call(this, compare);
+  });
+  try {
+    expect(() => ask(input, 'missing', () => ['k0'], { timeoutMs: 10 })).toThrow(/SLICE_TIMEOUT/);
+  } finally {
+    sorting.mockRestore();
+    clock.mockRestore();
+  }
+});

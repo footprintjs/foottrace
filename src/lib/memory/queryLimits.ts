@@ -88,6 +88,12 @@ export class SliceQueryControl {
     if (this.work > this.limits.maxWork) throw new SliceQueryError('SLICE_WORK_LIMIT');
   }
 
+  /** Check after result preparation, including every empty/missing fast path. */
+  finish<T>(result: T): T {
+    this.check();
+    return result;
+  }
+
   /** Bound preparation before it allocates indices. Never analyze an incomplete input prefix. */
   admit(log: readonly CommitBundle[]): void {
     this.check(log.length);
