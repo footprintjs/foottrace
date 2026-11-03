@@ -20,10 +20,11 @@ export function currentReleaseState() {
   const files = Object.fromEntries(['package.json', 'package-lock.json', 'CHANGELOG.md', 'README.md', 'docs/metadata.md'].map(name => [name, read(name)]));
   const fragments = {};
   if (existsSync(join(root, '.changes/metadata-query.md'))) fragments['metadata-query.md'] = read('.changes/metadata-query.md');
-  return { files, fragments };
+  const { unpublished } = JSON.parse(read('test/release/repository-status.json'));
+  return { files, fragments, unpublished };
 }
-/** Checkout consistency only: this does not assert registry publication. */
-export function assertRepositoryStatus({ files, fragments }) {
+/** Check documented history against explicit publication exclusions, without a registry call. */
+export function assertRepositoryStatus({ files, fragments, unpublished = [] }) {
   let pkg, lock;
   try { pkg = JSON.parse(files['package.json']); lock = JSON.parse(files['package-lock.json']); }
   catch { fail('status-package'); }
@@ -61,9 +62,26 @@ export function assertRepositoryStatus({ files, fragments }) {
   requireStatus(atMost(since, current), 'status-future-introduction');
   const matching = sections.filter(row => row[1] === intro[1] || row[1].startsWith(intro[1] + ' '));
   requireStatus(matching.length === 1 && new RegExp('^' + intro[1].replaceAll('.', '\\.') + ' — \\d{4}-\\d{2}-\\d{2}$').test(matching[0][1]), 'status-history-section');
-  const selected = matching[0], next = sections.find(row => row.index > selected.index);
-  const body = history.slice(selected.index, next?.index ?? history.length);
-  requireStatus(count(body, note) === 1, 'status-history-note');
+  requireStatus(count(history, note) === 1, 'status-history-note');
+  const entries = sections.filter(row => /^\d+\./.test(row[1])).map(row => {
+    const end = sections.find(next => next.index > row.index)?.index ?? history.length;
+    return { version: row[1].split(' ')[0], body: history.slice(row.index, end) };
+  });
+  requireStatus(Array.isArray(unpublished) && new Set(unpublished).size === unpublished.length &&
+    unpublished.every(item => typeof item === 'string' && entries.filter(entry => entry.version === item).length === 1),
+  'status-publication-history');
+  for (const item of unpublished) version(item);
+  const origin = entries.find(entry => count(entry.body, note) === 1);
+  requireStatus(!!origin, 'status-history-note');
+  const originVersion = version(origin.version);
+  const published = entries.filter(entry => !unpublished.includes(entry.version) &&
+    atMost(originVersion, version(entry.version)) && atMost(version(entry.version), current));
+  published.sort((a, b) => {
+    const av = version(a.version), bv = version(b.version);
+    for (let i = 0; i < 3; i++) { if (av[i] !== bv[i]) return av[i] - bv[i]; }
+    return 0;
+  });
+  requireStatus(published.length > 0 && published[0].version === intro[1], 'status-publication-introduction');
   packageHistory();
   return { mode: 'released', packageVersion: pkg.version, metadataSince: intro[1] };
 }
