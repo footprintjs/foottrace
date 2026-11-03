@@ -7,8 +7,7 @@
  * that index, ordered outer→inner) or `overlapping(start, end)`
  * (returns ranges intersecting a slice).
  *
- * See `docs/design/commit-range-index.md` for the full contract. In
- * one paragraph: this is a generic interval data structure for
+ * This is a generic interval data structure for
  * commit-range queries. footprintjs owns ZERO knowledge of what
  * labels mean — consumers (agentfootprint, lens, OTel exporters)
  * pick their own `TLabel` type. Open ranges (mid-run, no end yet)
@@ -103,7 +102,7 @@ export class CommitRangeIndex<TLabel> {
    * Open a new range. Returns a token the caller MUST hold and pass
    * to `close()` later. Each `open()` gets a fresh token; tokens
    * cannot be reused or shared across indices (silent no-op if
-   * misused — see Law 2 in the design doc). Tokens from BEFORE
+   * misused). Tokens from BEFORE
    * the most recent `clear()` are also invalid (owner symbol
    * rotates on clear).
    */
