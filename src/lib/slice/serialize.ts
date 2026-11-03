@@ -24,8 +24,7 @@
  * pointless twin: it is a FLAT list of plain fields holding no live
  * references and no sharing, so `JSON.stringify(timeline)` is already
  * correct and linear. What it still needs is the bounded LLM projection —
- * {@link formatTimeline} — because "the whole life of a key" is unbounded in
- * a long run.
+ * {@link formatTimeline} — because even a bounded timeline can be long.
  */
 
 import { flattenCausalDAG, formatCausalChain } from '../memory/backtrack.js';

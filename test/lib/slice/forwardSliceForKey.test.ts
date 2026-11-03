@@ -629,7 +629,7 @@ describe('forwardSliceForKey — performance & load', () => {
       log.push(commit(`r${i}`, id, [], i)); // reads only, writes nothing
       readsMap[id] = ['hot'];
     }
-    const fwd = forwardSliceForKey(log, 'hot', keysReadFromMap(readsMap));
+    const fwd = forwardSliceForKey(log, 'hot', keysReadFromMap(readsMap), { maxReads: 2000 });
     expect(fwd.root!.reads).toHaveLength(2000);
     expect(fwd.root!.fedEdges).toEqual([]);
     expect(fwd.root!.truncated).toBeUndefined();

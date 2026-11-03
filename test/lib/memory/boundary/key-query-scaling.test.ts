@@ -73,18 +73,23 @@ const quadratic = (s: ReturnType<typeof shape>) => {
 };
 
 const walk = (s: ReturnType<typeof shape>) =>
-  causalChain(s.log, s.log[s.log.length - 1].runtimeStageId, s.lookup, { maxDepth: 1e6, maxNodes: 1e6 });
+  causalChain(s.log, s.log[s.log.length - 1].runtimeStageId, s.lookup, {
+    maxDepth: 1000,
+    maxNodes: 10000,
+    timeoutMs: 30000,
+  });
 
 describe('a causal walk over nested keys scales near-linearly in the log', () => {
+  // Both complete walks use the reverse-index strategy and fit the public depth ceiling.
   for (const frozen of [false, true]) {
-    it(`${frozen ? 'a frozen (engine) log' : 'a hand-built log'}: N = 2000 vs 8000 does under 6× the work`, () => {
+    it(`${frozen ? 'a frozen (engine) log' : 'a hand-built log'}: N = 300 vs 900 does under 4.5× the work`, () => {
       // the walk is real: it reaches the first stage through every nested key
       const small = shape(200, frozen);
       expect(walk(small)).toBeDefined();
-      const n = workOf(2000, frozen, walk);
-      const n4 = workOf(8000, frozen, walk);
-      expect(n).toBeGreaterThan(2000); // it counted the walk
-      expect(n4 / n).toBeLessThan(6);
+      const n = workOf(300, frozen, walk);
+      const n4 = workOf(900, frozen, walk);
+      expect(n).toBeGreaterThan(200); // it counted the walk
+      expect(n4 / n).toBeLessThan(4.5);
     });
   }
 

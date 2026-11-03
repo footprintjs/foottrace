@@ -22,6 +22,7 @@
  * keeps it a tiny, separately-evolvable library (see README.md).
  */
 
+import type { SliceTruncation } from '../memory/queryLimits.js';
 import type { CausalNode, KeysReadLookup } from '../memory/backtrack.js';
 import type { ValueBasis } from '../memory/commitLogUtils.js';
 import type { RegisteredCode } from '../memory/honesty.js';
@@ -304,7 +305,7 @@ export interface ForwardNode {
    * Set on the ROOT only, and only when a budget actually cut the walk. Carries
    * no code: what it means is registered as `'truncated'` in `HONESTY_CODES`.
    */
-  truncated?: { byDepth: boolean; byNodes: boolean };
+  truncated?: SliceTruncation;
 }
 
 /**
@@ -375,9 +376,11 @@ export interface KeyMoment {
 /**
  * The whole life of one key in commit order — every write and every recorded
  * read. The flat, chronological companion to {@link ForwardSlice}: no graph,
- * no budgets, no live references (already JSON-safe by construction).
+ * bounded output, no live references (already JSON-safe by construction).
  */
 export interface KeyTimeline {
+  /** Present only when maxMoments omitted later moments. */
+  truncated?: { byMoments: true };
   /** The state key that was asked about (normalised string form). */
   key: string;
   /** Exclusive commit-array-index bound: only moments before this index. */
@@ -438,7 +441,7 @@ export interface ForwardSliceJSON {
   /** Id-referenced edges: parent (`from`) fed child (`to`). */
   edges?: Array<{ from: string; to: string; basis: FedBasis }>;
   /** Copied from the root when a budget cut the walk — registered as `'truncated'` in `HONESTY_CODES`. */
-  truncated?: { byDepth: boolean; byNodes: boolean };
+  truncated?: SliceTruncation;
 }
 
 // ── Element provenance (append-fold) ───────────────────────────────────────
@@ -590,7 +593,7 @@ export interface SliceJSON {
     basis?: RegisteredCode<'nested-rows'>;
   }>;
   /** Copied from the root when a budget cut the slice — registered as `'truncated'` in `HONESTY_CODES`. */
-  truncated?: { byDepth: boolean; byNodes: boolean };
+  truncated?: SliceTruncation;
   /** Copied from {@link VariableSlice.notes} (9.33.0); absent when the slice has none. */
   notes?: HonestyNote[];
 }

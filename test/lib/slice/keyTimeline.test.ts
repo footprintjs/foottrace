@@ -295,7 +295,7 @@ describe('keyTimeline — performance & load', () => {
       readsMap[id] = ['hot'];
     }
     const t0 = performance.now();
-    const timeline = keyTimeline(log, 'hot', keysReadFromMap(readsMap));
+    const timeline = keyTimeline(log, 'hot', keysReadFromMap(readsMap), { maxMoments: 5100 });
     const elapsed = performance.now() - t0;
     expect(timeline.moments!.length).toBe(5000 + 100); // 5000 reads + 100 writes
     expect(elapsed).toBeLessThan(300);

@@ -1,7 +1,7 @@
 /**
  * slice/keyTimeline.ts — the whole life of ONE key, in commit order.
  *
- * The flat companion to {@link forwardSliceForKey}: no graph, no budgets,
+ * The flat companion to {@link forwardSliceForKey}: no graph, bounded output,
  * no anchor — every write of the key and every recorded read of it, as one
  * chronological list. This is what a UI timeline row and an LLM's "walk me
  * through what happened to `total`" both want, and what makes a forward
@@ -23,6 +23,7 @@
  * DAG position: memory ← slice. Imports memory/ only (see README.md).
  */
 
+import { SliceQueryControl, type SliceQueryOptions } from '../memory/queryLimits.js';
 import type { KeysReadLookup } from '../memory/backtrack.js';
 import type { CommitBundle } from '../memory/types.js';
 import {
@@ -41,7 +42,9 @@ import { normaliseStateKey } from '../memory/paths.js';
 import type { HonestyNote, KeyMoment, KeysReadSource, KeyTimeline, StateKey } from './types.js';
 
 /** Options for {@link keyTimeline}. */
-export interface KeyTimelineOptions {
+export interface KeyTimelineOptions extends SliceQueryOptions {
+  /** Maximum returned moments: default 1000, maximum 100000. */
+  maxMoments?: number;
   /**
    * Exclusive commit-array-index upper bound: only moments BEFORE this idx.
    * Same word and semantics as `sliceForKey`'s `before` (note the sibling
@@ -68,6 +71,8 @@ export function keyTimeline(
   keysRead: KeysReadSource | KeysReadLookup,
   options?: KeyTimelineOptions,
 ): KeyTimeline {
+  const budget = new SliceQueryControl(options);
+  budget.admit(commitLog);
   const source = resolveKeysReadSource(keysRead);
   const normalisedKey = normaliseStateKey(key);
   const base: Pick<KeyTimeline, 'key' | 'before' | 'keysReadKind' | 'readsCoverage'> = {
@@ -79,7 +84,7 @@ export function keyTimeline(
 
   if (commitLog.length === 0) return { ...base, missing: 'empty-log', notes: [] };
 
-  const index = buildKeyIndex(commitLog, source.lookup);
+  const index = buildKeyIndex(commitLog, source.lookup, budget);
   const readsRecorded = hasRecordedReads(index);
   const notes: HonestyNote[] = [];
 
@@ -105,6 +110,8 @@ export function keyTimeline(
   let r = 0;
   let sawPreRunRead = false;
   while (w < writes.length || r < reads.length) {
+    budget.check(1);
+    if (moments.length >= budget.limits.maxMoments) break;
     const takeRead = r < reads.length && (w >= writes.length || reads[r] <= writes[w]);
     if (takeRead) {
       const idx = reads[r++];
@@ -136,7 +143,15 @@ export function keyTimeline(
   }
 
   if (sawPreRunRead) notes.push(preRunOriginNote(normalisedKey));
-  const nested = nestedOnlyWrites(commitLog, normalisedKey, writes);
+  const nested = nestedOnlyWrites(
+    commitLog,
+    normalisedKey,
+    moments.filter((m) => m.kind === 'write').map((m) => m.commitIdx),
+  );
   if (nested.length > 0) notes.push(nestedRowsNote(normalisedKey, nested));
-  return { ...base, moments, notes };
+  budget.check();
+  const cut = w < writes.length || r < reads.length;
+  if (cut)
+    notes.push({ code: 'truncated', detail: 'timeline truncated (maxMoments reached) — later moments were omitted.' });
+  return { ...base, moments, notes, ...(cut && { truncated: { byMoments: true as const } }) };
 }

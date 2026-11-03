@@ -37,6 +37,7 @@ import {
 } from '../memory/keyPaths.js';
 import { logModel } from '../memory/logModel.js';
 import { pathSegments } from '../memory/paths.js';
+import { SliceQueryControl, SliceQueryError } from '../memory/queryLimits.js';
 import type { CommitBundle, TraceEntry } from '../memory/types.js';
 import type { HonestyNote } from './types.js';
 
@@ -86,23 +87,29 @@ function push(map: Map<string, number[]>, key: string, idx: number): void {
  * the log forwards), which is what lets every range query below be a pair of
  * binary searches instead of a scan.
  */
-export function buildKeyIndex(commitLog: CommitBundle[], lookup: KeysReadLookup): KeyIndex {
+export function buildKeyIndex(commitLog: CommitBundle[], lookup: KeysReadLookup, budget?: SliceQueryControl): KeyIndex {
+  budget?.check();
   const model = logModel(commitLog);
+  budget?.check();
   const writers = model.index;
   const readsByKey = new Map<string, number[]>();
   const readKeysByRoot = new Map<string, string[]>();
   for (let i = 0; i < commitLog.length; i++) {
+    budget?.check(1);
     const bundle = commitLog[i];
     // Reads: one lookup per execution step (see THE INVERSION above).
     // A provider that throws is a consumer bug, not a reason to lose the
     // query — the same error-isolation posture recorder callbacks get.
     let keys: string[] = [];
     try {
-      keys = lookup(bundle.runtimeStageId) ?? [];
-    } catch {
+      keys = (budget ? budget.reads(lookup, bundle.runtimeStageId) : lookup(bundle.runtimeStageId)) ?? [];
+    } catch (error) {
+      if (error instanceof SliceQueryError) throw error;
       /* provider threw — treat this step as "no recorded reads" */
     }
+    budget?.check();
     for (const k of new Set(keys)) {
+      budget?.check(1);
       if (!readsByKey.has(k)) {
         const names = readKeysByRoot.get(rootOf(k));
         if (names) names.push(k);
@@ -332,8 +339,15 @@ export function conservativeEdgesNote(key: string): HonestyNote {
 }
 
 /** A budget cut the walk — stated, never silent. */
-export function truncatedNote(byDepth: boolean, byNodes: boolean): HonestyNote {
-  const causes = [byDepth && 'maxDepth reached', byNodes && 'maxNodes reached'].filter(Boolean).join(', ');
+export function truncatedNote(byDepth: boolean, byNodes: boolean, byEdges = false, byReads = false): HonestyNote {
+  const causes = [
+    byDepth && 'maxDepth reached',
+    byNodes && 'maxNodes reached',
+    byEdges && 'maxEdges reached',
+    byReads && 'maxReads reached',
+  ]
+    .filter(Boolean)
+    .join(', ');
   return {
     code: 'truncated',
     detail: `walk truncated (${causes}) — more consumers of this value exist beyond this horizon.`,

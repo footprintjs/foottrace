@@ -224,3 +224,5 @@ Follow the [cause and impact manual](https://github.com/footprintjs/foottrace/bl
 ## Optional native root-read sources
 
 `foottrace/write` provides an opt-in, value-free source descriptor for the same native scalar root read. Existing reads and record bytes stay unchanged. Authorized hosts can also supply the optional root source-evidence seam to cause and PROV readers. Exact reads establish source-to-execution usage; per-write and semantic derivation remain separate. See the [setup, bounds and limitations](https://github.com/footprintjs/foottrace/blob/main/docs/read-sources.md).
+
+Root slice queries have [hard limits, truncation markers and cooperative stops](docs/root-query-limits.md).
