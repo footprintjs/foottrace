@@ -33,6 +33,8 @@ Release run-envelope refusals identify the first failing predicate with a fixed 
 
 ## 1.9.0 — 2026-10-30
 
+Not published to npm (the release bot skipped this version); these changes first shipped in 1.10.0.
+
 ### Added
 
 - Optional `foottrace/metadata` ESM/CommonJS/type entry for detached value-free path occurrences and explicitly anchored candidate-read links. Metadata keeps unknown state effects, reads, ancestry and original row addresses visible; it never supplies replay state. The reader reuses the existing canonical path index and bounded traversal, with independent admission and logical work limits. Existing complete-record APIs and recorded bytes stay unchanged.

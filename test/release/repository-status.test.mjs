@@ -76,3 +76,42 @@ for (const [name, make, corrupt, code] of [
   const valid = make(); assertRepositoryStatus(valid); corrupt(valid); valid.fragments['later.md'] = fragment;
   assert.throws(() => assertRepositoryStatus(valid), error => error.code === code);
 });
+
+test('publication history: an explicitly unpublished introduction is refused', () => {
+  const state = released();
+  state.unpublished = ['1.9.0'];
+  assert.throws(() => assertRepositoryStatus(state), error => error.code === 'status-publication-introduction');
+});
+
+test('publication history: metadata first ships in the earliest non-excluded later version', () => {
+  const state = released();
+  state.unpublished = ['1.9.0', '1.9.1'];
+  state.files['CHANGELOG.md'] = state.files['CHANGELOG.md'].replace('# Changelog\n\n',
+    '# Changelog\n\n## 1.10.0 — 2026-11-01\n\nLater publication.\n\n## 1.9.1 — 2026-10-31\n\nUnpublished attempt.\n\n');
+  for (const file of ['package.json', 'package-lock.json']) {
+    const manifest = JSON.parse(state.files[file]); manifest.version = '1.10.0';
+    if (file === 'package-lock.json') manifest.packages[''].version = '1.10.0';
+    state.files[file] = JSON.stringify(manifest);
+  }
+  assert.throws(() => assertRepositoryStatus(state), error => error.code === 'status-publication-introduction');
+  replaceFile(state, 'README.md', '(since 1.9.0)', '(since 1.10.0)');
+  replaceFile(state, 'docs/metadata.md', 'FootTrace 1.9.0.', 'FootTrace 1.10.0.');
+  assert.deepEqual(assertRepositoryStatus(state), { mode: 'released', packageVersion: '1.10.0', metadataSince: '1.10.0' });
+  replaceFile(state, 'README.md', '(since 1.10.0)', '(since 1.9.1)');
+  replaceFile(state, 'docs/metadata.md', 'FootTrace 1.10.0.', 'FootTrace 1.9.1.');
+  assert.throws(() => assertRepositoryStatus(state), error => error.code === 'status-publication-introduction');
+  replaceFile(state, 'README.md', '(since 1.9.1)', '(since 1.10.0)');
+  replaceFile(state, 'docs/metadata.md', 'FootTrace 1.9.1.', 'FootTrace 1.10.0.');
+  state.unpublished = ['1.9.0'];
+  assert.throws(() => assertRepositoryStatus(state), error => error.code === 'status-publication-introduction');
+  replaceFile(state, 'README.md', '(since 1.10.0)', '(since 1.9.1)');
+  replaceFile(state, 'docs/metadata.md', 'FootTrace 1.10.0.', 'FootTrace 1.9.1.');
+  assert.deepEqual(assertRepositoryStatus(state), { mode: 'released', packageVersion: '1.10.0', metadataSince: '1.9.1' });
+});
+
+test('publication history: duplicate and unknown exclusions are refused', () => {
+  for (const unpublished of [['1.9.0', '1.9.0'], ['9.9.9'], '1.9.0', [null]]) {
+    const state = released(); state.unpublished = unpublished;
+    assert.throws(() => assertRepositoryStatus(state), error => error.code === 'status-publication-history');
+  }
+});
