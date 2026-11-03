@@ -353,14 +353,12 @@ writer's `LOG_PLACEHOLDER` is the historical `'REDACTED'` record byte.
   the cursor with no cast.
 - `test/lib/time-travel/fold-memo.test.ts` — the fold never touches the
   record, and stepping equals a fresh fold at every stop.
-- The footprintjs engine witness `test/lib/memory/scenario/write-door-same-bytes.test.ts`
-  checks that the same steps through `foottrace/write` and a flowchart give
-  the same commit log and reader answers.
 - `test/fixtures/hcifootprint/hcifootprint-2.6.1.test.ts` — a real
   producer's stored transitions, replayed through `foottrace/write`, give
   the stored bytes.
 - `test/architecture/exports.test.ts` and `test/architecture/layering.test.ts`
-  enforce three canonical doors and an engine-free source graph.
+  enforce six canonical code entry points (root, `/write`, `/paths`, `/cause`,
+  `/prov` and `/metadata`) and an engine-free source graph.
 - `test/architecture/public-door-state.test.ts` and
   `test/architecture/public-helper-contracts.test.ts` exercise the helper
   contracts, including shared freeze metadata through the built ESM and CJS doors.
