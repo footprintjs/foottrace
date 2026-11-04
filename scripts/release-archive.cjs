@@ -15,38 +15,48 @@ function text(bytes) {
   }
 }
 function field(bytes) {
-  const i = bytes.indexOf(0);
-  return text(i < 0 ? bytes : bytes.subarray(0, i));
+  const end = bytes.indexOf(0);
+  if (end >= 0 && bytes.subarray(end).some((n) => n !== 0)) fail();
+  if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) fail();
+  return text(end < 0 ? bytes : bytes.subarray(0, end));
 }
-function octal(bytes) {
-  const value = field(bytes).trim();
-  if (!/^[0-7]+$/.test(value)) fail();
+function octal(bytes, { empty = false, checksum = false } = {}) {
+  if (empty && bytes.every((n) => n === 0)) return 0;
+  const value = bytes.toString('latin1');
+  const shape = checksum
+    ? /^[0-7]{6}(?:\0 | \0)$/
+    : bytes.length === 8
+    ? /^(?:[0-7]{7}\0|[0-7]{6} \0)$/
+    : /^(?:[0-7]{11}\0|[0-7]{10} \0)$/;
+  if (!shape.test(value)) fail();
   const n = Number.parseInt(value, 8);
   if (!Number.isSafeInteger(n)) fail();
   return n;
 }
-function pax(bytes) {
-  const result = Object.create(null);
-  let at = 0;
-  while (at < bytes.length) {
-    const space = bytes.indexOf(32, at);
-    if (space < 0 || space - at > 9) fail();
-    const sizeText = text(bytes.subarray(at, space));
-    if (!/^[1-9]\d*$/.test(sizeText)) fail();
-    const size = Number(sizeText),
-      end = at + size;
-    if (!Number.isSafeInteger(size) || end > bytes.length || size <= space - at + 2 || bytes[end - 1] !== 10) fail();
-    const entry = text(bytes.subarray(space + 1, end - 1)),
-      eq = entry.indexOf('=');
-    if (eq <= 0) fail();
-    const key = entry.slice(0, eq),
-      value = entry.slice(eq + 1);
-    // No inherited ownership, link, size or extraction directives are accepted.
-    if (key !== 'path' || Object.prototype.hasOwnProperty.call(result, key)) fail();
-    result[key] = value;
-    at = end;
-  }
-  return result;
+function headerSize(header) {
+  const magic = Buffer.from([117, 115, 116, 97, 114, 0, 48, 48]);
+  if (!header.subarray(257, 265).equals(magic)) fail();
+  let sum = 0;
+  for (let i = 0; i < 512; i++) sum += i >= 148 && i < 156 ? 32 : header[i];
+  if (sum !== octal(header.subarray(148, 156), { checksum: true })) fail();
+  octal(header.subarray(100, 108));
+  for (const [start, end] of [
+    [108, 116],
+    [116, 124],
+    [329, 337],
+    [337, 345],
+  ])
+    if (octal(header.subarray(start, end), { empty: true }) !== 0) fail();
+  octal(header.subarray(136, 148));
+  // Portable regular-file packs have no link, owner, prefix or extension bytes.
+  if (
+    header[156] !== 48 ||
+    header.subarray(157, 257).some((n) => n !== 0) ||
+    header.subarray(265, 329).some((n) => n !== 0) ||
+    header.subarray(345, 512).some((n) => n !== 0)
+  )
+    fail();
+  return octal(header.subarray(124, 136));
 }
 function inspectArchive(bytes, expected) {
   try {
@@ -64,34 +74,22 @@ function inspectArchive(bytes, expected) {
     const names = new Set(),
       files = [];
     let at = 0,
-      pending = null,
       identity = null,
       ended = false;
     while (at + 512 <= tar.length) {
       const header = tar.subarray(at, at + 512);
       at += 512;
       if (header.every((n) => n === 0)) {
-        if (pending || at + 512 > tar.length || !tar.subarray(at).every((n) => n === 0)) fail();
+        if (at + 512 > tar.length || !tar.subarray(at).every((n) => n === 0)) fail();
         ended = true;
         break;
       }
-      let sum = 0;
-      for (let i = 0; i < 512; i++) sum += i >= 148 && i < 156 ? 32 : header[i];
-      if (sum !== octal(header.subarray(148, 156)) || field(header.subarray(257, 263)) !== 'ustar') fail();
-      const size = octal(header.subarray(124, 136));
-      if (at + size > tar.length) fail();
+      const size = headerSize(header);
+      const padded = Math.ceil(size / 512) * 512;
+      if (at + padded > tar.length || tar.subarray(at + size, at + padded).some((n) => n !== 0)) fail();
       const data = tar.subarray(at, at + size);
-      at += Math.ceil(size / 512) * 512;
-      const type = field(header.subarray(156, 157)) || '0';
-      if (type === 'x') {
-        if (pending || size > 65536) fail();
-        pending = pax(data);
-        continue;
-      }
-      if (type !== '0' || field(header.subarray(157, 257))) fail();
-      const prefix = field(header.subarray(345, 500));
-      const name = pending?.path ?? `${prefix ? prefix + '/' : ''}${field(header.subarray(0, 100))}`;
-      pending = null;
+      at += padded;
+      const name = field(header.subarray(0, 100));
       if (
         !name.startsWith('package/') ||
         /[\\\x00-\x1f]/.test(name) ||

@@ -236,12 +236,11 @@ function paxPath(path) {
   while (String(n).length + line.length !== n) n = String(n).length + line.length;
   return String(n) + line;
 }
-test('archive: a bounded PAX long path is retained without extracting it', () => {
+test('archive: PAX long paths are outside the canonical npm-pack profile', () => {
   const path = 'package/dist/' + 'long/'.repeat(30) + 'index.js';
   const m = members();
   m.push({ name: 'PaxHeader/long', type: 'x', body: paxPath(path) }, { name: 'truncated', body: 'safe' });
-  const r = call('release-archive', 'inspectArchive', tar(m), expected());
-  assert(r.files.some((f) => f.path === path));
+  assert.throws(() => call('release-archive', 'inspectArchive', tar(m), expected()), { code: 'invalid-archive' });
 });
 test('archive: PAX cannot disguise a traversal or add extraction directives', () => {
   for (const body of [paxPath('package/../escape'), paxPath('package/dist/good') + paxPath('package/dist/again')]) {

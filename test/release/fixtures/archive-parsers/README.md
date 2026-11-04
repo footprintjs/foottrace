@@ -1,0 +1,3 @@
+# Archive parser agreement fixtures
+
+Data-only tar/gzip fixtures from the independent Foottrace54 reader, retained byte-for-byte with SHA256 metadata. The adjacent release archive-parser test compares the real inspector with npm11.19.0 publish-manifest reading through pacote, offline and with scripts disabled. It never calls publish or obtains a token. Noncanonical tar headers are refused even when the two parsers happen to agree; admitted manifests must agree on name, version and absence of effective publishConfig. The benign JSON/BOM/concatenated-gzip cases retain their separate agreement check.
