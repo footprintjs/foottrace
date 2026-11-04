@@ -14,6 +14,7 @@
   "src/lib/memory/deltaEncoding.ts": 2,
   "src/lib/memory/equality.ts": 0,
   "src/lib/memory/eventPosition.ts": 0,
+  "src/lib/memory/hardWriteCoverage.ts": 0,
   "src/lib/memory/honesty.ts": 0,
   "src/lib/memory/keyPaths.ts": 0,
   "src/lib/memory/logModel.ts": 3,

@@ -57,6 +57,35 @@ describe('the record fence', () => {
     ).toEqual([]);
   });
 
+  it('keeps colocated tests outside the runtime graph and type program', () => {
+    expect(
+      probe(
+        {
+          'src/a.ts': 'export const value = 1;',
+          'src/a.test.ts': "import { it } from 'vitest'; it('adjacent', () => undefined);",
+        },
+        { 'src/a.ts': 0 },
+      ).problems,
+    ).toEqual([]);
+  });
+
+  it.each([
+    "import { value } from './a.test.js'; export { value };",
+    "export { value } from './a.test.js';",
+    "export type Alias = import('./a.test.js').Value;",
+    "export const load = () => import('./a.test.js');",
+  ])('refuses production importing a colocated test: %s', (source) => {
+    expect(
+      probe(
+        {
+          'src/a.ts': source,
+          'src/a.test.ts': 'export const value = 1; export interface Value { value: number; }',
+        },
+        { 'src/a.ts': 0 },
+      ).problems,
+    ).toContain('src/a.ts: unresolved or non-source import ./a.test.js');
+  });
+
   it('rejects unranked files and stale layer entries', () => {
     const result = probe({ 'src/a.ts': 'export const value = 1;' }, { 'src/missing.ts': 0 });
     expect(result.problems).toContain('unranked source: src/a.ts');

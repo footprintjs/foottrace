@@ -42,8 +42,8 @@
  * container still shared with committed state takes a private deep copy of
  * it ({@link privatise}) — what the whole-state clone used to give every
  * read, so an in-place edit of a read value stays private exactly as it did.
- * A read the working copy cannot answer is served from live state by the
- * caller, as before; the buffer then replaces that path of its diff base
+ * An unresolved read not covered by a hard write may use live state; the
+ * buffer then replaces that path of its diff base
  * with a private copy ({@link detachBase}), as the clone had it.
  *
  * THE ADMITTED RECORD (9.30.0 — docs/design/2026-10-admitted-record.md). A
@@ -66,6 +66,7 @@
 import { putOwn } from '../capture/ownData.js';
 import { type Family, type Lossy, type Member, type Rows, addressDepthOf, lossyFamilies } from './admission.js';
 import { type OpVerb, type Survivor, emitInFamilyOrder, groupIntoFamilies, pushValueRow } from './deltaEncoding.js';
+import { hardWriteCovers } from './hardWriteCoverage.js';
 import { relation } from './keyPaths.js';
 import {
   adopt,
@@ -103,6 +104,7 @@ export class TransactionBuffer {
     readAttemptsOmitted?: number;
   }[] = [];
   private redactedPaths = new Set<string>();
+  private hardWriteKeys = new Set<string>();
   /**
    * Paths whose `overwritePatch` value is the caller's own object (9.23.0):
    * a `set` of a container stores the reference, and this is the ledger of
@@ -222,6 +224,7 @@ export class TransactionBuffer {
     if (path.length - addressDepthOf(path, this.address) > 1) this.nestedOps++;
     this.sourceStaging?.write(path, verb, this.redactedPaths.has(key));
     this.opTrace.push(this.stampReadKeys({ path: key, verb }));
+    if (verb === 'set' || verb === 'delete') this.hardWriteKeys.add(key);
   }
 
   /**
@@ -285,7 +288,7 @@ export class TransactionBuffer {
    *
    * Stages EXACTLY the same buffer mutations as `set(path, undefined)` —
    * `workingCopy`/`overwritePatch` get an own `undefined` at the path (the
-   * historical flattening, preserving read behavior and the dedup diff base
+   * historical flattening, preserving patch bytes and the dedup diff base
    * across modes) — but records the op verb as `'delete'`. At commit:
    * `'full'` mode maps it back to a `'set'` trace entry (byte-identical to
    * today); `'delta'` mode emits a real `'delete'` entry whose replay
@@ -431,27 +434,18 @@ export class TransactionBuffer {
   /**
    * Keep the diff base exact under a read the working copy cannot answer.
    *
-   * When `workingCopy` holds nothing at `path` — the stage deleted or unset
-   * it, or a write replaced a container above it — `RecordFrame · read`
-   * serves the read from LIVE committed state, exactly as 9.28.0
-   * did, so the value it hands out is committed state itself. On 9.28.0 the
-   * diff base was a whole-state clone taken at the stage's first write, and
-   * an in-place edit of that value (out of contract — reads are borrowed)
-   * could not move it: written back, the edit was recorded. Here the diff
-   * base IS a committed generation, and it very often holds that same
-   * container at `path` — the edit would move the base with it, and the
-   * write-back would commit no change. So before the value goes out, the
-   * base's value at `path` is replaced by a private deep copy (the base's
-   * root and the containers on the way copied shallowly) — what 9.28.0's
-   * base held there. The commit's net-change test compares against it and
-   * the delta encoder replays from it; the value handed out stays the live
-   * one, so whatever else an edit of it reaches (live state, the next
-   * generation) behaves as on 9.28.0 too.
+   * Only an unresolved path not covered by a staged hard set/delete may
+   * fall back to LIVE state. Its returned container can also be held in
+   * the diff base. A borrowed in-place edit would then move that base and
+   * make a later write-back appear unchanged. Replace the base's value at
+   * `path` with a private deep copy before the live value goes out, copying
+   * its root and ancestors shallowly. The net-change test and delta replay
+   * use that private base, as the old whole-state clone did. The returned
+   * value remains live, preserving the existing borrowed-read behavior.
    *
-   * Not `privatise`: a private copy handed to the stage would also keep the
-   * edit out of live state, where 9.28.0 let it in — a run-namespaced read
-   * that falls back to a global key would then end differently (the
-   * differential's NESTED family fails within 100 programs that way).
+   * Not `privatise`: returning a private copy would also keep the edit out
+   * of live state. A namespace read falling back to a global key retains
+   * the existing borrowed-reference behavior.
    *
    * Copies nothing when the base holds no container at `path`, and nothing
    * twice: a path at or below an earlier detach is already private. O(path)
@@ -567,6 +561,11 @@ export class TransactionBuffer {
     return copy;
   }
 
+  /** Does a successful staged hard set/delete own this path or an ancestor? */
+  hasHardWrite(path: (string | number)[]): boolean {
+    return hardWriteCovers(this.hardWriteKeys, path);
+  }
+
   /**
    * Did any staged op touch `path`, or a path above or below it?
    *
@@ -658,6 +657,7 @@ export class TransactionBuffer {
     this.overwritePatch = {};
     this.updatePatch = {};
     this.opTrace.length = 0;
+    this.hardWriteKeys.clear();
     this.redactedPaths.clear();
     this.heldRefs.clear();
     this.workingCopy = {};

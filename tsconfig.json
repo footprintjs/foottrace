@@ -5,5 +5,6 @@
     "declaration": true, "rootDir": "src", "outDir": "dist", "declarationDir": "dist/types",
     "esModuleInterop": true, "skipLibCheck": true, "types": []
   },
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "bower_components", "jspm_packages", "dist", "src/**/*.test.ts"]
 }
