@@ -78,7 +78,8 @@ export function inspectRecordNode(
       : sliceForKey(scope.log, identity.key, lookup, {
           before: commitIndex + 1,
           maxDepth: 1,
-          maxNodes: maximumEdges + 1,
+          maxNodes: Math.min(maximumEdges + 1, 10000),
+          maxEdges: maximumEdges,
           controlDeps: control,
         });
   if (
@@ -96,18 +97,19 @@ export function inspectRecordNode(
           scope.log,
           identity.runtimeStageId,
           (runtimeStageId) => (runtimeStageId === identity.runtimeStageId ? [identity.key!] : lookup(runtimeStageId)),
-          { maxDepth: 1, maxNodes: maximumEdges + 1, controlDeps: control },
+          { maxDepth: 1, maxNodes: Math.min(maximumEdges + 1, 10000), maxEdges: maximumEdges, controlDeps: control },
         )
       : slice?.root ??
         (identity.key === undefined
           ? causalChain(scope.log, identity.runtimeStageId, lookup, {
               maxDepth: 1,
-              maxNodes: maximumEdges + 1,
+              maxNodes: Math.min(maximumEdges + 1, 10000),
+              maxEdges: maximumEdges,
               controlDeps: control,
             })
           : undefined);
   if (root?.preRunReads?.keys.length) coverage.addGap('untracked-input');
-  if (root?.truncated?.byNodes) coverage.addGap('edge-limit');
+  if (root?.truncated?.byNodes || root?.truncated?.byEdges) coverage.addGap('edge-limit');
   for (const note of slice?.notes ?? [])
     if (note.code === 'redacted') coverage.addGap('redacted');
     else if (note.code === 'nested-rows' || note.code === 'from-initial-state') coverage.addGap('conservative');

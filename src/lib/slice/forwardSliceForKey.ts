@@ -53,6 +53,7 @@
  * DAG position: memory ← slice. Imports memory/ only (see README.md).
  */
 
+import { SliceQueryControl, type SliceWalkOptions } from '../memory/queryLimits.js';
 import type { KeysReadLookup } from '../memory/backtrack.js';
 import { relation } from '../memory/keyPaths.js';
 import type { CommitBundle } from '../memory/types.js';
@@ -80,7 +81,9 @@ import { normaliseStateKey } from '../memory/paths.js';
 import type { FedBasis, ForwardNode, ForwardSlice, HonestyNote, KeysReadSource, StateKey } from './types.js';
 
 /** Options for {@link forwardSliceForKey} — anchoring plus walk budgets. */
-export interface ForwardSliceForKeyOptions {
+export interface ForwardSliceForKeyOptions extends SliceWalkOptions {
+  /** Maximum total read occurrences returned: default 1000, maximum 100000. */
+  maxReads?: number;
   /**
    * Exclusive commit-array-index upper bound for the ANCHOR search: follow
    * the value as it stood BEFORE this idx. Same contract as
@@ -90,10 +93,6 @@ export interface ForwardSliceForKeyOptions {
    * "what did the value at step 12 go on to feed?" is the whole question.
    */
   before?: number;
-  /** Maximum BFS depth in value-lives (default: 20 — causalChain's). */
-  maxDepth?: number;
-  /** Maximum total nodes (default: 100 — causalChain's). */
-  maxNodes?: number;
 }
 
 /** Identity of one value life: (write position, key). Never parsed. */
@@ -169,8 +168,11 @@ export function forwardSliceForKey(
   keysRead: KeysReadSource | KeysReadLookup,
   options?: ForwardSliceForKeyOptions,
 ): ForwardSlice {
+  const budget = new SliceQueryControl(options);
+  budget.admit(commitLog);
   const source = resolveKeysReadSource(keysRead);
   const normalisedKey = normaliseStateKey(key);
+  budget.check(normalisedKey.length);
   const base: Pick<ForwardSlice, 'key' | 'before' | 'keysReadKind' | 'readsCoverage'> = {
     key: normalisedKey,
     ...(options?.before !== undefined && { before: options.before }),
@@ -178,9 +180,9 @@ export function forwardSliceForKey(
     ...(source.coverage !== undefined && { readsCoverage: source.coverage }),
   };
 
-  if (commitLog.length === 0) return { ...base, missing: 'empty-log', notes: [] };
+  if (commitLog.length === 0) return budget.finish({ ...base, missing: 'empty-log', notes: [] });
 
-  const index = buildKeyIndex(commitLog, source.lookup);
+  const index = buildKeyIndex(commitLog, source.lookup, budget);
   const readsRecorded = hasRecordedReads(index);
   const notes: HonestyNote[] = [];
 
@@ -193,12 +195,15 @@ export function forwardSliceForKey(
   const known = index.isKnown(normalisedKey);
   if (!known) {
     notes.push(unknownKeyNote(index, normalisedKey));
-    if (readsRecorded) return { ...base, missing: 'never-written', notes };
+    if (readsRecorded) return budget.finish({ ...base, missing: 'never-written', notes });
   }
   if (!readsRecorded) notes.push(readsNotRecordedNote());
 
-  const maxDepth = options?.maxDepth ?? 20;
-  const maxNodes = options?.maxNodes ?? 100;
+  const { maxDepth, maxNodes, maxEdges, maxReads } = budget.limits;
+  let edges = 0;
+  let reads = 0;
+  let truncatedByEdges = false;
+  let truncatedByReads = false;
 
   const nodes = new Map<string, ForwardNode>();
   let created = 0;
@@ -213,6 +218,7 @@ export function forwardSliceForKey(
 
   const queue: ForwardNode[] = [root];
   while (queue.length > 0) {
+    budget.check(1);
     const node = queue.shift()!;
     // Live range: open below the write, CLOSED at the next write (see LAW).
     const from = node.commitIdx !== undefined ? node.commitIdx + 1 : 0;
@@ -225,6 +231,12 @@ export function forwardSliceForKey(
     }
 
     for (const readerIdx of readers) {
+      budget.check(1);
+      if (reads >= maxReads) {
+        truncatedByReads = true;
+        break;
+      }
+      reads++;
       const bundle = commitLog[readerIdx];
       node.reads.push({
         runtimeStageId: bundle.runtimeStageId,
@@ -236,6 +248,7 @@ export function forwardSliceForKey(
       // The reader IS the writer of everything it committed — each written
       // path is a candidate `fed` edge.
       for (const path of writtenPaths(bundle)) {
+        budget.check(1);
         const entry = lastTraceEntry(bundle, path);
         let basis: FedBasis;
         if (entry?.readKeys !== undefined) {
@@ -249,6 +262,10 @@ export function forwardSliceForKey(
         }
 
         const id = nodeKey(readerIdx, path);
+        if (edges >= maxEdges) {
+          truncatedByEdges = true;
+          continue;
+        }
         let child = nodes.get(id);
         if (!child) {
           if (created >= maxNodes) {
@@ -261,7 +278,10 @@ export function forwardSliceForKey(
           queue.push(child);
         }
         // One edge per distinct child life (a stage reads a key once).
-        if (!node.fedEdges.some((e) => e.child === child)) node.fedEdges.push({ child, basis });
+        if (!node.fedEdges.some((e) => e.child === child)) {
+          edges++;
+          node.fedEdges.push({ child, basis });
+        }
       }
     }
   }
@@ -271,6 +291,7 @@ export function forwardSliceForKey(
   // Every life a write INSIDE its key starts or crosses — the anchor's, a pre-run life's, a child's — says so.
   const partial = new Map<string, Set<number>>();
   for (const node of nodes.values()) {
+    budget.check(1);
     const start = node.commitIdx ?? -1;
     const crossed = index
       .writesOf(node.key)
@@ -289,15 +310,21 @@ export function forwardSliceForKey(
       ),
     );
   if (anyConservative) notes.push(conservativeEdgesNote(normalisedKey));
-  if (truncatedByDepth || truncatedByNodes) {
-    root.truncated = { byDepth: truncatedByDepth, byNodes: truncatedByNodes };
-    notes.push(truncatedNote(truncatedByDepth, truncatedByNodes));
+  budget.check();
+  if (truncatedByDepth || truncatedByNodes || truncatedByEdges || truncatedByReads) {
+    root.truncated = {
+      byDepth: truncatedByDepth,
+      byNodes: truncatedByNodes,
+      ...(truncatedByEdges && { byEdges: true }),
+      ...(truncatedByReads && { byReads: true }),
+    };
+    notes.push(truncatedNote(truncatedByDepth, truncatedByNodes, truncatedByEdges, truncatedByReads));
   }
 
-  return {
+  return budget.finish({
     ...base,
     ...(anchorIdx !== undefined && { writer: commitLog[anchorIdx] }),
     root,
     notes,
-  };
+  });
 }

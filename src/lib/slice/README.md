@@ -1,3 +1,5 @@
+> Root queries now have hard ceilings and cooperative stops. See [limits and migration](../../../docs/root-query-limits.md).
+
 # slice/ — variable-first slicing, both directions
 
 The **triage query layer** of foottrace: given a *variable* (a state key, or one
@@ -203,7 +205,7 @@ The whole life of one key in commit order: every write (with its verb) and
 every recorded read, each moment carrying `runtimeStageId` **and** `commitIdx`
 — the two universal join keys. A read's `fromWriteIdx` says which value it saw,
 by the *same* live-range rule the walk uses (a property test pins the two doors
-to identical attribution). No graph, no budgets, no live references.
+to identical attribution). No graph or live references; bounded moments with explicit truncation.
 
 ### `sliceToJSON(slice)` / `formatSlice(slice)` — the ONLY safe serializations
 

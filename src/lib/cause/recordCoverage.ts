@@ -72,10 +72,13 @@ export function collectForwardCoverage(
     const forward = forwardSliceForKey(scope.log, key, lookup, {
       before: commitIndex + 1,
       maxDepth: 1,
-      maxNodes: maximumEdges + 1,
+      maxNodes: Math.min(maximumEdges + 1, 10000),
+      maxEdges: maximumEdges,
+      maxReads: maximumEdges,
     });
     // A one-hop query intentionally stops at depth one; only a node cap hides immediate adjacency.
-    if (forward.root?.truncated?.byNodes) addGap('edge-limit');
+    if (forward.root?.truncated?.byNodes || forward.root?.truncated?.byEdges || forward.root?.truncated?.byReads)
+      addGap('edge-limit');
     for (const edge of forward.root?.fedEdges ?? [])
       neighbors.add(JSON.stringify(['data', edge.child.commitIdx, edge.child.key]));
     for (const read of forward.root?.reads ?? [])

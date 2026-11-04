@@ -39,3 +39,31 @@ const answerRow: TraceEntry = { path: 'result', verb: 'set', readAttempts: ['fet
 // @ts-expect-error Answer ceilings are immutable through the public record type.
 answerRow.readAttempts?.push('fetch#0@1.2@1');
 void answerRow;
+
+import {
+  causalChain,
+  forwardSliceForKey,
+  keyTimeline,
+  sliceForKey,
+  SliceQueryError,
+  type SliceWalkOptions,
+} from 'foottrace';
+const rootLimits: SliceWalkOptions = {
+  maxDepth: 20,
+  maxNodes: 100,
+  maxEdges: 1000,
+  maxWork: 1000000,
+  timeoutMs: 1000,
+  signal: new AbortController().signal,
+};
+const chain = causalChain([], 'root#0', () => [], rootLimits);
+const backwardSlice = sliceForKey([], 'x', () => [], rootLimits);
+const forwardSlice = forwardSliceForKey([], 'x', () => [], { ...rootLimits, maxReads: 2000 });
+const timeline = keyTimeline([], 'x', () => [], { maxMoments: 2000, timeoutMs: 1000 });
+const edgeCut: boolean | undefined = chain?.truncated?.byEdges;
+const readCut: boolean | undefined = forwardSlice.root?.truncated?.byReads;
+const momentCut: true | undefined = timeline.truncated?.byMoments;
+const stopped: string = new SliceQueryError('SLICE_CANCELLED').code;
+void [backwardSlice, edgeCut, readCut, momentCut, stopped];
+// @ts-expect-error Signals must be AbortSignals rather than model-provided strings.
+causalChain([], 'root', () => [], { signal: 'stop' });

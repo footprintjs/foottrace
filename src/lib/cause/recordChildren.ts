@@ -78,9 +78,12 @@ function appendDataChildren(
     const forward = forwardSliceForKey(scope.log, key, lookup, {
       before: commitIndex + 1,
       maxDepth: 1,
-      maxNodes: maximumEdges + 1,
+      maxNodes: Math.min(maximumEdges + 1, 10000),
+      maxEdges: maximumEdges,
+      maxReads: maximumEdges,
     });
-    if (forward.root?.truncated?.byNodes) complete = false;
+    if (forward.root?.truncated?.byNodes || forward.root?.truncated?.byEdges || forward.root?.truncated?.byReads)
+      complete = false;
     if (forward.root?.commitIdx !== commitIndex) {
       complete = false;
       continue;

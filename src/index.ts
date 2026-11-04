@@ -149,3 +149,10 @@ export {
   RequirementValidationError,
   REQUIREMENT_RESULT_LIMITS,
 } from './lib/evidence/requirements.js';
+
+export {
+  SliceQueryError,
+  type SliceQueryOptions,
+  type SliceWalkOptions,
+  type SliceTruncation,
+} from './lib/memory/queryLimits.js';
