@@ -323,7 +323,12 @@ jobs:
           PACKAGE_FILE: ${{ steps.control.outputs.file }}
           NPM_TAG: ${{ steps.control.outputs.npmtag }}
           NODE_AUTH_TOKEN: ''
-        run: npm publish "$PACKAGE_FILE" --ignore-scripts --access public --tag "$NPM_TAG" --registry=https://registry.npmjs.org
+        run: |
+          case "$NPM_TAG" in
+            next) npm publish "$PACKAGE_FILE" --ignore-scripts --access public --tag next --registry=https://registry.npmjs.org ;;
+            latest) npm publish "$PACKAGE_FILE" --ignore-scripts --access public --registry=https://registry.npmjs.org ;;
+            *) exit 1 ;;
+          esac
   verify:
     needs: [plan, authority, build, release, publish]
     if: >-

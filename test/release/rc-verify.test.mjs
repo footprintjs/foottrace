@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { syntheticPackageArchive, sha } from './helpers.mjs';
+import { syntheticPackageArchive, sha, executeWorkflowStage } from './helpers.mjs';
 const require = createRequire(import.meta.url),
   runtime = require('../../scripts/release-github.cjs'),
   archive = require('../../scripts/release-archive.cjs');
@@ -105,7 +105,7 @@ test('RC verify derives fixed source-bound notes without an RC changelog commit'
   assert.equal(notes, f.release.body);
   assert.equal(f.calls.length, 0);
 });
-test('RC verify checks exact package bytes, current-attempt marker, next and unchanged latest', async () => {
+test('RC verify checks exact package bytes, same-run marker, next and unchanged latest', async () => {
   const f = fixture();
   let result;
   await assert.doesNotReject(async () => {
@@ -126,7 +126,6 @@ for (const [name, change, code] of [
   ['next moved', (f) => (f.next = '2.0.0-rc.1'), 'rc-next'],
   ['latest changed', (f) => (f.latest = '2.0.0'), 'rc-latest'],
   ['old reservation run', (f) => (f.marker.runId = 499), 'journal-conflict'],
-  ['old reservation attempt', (f) => (f.marker.runAttempt = 1), 'journal-conflict'],
   ['foreign reservation source', (f) => (f.marker.sha = sha('9')), 'journal-conflict'],
   ['unadmitted reservation field', (f) => (f.marker.extra = 'not-a-grant'), 'journal-conflict'],
   ['wrong package bytes', (f) => (f.bytes = syntheticPackageArchive('2.0.0-rc.1')), 'invalid-archive'],
@@ -136,7 +135,6 @@ for (const [name, change, code] of [
   ['ordinary final release flag', (f) => (f.release.prerelease = false), 'release-conflict'],
   ['wrong source release notes', (f) => (f.release.body = 'different\n'), 'release-conflict'],
   ['wrong release source', (f) => (f.release.target_commitish = sha('9')), 'release-conflict'],
-  ['moved current main', (f) => (f.main = sha('9')), 'main-moved'],
 ])
   test('RC verify refuses ' + name, async () => {
     const f = fixture();
@@ -170,27 +168,103 @@ for (const [name, suffix, response, code] of [
     await assert.rejects(() => runtime.verifyPublished(f.api, f.context, f.pinned, f.fetcher), { code });
     assert.equal(attempts, 1);
   });
-test('RC verify rechecks current main before reporting verified', async () => {
-  const f = fixture(),
-    api = f.api;
-  let reads = 0;
-  f.api = async (...args) => {
-    if (args[1].endsWith('/git/ref/heads/main') && ++reads > 1)
-      return { data: { object: { type: 'commit', sha: sha('9') } } };
-    return api(...args);
-  };
-  await assert.rejects(() => runtime.verifyPublished(f.api, f.context, f.pinned, f.fetcher), { code: 'main-moved' });
-});
-test('RC verify pending registry is diagnostic only and never enables submission', async () => {
+test('RC verification can repair a prior failed attempt after main advances', async () => {
   const f = fixture(),
     fetcher = f.fetcher;
   f.fetcher = (url, options) =>
-    url.endsWith('/' + f.pinned.version) ? Promise.resolve(new Response('{}', { status: 404 })) : fetcher(url, options);
-  const result = await runtime.verifyPublished(f.api, f.context, f.pinned, f.fetcher);
-  assert.equal(result.state, 'pending-registry');
-  assert.notEqual(result.mayPublish, true);
+    url.endsWith('/next') ? Promise.resolve(new Response('', { status: 404 })) : fetcher(url, options);
+  await assert.rejects(() => runtime.verifyPublished(f.api, f.context, f.pinned, f.fetcher), {
+    code: 'registry-unavailable',
+  });
+  f.context.runAttempt = 3;
+  f.main = sha('9');
+  const start = f.calls.length;
+  let result;
+  await assert.doesNotReject(async () => {
+    result = await runtime.verifyPublished(f.api, f.context, f.pinned, fetcher);
+  });
+  assert.equal(result.state, 'verified');
+  assert.equal(result.next, f.pinned.version);
+  assert(!f.calls.slice(start).some((c) => c.route.endsWith('/git/ref/heads/main')));
   assert(f.calls.every((c) => c.method === 'GET'));
-  assert(!f.reads.some((u) => u.endsWith('/next')));
+});
+for (const missing of ['release', 'registry'])
+  test('RC verify fails named after bounded GET-only wait for missing ' + missing, async () => {
+    const f = fixture(),
+      api = f.api,
+      fetcher = f.fetcher;
+    let attempts = 0,
+      waits = 0;
+    if (missing === 'release')
+      f.api = async (...args) => {
+        if (args[1].endsWith('/releases/tags/v' + f.pinned.version)) {
+          attempts++;
+          throw Object.assign(new Error('not-found'), { status: 404 });
+        }
+        return api(...args);
+      };
+    else
+      f.fetcher = async (url, options) => {
+        if (url.endsWith('/' + f.pinned.version)) {
+          attempts++;
+          return new Response('', { status: 404 });
+        }
+        return fetcher(url, options);
+      };
+    await assert.rejects(
+      () =>
+        runtime.verifyPublished(f.api, f.context, f.pinned, f.fetcher, async (ms) => {
+          assert.equal(ms, 1000);
+          waits++;
+        }),
+      { code: 'rc-' + missing + '-missing' },
+    );
+    assert.equal(attempts, 3);
+    assert.equal(waits, 2);
+    assert.equal(f.reads.filter((u) => u.endsWith('/next')).length, 1);
+    assert.equal(f.reads.filter((u) => u.endsWith('/latest')).length, 1);
+    assert(f.calls.every((c) => c.method === 'GET'));
+  });
+test('RC verification tolerates finite registry lag then checks actual bytes and tags', async () => {
+  const f = fixture(),
+    fetcher = f.fetcher;
+  let attempts = 0,
+    waits = 0;
+  f.fetcher = async (url, options) => {
+    if (url.endsWith('/' + f.pinned.version) && ++attempts < 3) return new Response('', { status: 404 });
+    return fetcher(url, options);
+  };
+  const result = await runtime.verifyPublished(f.api, f.context, f.pinned, f.fetcher, async () => {
+    waits++;
+  });
+  assert.equal(result.state, 'verified');
+  assert.equal(attempts, 3);
+  assert.equal(waits, 2);
+  assert.equal(result.sha256, f.info.sha256);
+});
+test('RC verify reads both tags even when latest is wrong', async () => {
+  const f = fixture();
+  f.latest = '2.0.0';
+  await assert.rejects(() => runtime.verifyPublished(f.api, f.context, f.pinned, f.fetcher), { code: 'rc-latest' });
+  assert.equal(f.reads.filter((u) => u.endsWith('/next')).length, 1);
+  assert.equal(f.reads.filter((u) => u.endsWith('/latest')).length, 1);
+});
+test('native RC verification stays read-only across attempt and main changes', async () => {
+  const f = fixture();
+  f.context.runAttempt = 3;
+  f.main = sha('9');
+  let result;
+  await assert.doesNotReject(async () => {
+    result = await runtime.runStage('verify', {
+      context: f.context,
+      env: { PLAN_JSON: JSON.stringify(f.pinned) },
+      api: f.api,
+      fetcher: f.fetcher,
+      io: { write: () => assert.fail('verify cannot write') },
+    });
+  });
+  assert.equal(JSON.parse(result.verification).state, 'verified');
+  assert(f.calls.every((c) => c.method === 'GET'));
 });
 test('RC notes reject noncanonical candidate numbers before any content read', async () => {
   const f = fixture();
@@ -212,5 +286,40 @@ test('native RC verify entry returns diagnostic verification without any submiss
   });
   assert.equal(JSON.parse(result.verification).state, 'verified');
   assert.equal(Object.hasOwn(result, 'submit'), false);
+  assert(f.calls.every((c) => c.method === 'GET'));
+});
+
+test('actual verify CLI fails named without pending output when submitted RC stays absent', async () => {
+  const f = fixture(),
+    fetcher = f.fetcher;
+  let reads = 0;
+  const result = await executeWorkflowStage('verify', {
+    env: {
+      REPO_ID: '123',
+      REPO_NAME: f.context.repository.full_name,
+      SOURCE_SHA: f.context.sha,
+      SOURCE_REF: f.context.ref,
+      EVENT_NAME: 'workflow_dispatch',
+      RUN_ID: '500',
+      RUN_ATTEMPT: '3',
+      RC: 'true',
+      RC_BUMP: 'major',
+      PLAN_JSON: JSON.stringify(f.pinned),
+    },
+    api: f.api,
+    fetcher: (url, options) => {
+      if (url.endsWith('/' + f.pinned.version)) {
+        reads++;
+        return Promise.resolve(new Response('', { status: 404 }));
+      }
+      return fetcher(url, options);
+    },
+  });
+  assert.equal(result.exit, 1);
+  assert.equal(result.failure, 'rc-registry-missing');
+  assert.equal(result.output, '');
+  assert.equal(reads, 3);
+  assert.equal(f.reads.filter((u) => u.endsWith('/next')).length, 1);
+  assert.equal(f.reads.filter((u) => u.endsWith('/latest')).length, 1);
   assert(f.calls.every((c) => c.method === 'GET'));
 });

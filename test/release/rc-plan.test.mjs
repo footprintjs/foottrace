@@ -35,6 +35,7 @@ function fixture() {
 test('RC plan leaves the ordinary stable fragment route intact', async () => {
   const f = fixture();
   f.context.rc = false;
+  f.context.bump = 'none';
   const p = await succeeds(() => runtime.plan(f.api, f.context, f.options));
   assert.equal(p.mode, 'prepare');
   assert.equal(p.version, '1.11.1');
@@ -101,6 +102,7 @@ test('RC publication continuation holds after current main moves', async () => {
 test('final preparation names its hold when queued fragments do not match the unpromoted RC core', async () => {
   const f = fixture();
   f.context.rc = false;
+  f.context.bump = 'none';
   f.tags.set('v2.0.0-rc.0', sha('8'));
   await assert.rejects(() => runtime.plan(f.api, f.context, f.options), { code: 'rc-final-target' });
   assert(f.calls.every((c) => c.method === 'GET'));
@@ -109,6 +111,7 @@ test('final preparation names its hold when queued fragments do not match the un
 test('final preparation accepts the newest numeric RC core when the fragment target agrees', async () => {
   const f = fixture();
   f.context.rc = false;
+  f.context.bump = 'none';
   f.tags.set('v1.12.0-rc.99', sha('8'));
   f.tags.set('v2.0.0-rc.1', sha('8'));
   const pure = require('../../scripts/release-prepare.cjs');
@@ -131,6 +134,7 @@ test('promoted RC cores do not freeze the next ordinary stable patch', async () 
 test('unknown final tag inventory refuses instead of silently bypassing the RC target hold', async () => {
   const f = fixture();
   f.context.rc = false;
+  f.context.bump = 'none';
   const api = f.api;
   f.api = async (...args) => {
     if (args[1].includes('/git/matching-refs/')) throw Object.assign(new Error('private'), { status: 403 });
@@ -183,4 +187,30 @@ test('RC planning rechecks mutable main after the outer event check', async () =
   };
   await assert.rejects(() => runtime.plan(f.api, f.context, f.options), { code: 'main-moved' });
   assert(f.calls.every((c) => c.method === 'GET'));
+});
+
+test('an explicit bump with RC false refuses before any native source read', async () => {
+  for (const bump of ['patch', 'minor', 'major']) {
+    const f = fixture();
+    f.context.rc = false;
+    f.context.bump = bump;
+    await assert.rejects(() => runtime.plan(f.api, f.context, f.options), { code: 'rc-bump-without-rc' });
+    assert.equal(f.calls.length, 0);
+  }
+});
+test('environment rejects bump-only dispatch before any stage', () => {
+  const env = {
+    REPO_ID: '123',
+    REPO_NAME: 'footprintjs/foottrace',
+    SOURCE_SHA: sha('1'),
+    SOURCE_REF: 'refs/heads/main',
+    EVENT_NAME: 'workflow_dispatch',
+    RUN_ID: '500',
+    RUN_ATTEMPT: '2',
+    RC: 'false',
+  };
+  for (const bump of ['patch', 'minor', 'major'])
+    assert.throws(() => runtime.environmentContext({ ...env, RC_BUMP: bump }), { code: 'rc-bump-without-rc' });
+  for (const bump of ['none', '', undefined])
+    assert.equal(runtime.environmentContext({ ...env, RC_BUMP: bump }).rc, false);
 });

@@ -30,6 +30,9 @@ const LEGACY_CODES = new Set([
   'rc-tags',
   'rc-tag-number',
   'rc-bump',
+  'rc-bump-without-rc',
+  'rc-release-missing',
+  'rc-registry-missing',
   'rc-final-target',
   'rc-next',
   'rc-latest',
@@ -297,6 +300,7 @@ async function pages(api, route, key) {
 async function assertCurrentMain(api, context) {
   const current = (await api('GET', `${prefix(context)}/git/ref/heads/main`)).data;
   if (current.object?.sha !== context.sha) fail('main-moved');
+  return current.object.sha;
 }
 async function content(api, context, path) {
   if (!control.validSha(context.sha)) fail('source-sha');
@@ -616,8 +620,8 @@ async function rcSource(api, context, pinned, phase, options) {
   const tag = await peeledTag(api, context, expected.tag), registry = await registryVersion(version, options.fetcher);
   if (phase === 'initial' ? tag !== null : tag !== context.sha) fail('rc-tag');
   if (phase === 'initial' && registry !== null) fail('rc-registry');
-  await assertCurrentMain(api, context);
-  return { expected, input, publication, pulls, selectedVersion, tag, registry };
+  const currentMain = await assertCurrentMain(api, context);
+  return { expected, input, publication, pulls, selectedVersion, tag, registry, currentMain };
 }
 
 function requireFinalRcTarget(current, target, refs) {
@@ -632,6 +636,7 @@ function requireFinalRcTarget(current, target, refs) {
 }
 
 async function plan(api, context, options = {}) {
+  if (context.rc !== true && context.bump && context.bump !== 'none') fail('rc-bump-without-rc');
   if (!['push', 'workflow_dispatch'].includes(context.eventName) || context.ref !== 'refs/heads/main' || !control.validSha(context.sha)) fail('event');
   const repo = (await api('GET', prefix(context))).data;
   if (!control.sameRepo(repo, context.repository)) fail('repository');
@@ -713,7 +718,7 @@ async function collectRcAuthority(api, context, pinned, role, options = {}) {
     producer = await producerIdentity(api, context, role);
   const result = control.decideRcAuthority({ expected: e, bump: context.bump,
     event: { name: context.eventName, ref: context.ref, sha: context.sha, repository: context.repository },
-    currentMain: context.sha, sourceCommit: w.input.commit, sourcePackage: w.input.pkg,
+    currentMain: w.currentMain, sourceCommit: w.input.commit, sourcePackage: w.input.pkg,
     publication: w.publication, pullsComplete: true, pulls: w.pulls, app,
     runId: context.runId, runAttempt: context.runAttempt, producer,
     selectedVersion: w.selectedVersion, tag: w.tag, registry: w.registry }, phase);
@@ -1374,75 +1379,85 @@ async function requireUnpublishedLatest(version, fetcher) {
   const latest = parseJson('registry-latest-json', (await responseBytes(response, 2 * 1024 * 1024, 'registry-body')).toString('utf8'));
   if (latest.name !== 'foottrace' || preparation.versionOrder(latest.version, version) >= 0) fail('recovery-state');
 }
-async function verifyPublished(api, context, pinned, fetcher = fetch) {
+async function verifyPublished(api, context, pinned, fetcher = fetch,
+  wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))) {
   const rc = pinned.mode === 'rc';
   if (rc) {
     rcVersion.candidateCore(pinned.version);
     preparation.parseVersion(pinned.fromVersion);
-    await assertCurrentMain(api, context);
   }
-  const tag = `v${pinned.version}`,
+  // Verification grants no effects: a later attempt may verify this run's
+  // pinned source after main advances. Absence never permits a repeated write.
+  const present = async (read) => {
+    for (let n = 0; n < (rc ? 3 : 1); n++) {
+      const value = await read();
+      if (value !== null) return value;
+      if (rc && n < 2) await wait(1000);
+    }
+    return null;
+  };
+  const rcTags = async () => {
+    const values = [];
+    for (const tag of ['latest', 'next']) {
+      const response = await registryFetch('https://registry.npmjs.org/foottrace/' + tag, fetcher);
+      if (!response.ok || response.status !== 200) fail('registry-unavailable');
+      values.push(parseJson('registry-' + tag + '-json',
+        (await responseBytes(response, 2 * 1024 * 1024, 'registry-body')).toString('utf8')));
+    }
+    const [latest, next] = values;
+    if (latest.name !== 'foottrace' || next.name !== 'foottrace') fail('registry-shape');
+    if (latest.version !== pinned.fromVersion) fail('rc-latest');
+    if (next.version !== pinned.version) fail('rc-next');
+    return { latest, next };
+  };
+  const tag = 'v' + pinned.version,
     base = prefix(context),
-    release = await optional(api, `${base}/releases/tags/${enc(tag)}`);
-  if (!release) return { state: 'pending-release' };
+    release = await present(() => optional(api, base + '/releases/tags/' + enc(tag)));
+  if (!release) {
+    if (rc) { await rcTags(); fail('rc-release-missing'); }
+    return { state: 'pending-release' };
+  }
   const notes = await sourceReleaseNotes(api, context, pinned.version);
   requireReleaseNotes(release, context, tag, notes);
   if ((await peeledTag(api, context, tag)) !== context.sha) fail('release-conflict');
-  const assets = await pages(api, `${base}/releases/${release.id}/assets`),
-    markers = assets.filter((a) => a.name === `publish-attempt-${pinned.version}.json`);
+  const assets = await pages(api, base + '/releases/' + release.id + '/assets'),
+    markers = assets.filter((a) => a.name === 'publish-attempt-' + pinned.version + '.json');
   if (markers.length !== 1 || markers[0].state !== 'uploaded' || markers[0].size > 4096) fail('journal-conflict');
   const markerBytes = Buffer.from(
-      (await api('GET', `${base}/releases/assets/${markers[0].id}`, { accept: 'application/octet-stream' })).data),
+      (await api('GET', base + '/releases/assets/' + markers[0].id, { accept: 'application/octet-stream' })).data),
     marker = rc ? markerData(markerBytes, pinned.version, context.sha, markers[0].size) :
       parseJson('journal-json', markerBytes.toString('utf8'));
-  if (rc && (marker.runId !== context.runId || marker.runAttempt !== context.runAttempt)) fail('journal-conflict');
+  if (rc && marker.runId !== context.runId) fail('journal-conflict');
   if (marker.sha !== context.sha || marker.version !== pinned.version) fail('journal-conflict');
-  const registry = await registryVersion(pinned.version, fetcher);
-  if (!registry) return { state: 'pending-registry' };
+  const registry = await present(() => registryVersion(pinned.version, fetcher));
+  if (!registry) {
+    if (rc) { await rcTags(); fail('rc-registry-missing'); }
+    return { state: 'pending-registry' };
+  }
   if (
     registry.integrity !== marker.integrity ||
-    registry.tarball !== `https://registry.npmjs.org/foottrace/-/foottrace-${pinned.version}.tgz`
+    registry.tarball !== 'https://registry.npmjs.org/foottrace/-/foottrace-' + pinned.version + '.tgz'
   )
     fail('registry-conflict');
   const response = await registryFetch(registry.tarball, fetcher);
   if (!response.ok) fail('registry-unavailable');
   const archive = require('./release-archive.cjs').inspectArchive(
-    await responseBytes(response, 16 * 1024 * 1024, 'registry-body'),
-    {
-      package: 'foottrace',
-      version: pinned.version,
-    },
-  );
+    await responseBytes(response, 16 * 1024 * 1024, 'registry-body'), { package: 'foottrace', version: pinned.version });
   if (archive.integrity !== marker.integrity || archive.shasum !== registry.shasum) fail('registry-bytes');
-  const latestResponse = await registryFetch('https://registry.npmjs.org/foottrace/latest', fetcher);
-  if (!latestResponse.ok) fail('registry-unavailable');
-  const latest = parseJson(
-    'registry-latest-json',
-    (await responseBytes(latestResponse, 2 * 1024 * 1024, 'registry-body')).toString('utf8'),
-  );
-  let next;
-  if (rc) {
-    if (latest.name !== 'foottrace') fail('registry-shape');
-    if (latest.version !== pinned.fromVersion) fail('rc-latest');
-    const response = await registryFetch('https://registry.npmjs.org/foottrace/next', fetcher);
-    if (!response.ok || response.status !== 200) fail('registry-unavailable');
-    next = parseJson('registry-next-json',
+  let latest, next;
+  if (rc) ({ latest, next } = await rcTags());
+  else {
+    const response = await registryFetch('https://registry.npmjs.org/foottrace/latest', fetcher);
+    if (!response.ok) fail('registry-unavailable');
+    latest = parseJson('registry-latest-json',
       (await responseBytes(response, 2 * 1024 * 1024, 'registry-body')).toString('utf8'));
-    if (next.name !== 'foottrace') fail('registry-shape');
-    if (next.version !== pinned.version) fail('rc-next');
-    await assertCurrentMain(api, context);
   }
   return {
     state: rc ? 'verified' : latest.version === pinned.version ? 'verified' : 'pending-latest',
     ...(rc ? { next: next.version } : {}),
-    version: pinned.version,
-    latest: latest.version,
-    sha: context.sha,
-    integrity: archive.integrity,
-    shasum: archive.shasum,
-    sha256: archive.sha256,
-    provenance: registry.attestations ?? null,
-    provenanceCryptographicallyVerified: false,
+    version: pinned.version, latest: latest.version, sha: context.sha,
+    integrity: archive.integrity, shasum: archive.shasum, sha256: archive.sha256,
+    provenance: registry.attestations ?? null, provenanceCryptographicallyVerified: false,
     docs: 'No separate FootTrace docs deployment is configured.',
   };
 }
@@ -1459,6 +1474,7 @@ function environmentContext(env) {
     bump: env.RC_BUMP,
   };
   prefix(context);
+  if (!context.rc && context.bump && context.bump !== 'none') fail('rc-bump-without-rc');
   if (
     !control.validSha(context.sha) ||
     !Number.isSafeInteger(context.runId) ||

@@ -40,8 +40,8 @@ test('legacy GitHub release event is not a publication shortcut', () => {
 });
 test('one exact archive is published with project lifecycle scripts disabled', () => {
   const lines = publish.split('\n').filter((line) => line.includes('npm publish'));
-  assert.equal(lines.length, 1);
-  assert.match(lines[0], /--ignore-scripts/);
+  assert.equal(lines.length, 2);
+  for (const line of lines) assert.match(line, /--ignore-scripts/);
 });
 test('no automatic or force merge/rewrite path is introduced', () => {
   assert.doesNotMatch(publish, /--force(?:-with-lease)?\b|--admin\b|gh pr merge\b|enablePullRequestAutoMerge/);
@@ -83,8 +83,14 @@ test('controls check out exactly the event source, without persisted credentials
           (name === 'publish' &&
             [
               'test "$(npm --version)" = \'11.19.0\'',
-              'npm publish "$PACKAGE_FILE" --ignore-scripts --access public --tag "$NPM_TAG" --registry=https://registry.npmjs.org',
-            ].includes(command)),
+              [
+                'case "$NPM_TAG" in',
+                '  next) npm publish "$PACKAGE_FILE" --ignore-scripts --access public --tag next --registry=https://registry.npmjs.org ;;',
+                '  latest) npm publish "$PACKAGE_FILE" --ignore-scripts --access public --registry=https://registry.npmjs.org ;;',
+                '  *) exit 1 ;;',
+                'esac',
+              ].join('\n'),
+            ].includes(command.trimEnd())),
         `Unexpected ${name} command: ${command}`,
       );
   }

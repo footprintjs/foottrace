@@ -223,3 +223,27 @@ for (const [name, predicate, code] of [
     };
     await assert.rejects(() => write(x), { code });
   });
+
+for (const state of ['missing', 'foreign', 'unavailable'])
+  test('RC writer rereads its created tag and stops before release when ' + state, async () => {
+    const x = await prepared(),
+      api = x.f.api;
+    let created = false;
+    x.f.api = async (method, route, body) => {
+      if (method === 'POST' && route.endsWith('/git/refs')) {
+        const result = await api(method, route, body);
+        created = true;
+        return result;
+      }
+      if (created && method === 'GET' && route.endsWith('/git/ref/tags/' + x.identity.tag)) {
+        if (state === 'missing') throw Object.assign(new Error('missing'), { status: 404 });
+        if (state === 'unavailable') throw Object.assign(new Error('unavailable'), { status: 503 });
+        return { data: { object: { type: 'commit', sha: '9'.repeat(40) } } };
+      }
+      return api(method, route, body);
+    };
+    await assert.rejects(() => write(x));
+    assert.equal(created, true);
+    assert.equal(x.f.calls.filter((c) => c.method === 'POST').length, 1);
+    assert.equal(x.f.releases.size, 1, 'only the existing stable predecessor release remains');
+  });
