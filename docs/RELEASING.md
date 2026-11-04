@@ -128,3 +128,17 @@ ambiguity holds for coordination; no extra control ref, historical Actions-run
 absence proof, new credential, manual publication or reservation reset is added.
 Unmanaged legacy publication without the complete witness requires separately
 reviewed bootstrap evidence and is held rather than guessed.
+
+## Source release candidates (npm next)
+
+Dispatch `publish.yml` on main with **rc=true** and an explicit **bump**: patch, minor or major. The current stable version must already be published, main must still equal the dispatch SHA, and no open `release/next` proposal may exist. CodeQL must have completed successfully for that exact main push and its latest attempt; an unfinished run holds rather than polling.
+
+An RC has no release PR. Its named source-authority decision replaces only the stable route's release-PR/tree/approval question; it does not waive source review, private App authentication, the current producer, archive binding, reservation or publish-grant checks. Both full Node gates run. The source package/lock remain unchanged: only a staged package version changes immediately before packing, with lifecycle scripts disabled.
+
+The candidate uses the normal stable bump and the highest canonical matching `vX.Y.Z-rc.N` tag plus one (starting at zero). Fragments never choose the RC version. It creates an explicit source tag and a prerelease with `make_latest=false`, without creating a proposal, merging, deploying docs or re-dispatching. The inspected archive version selects npm `next`; stable archives select `latest`. Verification checks the actual registry package bytes, `next` at this RC, and `latest` still at the original stable version. Provenance metadata is not a claim of cryptographic verification.
+
+An RC never adopts an existing tag, release or attempt marker, even at the same SHA or in a later attempt of the same run. Every create must succeed strictly; a collision holds. Submission requires this run and attempt's own marker grant, the exact checked archive and fresh source/App/producer/security checks. A matching registry observation prevents another submission; a later absence cannot erase that observation.
+
+An uncertain response stops that invocation without retry. Leave partial tags/releases/markers in place: a tag without an npm package is an expected burned candidate number. A fresh dispatch repeats every eligibility predicate and selects from current tags. While an older create is not yet visible, it may encounter the same number, but its strict create must win independently or fail and hold. An old response, a missing snapshot or a failed-run record never supplies a grant. There is no RC recovery/adoption path, cleanup or cross-dispatch admission journal.
+
+Prepare the final release only after every downstream change is green against the candidate. If source changes, publish a new candidate first. Normal fragment preparation holds with `rc-final-target` unless its stable target matches the newest unpromoted RC core. Already-promoted RC tags do not block a subsequent stable patch. Release notes/fragments join the final train last.

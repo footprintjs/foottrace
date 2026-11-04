@@ -157,11 +157,15 @@ test('real IO adapter retains fixed checkout identity/tree and cleanliness reads
 test('production release helper closure is static, builtin-only and closed', () => {
   const closure = new Map([
     ['release-runner', ['release-github', 'release-control']],
-    ['release-github', ['release-prepare', 'release-control', 'release-archive', 'release-app-auth']],
+    [
+      'release-github',
+      ['release-prepare', 'release-control', 'release-archive', 'release-app-auth', 'release-rc-version'],
+    ],
     ['release-app-auth', []],
     ['release-prepare', ['release-changes']],
     ['release-changes', []],
-    ['release-control', []],
+    ['release-control', ['release-rc-version']],
+    ['release-rc-version', ['release-changes']],
     ['release-archive', []],
   ]);
   const builtins = new Set(['node:fs', 'node:path', 'node:child_process', 'node:crypto', 'node:zlib']);
@@ -238,7 +242,7 @@ test('publisher uses the actual isolated CWD/argv, ignoring hostile checkout con
     const command = /        run: (.+)/.exec(block)?.[1];
     assert.equal(
       command,
-      'npm publish "$PACKAGE_FILE" --ignore-scripts --access public --registry=https://registry.npmjs.org',
+      'npm publish "$PACKAGE_FILE" --ignore-scripts --access public --tag "$NPM_TAG" --registry=https://registry.npmjs.org',
     );
     fs.writeFileSync(
       path.join(bins, 'npm'),
@@ -250,6 +254,7 @@ test('publisher uses the actual isolated CWD/argv, ignoring hostile checkout con
       env: {
         PATH: bins + ':/usr/bin:/bin',
         PACKAGE_FILE: archive,
+        NPM_TAG: 'next',
         NODE_AUTH_TOKEN: '',
         NODE_OPTIONS: '',
         NODE_PATH: '',
@@ -260,7 +265,16 @@ test('publisher uses the actual isolated CWD/argv, ignoring hostile checkout con
     assert.equal(r.status, 0, r.stderr);
     assert.deepEqual(JSON.parse(r.stdout), {
       cwd: fs.realpathSync(path.dirname(archive)),
-      argv: ['publish', archive, '--ignore-scripts', '--access', 'public', '--registry=https://registry.npmjs.org'],
+      argv: [
+        'publish',
+        archive,
+        '--ignore-scripts',
+        '--access',
+        'public',
+        '--tag',
+        'next',
+        '--registry=https://registry.npmjs.org',
+      ],
     });
     assert.deepEqual(fs.readdirSync(path.dirname(archive)), ['package.tgz']);
     assert(!fs.existsSync(path.join(checkout, 'NEVER_RUN')));

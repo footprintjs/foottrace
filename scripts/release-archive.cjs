@@ -117,6 +117,7 @@ function inspectArchive(bytes, expected) {
       !identity ||
       identity.name !== expected.package ||
       identity.version !== expected.version ||
+      Object.prototype.hasOwnProperty.call(identity, 'publishConfig') ||
       !files.some((f) => f.path.startsWith('package/dist/'))
     )
       fail();

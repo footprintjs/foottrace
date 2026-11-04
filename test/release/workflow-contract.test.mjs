@@ -83,7 +83,7 @@ test('controls check out exactly the event source, without persisted credentials
           (name === 'publish' &&
             [
               'test "$(npm --version)" = \'11.19.0\'',
-              'npm publish "$PACKAGE_FILE" --ignore-scripts --access public --registry=https://registry.npmjs.org',
+              'npm publish "$PACKAGE_FILE" --ignore-scripts --access public --tag "$NPM_TAG" --registry=https://registry.npmjs.org',
             ].includes(command)),
         `Unexpected ${name} command: ${command}`,
       );
@@ -281,7 +281,7 @@ test('trusted workflow triggers and context stay bound to the actual event', () 
   const triggers = /^on:\n([\s\S]*?)^permissions:/m.exec(publish)?.[1];
   assert.equal(
     triggers,
-    '  push:\n    branches: [main]\n  workflow_dispatch:\n    inputs:\n      verify_only:\n        description: Inspect the existing release without preparation or submission\n        type: boolean\n        default: false\n',
+    '  push:\n    branches: [main]\n  workflow_dispatch:\n    inputs:\n      rc:\n        description: Publish a source release candidate without consuming fragments\n        type: boolean\n        default: false\n      bump:\n        description: Explicit candidate bump required when rc is true\n        type: choice\n        options: [none, patch, minor, major]\n        default: none\n      verify_only:\n        description: Inspect the existing release without preparation or submission\n        type: boolean\n        default: false\n',
   );
   assert.equal(condition('plan'), "github.ref == 'refs/heads/main'");
   for (const [name, field] of [

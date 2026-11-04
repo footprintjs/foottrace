@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { gzipSync } from 'node:zlib';
 import { createHash } from 'node:crypto';
-import { call, sha, authorityApiFixture, executeWorkflowStage } from './helpers.mjs';
+import { call, sha, authorityApiFixture, executeWorkflowStage, artifactZip as zip } from './helpers.mjs';
 
 // Tiny synthetic USTAR fixture builder. Never extracts or executes its members.
 function tar(members) {
@@ -179,47 +179,6 @@ for (const [name, change] of [
     change(world);
     assert.equal(call('release-control', 'validateArtifactBinding', world).valid, false);
   });
-function zip(entries) {
-  const locals = [],
-    central = [];
-  let offset = 0;
-  const crc = (bytes) => {
-    let n = 0xffffffff;
-    for (const b of bytes) {
-      n ^= b;
-      for (let i = 0; i < 8; i++) n = n & 1 ? (n >>> 1) ^ 0xedb88320 : n >>> 1;
-    }
-    return (n ^ 0xffffffff) >>> 0;
-  };
-  for (const [name, value] of entries) {
-    const data = Buffer.from(value),
-      n = Buffer.from(name),
-      h = Buffer.alloc(30),
-      c = Buffer.alloc(46);
-    h.writeUInt32LE(0x04034b50);
-    h.writeUInt32LE(crc(data), 14);
-    h.writeUInt32LE(data.length, 18);
-    h.writeUInt32LE(data.length, 22);
-    h.writeUInt16LE(n.length, 26);
-    c.writeUInt32LE(0x02014b50);
-    c.writeUInt32LE(crc(data), 16);
-    c.writeUInt32LE(data.length, 20);
-    c.writeUInt32LE(data.length, 24);
-    c.writeUInt16LE(n.length, 28);
-    c.writeUInt32LE(offset, 42);
-    locals.push(h, n, data);
-    central.push(c, n);
-    offset += h.length + n.length + data.length;
-  }
-  const end = Buffer.alloc(22),
-    dir = Buffer.concat(central);
-  end.writeUInt32LE(0x06054b50);
-  end.writeUInt16LE(entries.length, 8);
-  end.writeUInt16LE(entries.length, 10);
-  end.writeUInt32LE(dir.length, 12);
-  end.writeUInt32LE(offset, 16);
-  return Buffer.concat([...locals, dir, end]);
-}
 test('artifact ZIP is read without extraction and admits only the fixed members', () => {
   const result = call(
     'release-archive',
@@ -613,4 +572,35 @@ test('actual release/reservation/grant/registry path preserves checked bytes and
       });
   release.body = originalNotes;
   changelog = originalChangelog;
+});
+
+for (const publishConfig of [
+  { registry: 'http://127.0.0.1:9/evil/' },
+  { 'https-proxy': 'http://127.0.0.1:9/' },
+  { tag: 'latest' },
+  {},
+  null,
+  false,
+  'invalid',
+]) {
+  test('archive publishConfig refuses ' + JSON.stringify(publishConfig), () => {
+    const fixture = members();
+    fixture[0].body = JSON.stringify({ name: 'foottrace', version: '1.9.0', publishConfig });
+    assert.throws(() => call('release-archive', 'inspectArchive', tar(fixture), expected()), {
+      code: 'invalid-archive',
+    });
+  });
+}
+test('archive publishConfig absence preserves the exact admitted bytes', () => {
+  const bytes = tar(members());
+  let result;
+  assert.doesNotThrow(() => {
+    result = call('release-archive', 'inspectArchive', bytes, expected());
+  });
+  assert.equal(result.sha256, createHash('sha256').update(bytes).digest('hex'));
+});
+test('archive refuses a later foreign-root manifest that npm could otherwise select', () => {
+  const fixture = members();
+  fixture.push({ name: 'x/package.json', body: JSON.stringify({ name: 'foottrace', version: '99.0.0' }) });
+  assert.throws(() => call('release-archive', 'inspectArchive', tar(fixture), expected()), { code: 'invalid-archive' });
 });

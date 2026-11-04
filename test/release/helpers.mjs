@@ -249,6 +249,7 @@ export function managedReleaseFixture({ version = '1.10.0', published = false, m
     if (method === 'GET') {
       if (path === base) return { data: repository };
       if (path.endsWith('/git/ref/heads/main')) return { data: { object: { type: 'commit', sha: remoteMain ?? context.sha } } };
+      if (path.endsWith('/git/matching-refs/tags/v')) return { data: [...tags].map(([tag, source]) => ({ ref: 'refs/tags/' + tag, object: { type: 'commit', sha: source } })) };
       if (path.endsWith('/git/ref/heads/release/next')) return tip ? { data: { object: { type: 'commit', sha: tip } } } : missing();
       if (path.includes('/git/ref/tags/')) { const value = tags.get(decodeURIComponent(path.split('/').at(-1))); return value ? { data: { object: { type: 'commit', sha: value } } } : missing(); }
       if (path.includes('/releases/tags/')) { const value = releases.get(decodeURIComponent(path.split('/').at(-1))); return value ? { data: value } : missing(); }
@@ -406,6 +407,7 @@ export async function executeWorkflowStage(stage, { env, api, fetcher }) {
     try {
       const response = await api(options.method ?? 'GET', route, body);
       return new Response(Buffer.isBuffer(response.data) ? response.data : JSON.stringify(response.data), {
+        status: response.status ?? 200,
         headers: { 'content-type': Buffer.isBuffer(response.data) ? 'application/octet-stream' : 'application/json' },
       });
     } catch (e) {
@@ -435,4 +437,47 @@ export async function executeWorkflowStage(stage, { env, api, fetcher }) {
     failure = error.code ?? error.message;
   }
   return { output, failure, exit: failure ? 1 : 0, writes, summary };
+}
+
+// Whole synthetic ZIP writer shared by native archive and RC end-to-end subjects.
+export function artifactZip(entries) {
+  const locals = [],
+    central = [];
+  let offset = 0;
+  const crc = (bytes) => {
+    let n = 0xffffffff;
+    for (const b of bytes) {
+      n ^= b;
+      for (let i = 0; i < 8; i++) n = n & 1 ? (n >>> 1) ^ 0xedb88320 : n >>> 1;
+    }
+    return (n ^ 0xffffffff) >>> 0;
+  };
+  for (const [name, value] of entries) {
+    const data = Buffer.from(value),
+      n = Buffer.from(name),
+      h = Buffer.alloc(30),
+      c = Buffer.alloc(46);
+    h.writeUInt32LE(0x04034b50);
+    h.writeUInt32LE(crc(data), 14);
+    h.writeUInt32LE(data.length, 18);
+    h.writeUInt32LE(data.length, 22);
+    h.writeUInt16LE(n.length, 26);
+    c.writeUInt32LE(0x02014b50);
+    c.writeUInt32LE(crc(data), 16);
+    c.writeUInt32LE(data.length, 20);
+    c.writeUInt32LE(data.length, 24);
+    c.writeUInt16LE(n.length, 28);
+    c.writeUInt32LE(offset, 42);
+    locals.push(h, n, data);
+    central.push(c, n);
+    offset += h.length + n.length + data.length;
+  }
+  const end = Buffer.alloc(22),
+    dir = Buffer.concat(central);
+  end.writeUInt32LE(0x06054b50);
+  end.writeUInt16LE(entries.length, 8);
+  end.writeUInt16LE(entries.length, 10);
+  end.writeUInt32LE(dir.length, 12);
+  end.writeUInt32LE(offset, 16);
+  return Buffer.concat([...locals, dir, end]);
 }
