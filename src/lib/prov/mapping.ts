@@ -2,7 +2,8 @@ import { collectControlParentCoverage, controlParentLookup } from '../cause/reco
 import { readKeysForStage } from '../cause/recordScope.js';
 import type { PreparedRecordScope } from '../cause/recordTypes.js';
 import { ProvBudget } from './budget.js';
-import { nativeExecution, ProvIds } from './ids.js';
+import { nativeExecution } from '../ids/nativeExecution.js';
+import { ProvIds } from './ids.js';
 import { ProvOutput } from './output.js';
 import type { AdmittedCommit, AdmittedProvRecord } from './types.js';
 

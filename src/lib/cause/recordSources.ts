@@ -5,7 +5,7 @@ import { relation } from '../memory/keyPaths.js';
 import { nativeGet, nativeHas } from '../memory/pathOps.js';
 import { normaliseStateKey, pathSegments } from '../memory/paths.js';
 import type { CommitBundle } from '../memory/types.js';
-import { nativeExecution } from '../prov/ids.js';
+import { nativeExecution } from '../ids/nativeExecution.js';
 import { decodeReadSourceSnapshot } from '../read-sources/codec.js';
 import type { ReadSourceGap, ReadSourceOccurrence, ReadSourceSnapshot } from '../read-sources/types.js';
 import {

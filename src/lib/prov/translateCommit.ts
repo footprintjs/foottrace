@@ -1,4 +1,4 @@
-import { nativeExecution } from './ids.js';
+import { nativeExecution } from '../ids/nativeExecution.js';
 import { reference } from './translation.js';
 import type { ProvCommitContext, ProvTranslation } from './translation.js';
 import type { AdmittedCommit, ProvNode } from './types.js';

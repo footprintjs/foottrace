@@ -4,6 +4,7 @@
   "src/lib/capture/valueKinds.ts": 0,
   "src/lib/ids/attemptId.ts": 0,
   "src/lib/ids/runtimeStageId.ts": 0,
+  "src/lib/ids/nativeExecution.ts": 0,
   "src/lib/memory/EventLog.ts": 3,
   "src/lib/memory/RecordFrame.ts": 3,
   "src/lib/memory/SharedMemory.ts": 2,

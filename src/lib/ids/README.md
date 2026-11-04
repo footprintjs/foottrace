@@ -13,6 +13,8 @@ The root entry exposes the ID grammar. `idPathSegments` splits slash-delimited I
 
 A generated segment such as `review~2` is opaque to readers. The engine owns branch-name generation and reserved-ID admission; those files remain in FootPrint. Readers never load them. `isExecutionKey` checks a delimiter, not full admission validity.
 
+The private `nativeExecution.ts` admission uses this codec's parse/build round trip to refuse missing executions, invalid indices and noncanonical suffixes. Cause, read-source and PROV consumers share that admission without depending on each other's folders. Its tests live beside it; it adds no public export.
+
 `RuntimeStageId`, `ExecutionIndex` and `CommitIdx` are type-only brands assignable to their underlying string/number. The grammar is a dependency-free leaf, checked by the package fence.
 
 ## Attempt ids (1.1.0)
