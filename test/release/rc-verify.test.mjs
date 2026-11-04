@@ -1,0 +1,384 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
+import { syntheticPackageArchive, sha, executeWorkflowStage } from './helpers.mjs';
+const require = createRequire(import.meta.url),
+  runtime = require('../../scripts/release-github.cjs'),
+  archive = require('../../scripts/release-archive.cjs');
+function fixture() {
+  const repository = { id: 123, full_name: 'footprintjs/foottrace' },
+    version = '2.0.0-rc.0',
+    source = sha('1');
+  const context = {
+    repository,
+    sha: source,
+    ref: 'refs/heads/main',
+    eventName: 'workflow_dispatch',
+    runId: 500,
+    runAttempt: 2,
+  };
+  const pinned = {
+    mode: 'rc',
+    repository,
+    sha: source,
+    tree: sha('3'),
+    package: 'foottrace',
+    version,
+    fromVersion: '1.11.0',
+  };
+  const bytes = syntheticPackageArchive(version),
+    info = archive.inspectArchive(bytes, { package: 'foottrace', version });
+  const marker = { version, runId: 500, runAttempt: 2, sha: source, integrity: info.integrity };
+  const f = {
+    context,
+    pinned,
+    bytes,
+    info,
+    marker,
+    main: source,
+    tag: source,
+    next: version,
+    latest: '1.11.0',
+    calls: [],
+    reads: [],
+  };
+  f.release = {
+    id: 20,
+    tag_name: 'v' + version,
+    target_commitish: source,
+    draft: false,
+    prerelease: true,
+    body: 'Release candidate ' + version + ' from ' + source + '.\n',
+  };
+  f.api = async (method, route, body) => {
+    f.calls.push({ method, route });
+    assert.equal(method, 'GET', 'Verification is GET-only');
+    const base = '/repos/footprintjs/foottrace';
+    if (route === base + '/git/ref/heads/main') return { data: { object: { type: 'commit', sha: f.main } } };
+    if (route === base + '/git/ref/tags/v' + version) return { data: { object: { type: 'commit', sha: f.tag } } };
+    if (route === base + '/releases/tags/v' + version) return { data: f.release };
+    const raw = Buffer.from(JSON.stringify(f.marker));
+    if (route === base + '/releases/20/assets?per_page=100&page=1')
+      return { data: [{ id: 21, name: 'publish-attempt-' + version + '.json', size: raw.length, state: 'uploaded' }] };
+    if (route === base + '/releases/assets/21' && body?.accept === 'application/octet-stream') return { data: raw };
+    // The pinned source keeps its STABLE changelog; an RC has no RC commit.
+    if (route === base + '/contents/CHANGELOG.md?ref=' + source) {
+      const text = '# Changelog\n\n## 1.11.0 — 2026-11-01\n\n- Stable release.\n';
+      return {
+        data: {
+          type: 'file',
+          encoding: 'base64',
+          content: Buffer.from(text).toString('base64'),
+          size: Buffer.byteLength(text),
+        },
+      };
+    }
+    assert.fail('Unexpected RC verification route ' + route);
+  };
+  f.fetcher = async (url, options) => {
+    f.reads.push(url);
+    assert(!options?.method || options.method === 'GET');
+    const base = 'https://registry.npmjs.org/foottrace';
+    if (url === base + '/' + version)
+      return Response.json({
+        name: 'foottrace',
+        version,
+        dist: {
+          integrity: f.info.integrity,
+          shasum: f.info.shasum,
+          tarball: base + '/-/foottrace-' + version + '.tgz',
+        },
+      });
+    if (url === base + '/-/foottrace-' + version + '.tgz') return new Response(f.bytes);
+    if (url === base + '/latest') return Response.json({ name: 'foottrace', version: f.latest });
+    if (url === base + '/next') return Response.json({ name: 'foottrace', version: f.next });
+    assert.fail('Unexpected RC registry read ' + url);
+  };
+  return f;
+}
+test('RC verify derives fixed source-bound notes without an RC changelog commit', async () => {
+  const f = fixture();
+  let notes;
+  await assert.doesNotReject(async () => {
+    notes = await runtime.sourceReleaseNotes(f.api, f.context, f.pinned.version);
+  });
+  assert.equal(notes, f.release.body);
+  assert.equal(f.calls.length, 0);
+});
+test('RC verify checks exact package bytes, same-run marker, next and unchanged latest', async () => {
+  const f = fixture();
+  let result;
+  await assert.doesNotReject(async () => {
+    result = await runtime.verifyPublished(f.api, f.context, f.pinned, f.fetcher);
+  });
+  assert.equal(result.state, 'verified');
+  assert.equal(result.version, f.pinned.version);
+  assert.equal(result.next, f.pinned.version);
+  assert.equal(result.latest, f.pinned.fromVersion);
+  assert.equal(result.sha256, f.info.sha256);
+  assert.equal(result.provenanceCryptographicallyVerified, false);
+  assert.equal(f.reads.filter((u) => u.endsWith('/next')).length, 1);
+  assert.equal(f.reads.filter((u) => u.endsWith('/latest')).length, 1);
+  assert(f.calls.every((x) => x.method === 'GET'));
+});
+
+for (const [name, change, code] of [
+  ['next moved', (f) => (f.next = '2.0.0-rc.1'), 'rc-next'],
+  ['latest changed', (f) => (f.latest = '2.0.0'), 'rc-latest'],
+  ['old reservation run', (f) => (f.marker.runId = 499), 'journal-conflict'],
+  ['foreign reservation source', (f) => (f.marker.sha = sha('9')), 'journal-conflict'],
+  ['unadmitted reservation field', (f) => (f.marker.extra = 'not-a-grant'), 'journal-conflict'],
+  ['wrong package bytes', (f) => (f.bytes = syntheticPackageArchive('2.0.0-rc.1')), 'invalid-archive'],
+  ['registry byte digest', (f) => (f.info.shasum = sha('9')), 'registry-bytes'],
+  ['registry integrity', (f) => (f.info.integrity = 'sha512-not-the-archive'), 'registry-conflict'],
+  ['foreign tag source', (f) => (f.tag = sha('9')), 'release-conflict'],
+  ['ordinary final release flag', (f) => (f.release.prerelease = false), 'release-conflict'],
+  ['wrong source release notes', (f) => (f.release.body = 'different\n'), 'release-conflict'],
+  ['wrong release source', (f) => (f.release.target_commitish = sha('9')), 'release-conflict'],
+])
+  test('RC verify refuses ' + name, async () => {
+    const f = fixture();
+    change(f);
+    await assert.rejects(() => runtime.verifyPublished(f.api, f.context, f.pinned, f.fetcher), { code });
+    assert(f.calls.every((c) => c.method === 'GET'));
+  });
+for (const [name, suffix, response, code] of [
+  ['unknown next', '/next', () => new Response('', { status: 404 }), 'rc-next'],
+  ['unavailable latest', '/latest', () => new Response('', { status: 503 }), 'registry-unavailable'],
+  [
+    'malformed next',
+    '/next',
+    () => new Response('{', { headers: { 'content-type': 'application/json' } }),
+    'registry-next-json:json',
+  ],
+  ['foreign next package', '/next', () => Response.json({ name: 'other', version: '2.0.0-rc.0' }), 'registry-shape'],
+  ['foreign latest package', '/latest', () => Response.json({ name: 'other', version: '1.11.0' }), 'registry-shape'],
+])
+  test('RC verify refuses ' + name + ' without polling', async () => {
+    const f = fixture(),
+      fetcher = f.fetcher;
+    let attempts = 0;
+    f.fetcher = async (url, options) => {
+      if (url.endsWith(suffix)) {
+        attempts++;
+        return response();
+      }
+      return fetcher(url, options);
+    };
+    await assert.rejects(() => runtime.verifyPublished(f.api, f.context, f.pinned, f.fetcher), { code });
+    assert.equal(attempts, 1);
+  });
+test('RC verification can repair a prior failed attempt after main advances', async () => {
+  const f = fixture(),
+    fetcher = f.fetcher;
+  f.fetcher = (url, options) =>
+    url.endsWith('/next') ? Promise.resolve(new Response('', { status: 404 })) : fetcher(url, options);
+  await assert.rejects(() => runtime.verifyPublished(f.api, f.context, f.pinned, f.fetcher), {
+    code: 'rc-next',
+  });
+  f.context.runAttempt = 3;
+  f.main = sha('9');
+  const start = f.calls.length;
+  let result;
+  await assert.doesNotReject(async () => {
+    result = await runtime.verifyPublished(f.api, f.context, f.pinned, fetcher);
+  });
+  assert.equal(result.state, 'verified');
+  assert.equal(result.next, f.pinned.version);
+  assert(!f.calls.slice(start).some((c) => c.route.endsWith('/git/ref/heads/main')));
+  assert(f.calls.every((c) => c.method === 'GET'));
+});
+for (const missing of ['release', 'registry'])
+  test('RC verify fails named after bounded GET-only wait for missing ' + missing, async () => {
+    const f = fixture(),
+      api = f.api,
+      fetcher = f.fetcher;
+    let attempts = 0,
+      waits = 0;
+    if (missing === 'release')
+      f.api = async (...args) => {
+        if (args[1].endsWith('/releases/tags/v' + f.pinned.version)) {
+          attempts++;
+          throw Object.assign(new Error('not-found'), { status: 404 });
+        }
+        return api(...args);
+      };
+    else
+      f.fetcher = async (url, options) => {
+        if (url.endsWith('/' + f.pinned.version)) {
+          attempts++;
+          return new Response('', { status: 404 });
+        }
+        return fetcher(url, options);
+      };
+    await assert.rejects(
+      () =>
+        runtime.verifyPublished(f.api, f.context, f.pinned, f.fetcher, async (ms) => {
+          assert.equal(ms, 1000);
+          waits++;
+        }),
+      { code: 'rc-' + missing + '-missing' },
+    );
+    assert.equal(attempts, 3);
+    assert.equal(waits, 2);
+    assert.equal(f.reads.filter((u) => u.endsWith('/next')).length, 1);
+    assert.equal(f.reads.filter((u) => u.endsWith('/latest')).length, 1);
+    assert(f.calls.every((c) => c.method === 'GET'));
+  });
+test('RC verification tolerates finite registry lag then checks actual bytes and tags', async () => {
+  const f = fixture(),
+    fetcher = f.fetcher;
+  let attempts = 0,
+    waits = 0;
+  f.fetcher = async (url, options) => {
+    if (url.endsWith('/' + f.pinned.version) && ++attempts < 3) return new Response('', { status: 404 });
+    return fetcher(url, options);
+  };
+  const result = await runtime.verifyPublished(f.api, f.context, f.pinned, f.fetcher, async () => {
+    waits++;
+  });
+  assert.equal(result.state, 'verified');
+  assert.equal(attempts, 3);
+  assert.equal(waits, 2);
+  assert.equal(result.sha256, f.info.sha256);
+});
+test('RC verify reads both tags even when latest is wrong', async () => {
+  const f = fixture();
+  f.latest = '2.0.0';
+  await assert.rejects(() => runtime.verifyPublished(f.api, f.context, f.pinned, f.fetcher), { code: 'rc-latest' });
+  assert.equal(f.reads.filter((u) => u.endsWith('/next')).length, 1);
+  assert.equal(f.reads.filter((u) => u.endsWith('/latest')).length, 1);
+});
+test('native RC verification stays read-only across attempt and main changes', async () => {
+  const f = fixture();
+  f.context.runAttempt = 3;
+  f.main = sha('9');
+  let result;
+  await assert.doesNotReject(async () => {
+    result = await runtime.runStage('verify', {
+      context: f.context,
+      env: { PLAN_JSON: JSON.stringify(f.pinned) },
+      api: f.api,
+      fetcher: f.fetcher,
+      io: { write: () => assert.fail('verify cannot write') },
+    });
+  });
+  assert.equal(JSON.parse(result.verification).state, 'verified');
+  assert(f.calls.every((c) => c.method === 'GET'));
+});
+test('RC notes reject noncanonical candidate numbers before any content read', async () => {
+  const f = fixture();
+  await assert.rejects(() => runtime.sourceReleaseNotes(f.api, f.context, '2.0.0-rc.01'), { code: 'rc-version' });
+  assert.equal(f.calls.length, 0);
+});
+
+test('native RC verify entry returns diagnostic verification without any submission path', async () => {
+  const f = fixture();
+  let result;
+  await assert.doesNotReject(async () => {
+    result = await runtime.runStage('verify', {
+      context: f.context,
+      env: { PLAN_JSON: JSON.stringify(f.pinned) },
+      api: f.api,
+      fetcher: f.fetcher,
+      io: { write: () => assert.fail('verify must not write a package') },
+    });
+  });
+  assert.equal(JSON.parse(result.verification).state, 'verified');
+  assert.equal(Object.hasOwn(result, 'submit'), false);
+  assert(f.calls.every((c) => c.method === 'GET'));
+});
+
+test('actual verify CLI fails named without pending output when submitted RC stays absent', async () => {
+  const f = fixture(),
+    fetcher = f.fetcher;
+  let reads = 0;
+  const result = await executeWorkflowStage('verify', {
+    env: {
+      REPO_ID: '123',
+      REPO_NAME: f.context.repository.full_name,
+      SOURCE_SHA: f.context.sha,
+      SOURCE_REF: f.context.ref,
+      EVENT_NAME: 'workflow_dispatch',
+      RUN_ID: '500',
+      RUN_ATTEMPT: '3',
+      RC: 'true',
+      RC_BUMP: 'major',
+      PLAN_JSON: JSON.stringify(f.pinned),
+    },
+    api: f.api,
+    fetcher: (url, options) => {
+      if (url.endsWith('/' + f.pinned.version)) {
+        reads++;
+        return Promise.resolve(new Response('', { status: 404 }));
+      }
+      return fetcher(url, options);
+    },
+  });
+  assert.equal(result.exit, 1);
+  assert.equal(result.failure, 'rc-registry-missing');
+  assert.equal(result.output, '');
+  assert.equal(reads, 3);
+  assert.equal(f.reads.filter((u) => u.endsWith('/next')).length, 1);
+  assert.equal(f.reads.filter((u) => u.endsWith('/latest')).length, 1);
+  assert(f.calls.every((c) => c.method === 'GET'));
+});
+
+for (const missing of ['release', 'registry'])
+  for (const nextState of ['absent', 'older'])
+    test('RC honest ' + missing + ' absence is named before ' + nextState + ' next', async () => {
+      const f = fixture(),
+        api = f.api,
+        fetcher = f.fetcher;
+      let attempts = 0,
+        waits = 0;
+      f.api = async (...args) => {
+        if (missing === 'release' && args[1].endsWith('/releases/tags/v' + f.pinned.version)) {
+          attempts++;
+          throw Object.assign(new Error('not-found'), { status: 404 });
+        }
+        return api(...args);
+      };
+      f.fetcher = async (url, options) => {
+        if (missing === 'registry' && url.endsWith('/' + f.pinned.version)) {
+          attempts++;
+          return new Response('', { status: 404 });
+        }
+        if (url.endsWith('/next'))
+          return nextState === 'absent'
+            ? new Response('', { status: 404 })
+            : Response.json({ name: 'foottrace', version: '1.12.0-rc.0' });
+        return fetcher(url, options);
+      };
+      await assert.rejects(
+        () =>
+          runtime.verifyPublished(f.api, f.context, f.pinned, f.fetcher, async () => {
+            waits++;
+          }),
+        { code: 'rc-' + missing + '-missing' },
+      );
+      assert.equal(attempts, 3);
+      assert.equal(waits, 2);
+      assert(f.calls.every((c) => c.method === 'GET'));
+    });
+for (const missing of ['release', 'registry', 'neither'])
+  test('RC on latest outranks absent next and ' + missing + ' absence', async () => {
+    const f = fixture(),
+      api = f.api,
+      fetcher = f.fetcher;
+    f.latest = f.pinned.version;
+    f.api = async (...args) => {
+      if (missing === 'release' && args[1].endsWith('/releases/tags/v' + f.pinned.version))
+        throw Object.assign(new Error('not-found'), { status: 404 });
+      return api(...args);
+    };
+    f.fetcher = async (url, options) => {
+      if (url.endsWith('/next') || (missing === 'registry' && url.endsWith('/' + f.pinned.version)))
+        return new Response('', { status: 404 });
+      return fetcher(url, options);
+    };
+    await assert.rejects(() => runtime.verifyPublished(f.api, f.context, f.pinned, f.fetcher, async () => {}), {
+      code: 'rc-latest',
+    });
+    assert(f.calls.every((c) => c.method === 'GET'));
+  });

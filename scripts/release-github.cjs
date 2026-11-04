@@ -2,6 +2,7 @@
 const preparation = require('./release-prepare.cjs');
 const { prepareRelease } = preparation;
 const control = require('./release-control.cjs');
+const rcVersion = require('./release-rc-version.cjs');
 const { appRequest } = require('./release-app-auth.cjs');
 const fail = (code) => {
   const e = new Error(code);
@@ -12,6 +13,32 @@ const fail = (code) => {
 // Codes are diagnostic labels, never evidence of authority. Do not inspect messages,
 // stacks or arbitrary object stringification at this output boundary.
 const LEGACY_CODES = new Set([
+  'rc-identity',
+  'rc-event',
+  'rc-source',
+  'rc-stable',
+  'rc-proposal',
+  'rc-app',
+  'rc-producer',
+  'rc-version',
+  'rc-plan',
+  'rc-tag',
+  'rc-registry',
+  'rc-evidence',
+  'rc-phase',
+  'rc-tags',
+  'rc-tag-number',
+  'rc-bump',
+  'rc-bump-without-rc',
+  'rc-release-missing',
+  'rc-registry-missing',
+  'rc-final-target',
+  'rc-next',
+  'rc-latest',
+  'rc-existing-tag',
+  'rc-existing-release',
+  'rc-tag-create',
+  'rc-release-create',
   'EEXIST',
   'api-route',
   'app-settings',
@@ -154,6 +181,7 @@ const OPERATIONS = new Set([
   'journal-json',
   'registry-json',
   'registry-latest-json',
+  'registry-next-json',
 ]);
 const REASONS = new Set([
   'app-auth',
@@ -192,6 +220,8 @@ function ownData(value, key) {
   }
 }
 function refusalCode(error) {
+  const archive = require('./release-archive.cjs').archiveRefusalCode(error);
+  if (archive !== undefined) return archive;
   const code = ownData(error, 'code');
   return typeof code === 'string' && PRINTABLE_CODES.has(code) ? code : 'release-unexpected';
 }
@@ -201,6 +231,7 @@ function diagnostic(code, message = code) {
   return error;
 }
 function contextual(error, operation) {
+  if (require('./release-archive.cjs').archiveRefusalCode(error) !== undefined) return error;
   if (!OPERATIONS.has(operation)) return diagnostic('diagnostic-operation');
   const code = refusalCode(error);
   // Keep exact direct-caller contracts and already-contextualized failures intact.
@@ -271,6 +302,7 @@ async function pages(api, route, key) {
 async function assertCurrentMain(api, context) {
   const current = (await api('GET', `${prefix(context)}/git/ref/heads/main`)).data;
   if (current.object?.sha !== context.sha) fail('main-moved');
+  return current.object.sha;
 }
 async function content(api, context, path) {
   if (!control.validSha(context.sha)) fail('source-sha');
@@ -555,11 +587,67 @@ async function requireRecoverySource(api, context, identity, options) {
   await assertCurrentMain(api, context);
   return input.intents.active.length > 0;
 }
+async function rcTagRefs(api, context) {
+  // GitHub's matching-refs endpoint returns the complete matching array; it has
+  // no pagination parameters. Ref names, not response order, select RC numbers.
+  const rows = (await api('GET', prefix(context) + '/git/matching-refs/tags/v')).data;
+  if (!Array.isArray(rows) || rows.length > 4096) fail('rc-tags');
+  const seen = new Set();
+  for (const row of rows) {
+    if (typeof row?.ref !== 'string' || !row.ref.startsWith('refs/tags/v') ||
+        seen.has(row.ref) || !['commit', 'tag'].includes(row.object?.type) ||
+        !control.validSha(row.object.sha)) fail('rc-tags');
+    seen.add(row.ref);
+  }
+  return [...seen];
+}
+async function rcSource(api, context, pinned, phase, options) {
+  if (context.rc !== true || context.verify === true || context.eventName !== 'workflow_dispatch' ||
+      context.ref !== 'refs/heads/main' || !['initial', 'publish'].includes(phase)) fail('rc-event');
+  await assertCurrentMain(api, context);
+  const input = await sourceInput(api, context);
+  if (input.intents.active.length) await activeHistory(api, context, input, await publicBot(api, options.settings));
+  const pulls = await pages(api, prefix(context) + '/pulls?state=open&head=footprintjs:release/next&base=main');
+  if (pulls.length) fail('rc-proposal');
+  const publication = await publicationState(api, context, input, options);
+  if (publication.state !== 'published' || publication.latest !== input.pkg.version) fail('rc-stable');
+  const selectedVersion = phase === 'initial' ?
+    rcVersion.candidateVersion(input.pkg.version, context.bump, await rcTagRefs(api, context)) : undefined,
+    version = pinned?.version ?? selectedVersion;
+  if (rcVersion.candidateCore(version) !== rcVersion.targetVersion(input.pkg.version, context.bump) ||
+      (phase === 'initial' && selectedVersion !== version)) fail('rc-plan');
+  const expected = { mode: 'rc', repository: context.repository, sourceSha: context.sha,
+    tree: input.commit.tree.sha, package: input.pkg.name, fromVersion: input.pkg.version,
+    version, tag: 'v' + version };
+  const tag = await peeledTag(api, context, expected.tag), registry = await registryVersion(version, options.fetcher);
+  if (phase === 'initial' ? tag !== null : tag !== context.sha) fail('rc-tag');
+  if (phase === 'initial' && registry !== null) fail('rc-registry');
+  await assertCurrentMain(api, context);
+  return { expected, input, publication, pulls, selectedVersion, tag, registry };
+}
+
+function requireFinalRcTarget(current, target, refs) {
+  let newest = null;
+  for (const ref of refs) {
+    if (!/^refs\/tags\/v[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$/.test(ref)) continue;
+    const core = rcVersion.candidateCore(ref.slice('refs/tags/v'.length));
+    if (preparation.versionOrder(core, current) > 0 &&
+        (newest === null || preparation.versionOrder(core, newest) > 0)) newest = core;
+  }
+  if (newest !== null && target !== newest) fail('rc-final-target');
+}
+
 async function plan(api, context, options = {}) {
+  if (context.rc !== true && context.bump && context.bump !== 'none') fail('rc-bump-without-rc');
   if (!['push', 'workflow_dispatch'].includes(context.eventName) || context.ref !== 'refs/heads/main' || !control.validSha(context.sha)) fail('event');
   const repo = (await api('GET', prefix(context))).data;
   if (!control.sameRepo(repo, context.repository)) fail('repository');
   await assertCurrentMain(api, context);
+  if (context.rc === true) {
+    const { expected, input } = await rcSource(api, context, null, 'initial', options);
+    return { mode: 'rc', repository: context.repository, sha: context.sha, tree: expected.tree,
+      version: expected.version, fromVersion: expected.fromVersion, package: expected.package, date: input.date };
+  }
   const input = await sourceInput(api, context);
   if (input.intents.active.length) await activeHistory(api, context, input, await publicBot(api, options.settings));
   const classification = await publicationState(api, context, input, options);
@@ -590,6 +678,7 @@ async function plan(api, context, options = {}) {
     } else mode = 'publish';
   } else fail('recovery-state');
   const prepared = preparationKind === 'next' ? prepareRelease({ files: input.files, fragments: input.fragments, date: input.date }) : null;
+  if (prepared) requireFinalRcTarget(input.pkg.version, prepared.version, await rcTagRefs(api, context));
   await assertCurrentMain(api, context);
   return { mode, ...(preparationKind ? { preparationKind } : {}), repository: context.repository, sha: context.sha,
     tree: input.commit.tree.sha, version: prepared?.version ?? input.pkg.version, package: input.pkg.name, date: input.date };
@@ -606,6 +695,41 @@ async function prepareProposal(api, context, pinned, options = {}) {
   await assertCurrentMain(api, context);
   return { base: context.sha, tree: pinned.tree, repository: context.repository, prepared };
 }
+async function collectApp(api, settings) {
+  if (!/^[a-z0-9-]+$/.test(settings.slug ?? '') || typeof settings.clientId !== 'string' || !settings.clientId)
+    fail('app-settings');
+  const metadata = await withRefusal(
+    'authority-app',
+    async () => (await api('GET', `/apps/${enc(settings.slug)}`)).data,
+  );
+  const bot = await withRefusal(
+    'authority-bot',
+    async () => (await api('GET', `/users/${enc(settings.slug + '[bot]')}`)).data,
+  );
+  return { expectedClientId: settings.clientId, expectedSlug: settings.slug, metadata, bot };
+}
+
+async function collectRcAuthority(api, context, pinned, role, options = {}) {
+  if (!['authority', 'release', 'publish'].includes(role)) fail('rc-phase');
+  const phase = role === 'publish' ? 'publish' : 'initial',
+    w = await rcSource(api, context, pinned, phase, options), e = w.expected;
+  const freshPlan = { mode: 'rc', repository: context.repository, sha: context.sha, tree: e.tree,
+    version: e.version, fromVersion: e.fromVersion, package: e.package, date: w.input.date };
+  exactData(freshPlan, pinned, 'rc-plan');
+  const app = await collectApp(api, options.settings),
+    producer = await producerIdentity(api, context, role);
+  const result = control.decideRcAuthority({ expected: e, bump: context.bump,
+    event: { name: context.eventName, ref: context.ref, sha: context.sha, repository: context.repository },
+    sourceCommit: w.input.commit, sourcePackage: w.input.pkg,
+    publication: w.publication, pullsComplete: true, pulls: w.pulls, app,
+    runId: context.runId, runAttempt: context.runAttempt, producer,
+    selectedVersion: w.selectedVersion, tag: w.tag, registry: w.registry }, phase);
+  if (!result.authorized) fail(result.reason);
+  await requireSecurity(api, e);
+  await assertCurrentMain(api, context);
+  return { identity: result.identity, registry: w.registry };
+}
+
 async function collectAuthority(api, context, settings) {
   await withRefusal('authority-main', () => assertCurrentMain(api, context));
   const base = prefix(context),
@@ -633,16 +757,7 @@ async function collectAuthority(api, context, settings) {
     );
     reviewerPermissions.push(permission);
   }
-  if (!/^[a-z0-9-]+$/.test(settings.slug ?? '') || typeof settings.clientId !== 'string' || !settings.clientId)
-    fail('app-settings');
-  const metadata = await withRefusal(
-    'authority-app',
-    async () => (await api('GET', `/apps/${enc(settings.slug)}`)).data,
-  );
-  const bot = await withRefusal(
-    'authority-bot',
-    async () => (await api('GET', `/users/${enc(settings.slug + '[bot]')}`)).data,
-  );
+  const app = await collectApp(api, settings);
   const pkg = await withRefusal('authority-package', async () =>
     parseJson('package-json', await content(api, context, 'package.json')),
   );
@@ -663,7 +778,7 @@ async function collectAuthority(api, context, settings) {
     event: { name: context.eventName, ref: context.ref, sha: context.sha, repository: context.repository },
     commit,
     headCommit,
-    app: { expectedClientId: settings.clientId, expectedSlug: settings.slug, metadata, bot },
+    app,
     pullsComplete: true,
     reviewsComplete: true,
     permissionsComplete: true,
@@ -682,22 +797,26 @@ async function collectAuthority(api, context, settings) {
   return expected;
 }
 async function workflowEvidence(api, identity, file) {
-  const base = prefix(identity),
+  if (identity.mode === 'rc' && !control.validSha(identity.sourceSha)) fail('security-run');
+  const base = prefix(identity), rc = identity.mode === 'rc',
+    source = rc ? identity.sourceSha : identity.headSha, event = rc ? 'push' : 'pull_request',
     workflow = (await api('GET', `${base}/actions/workflows/${file}`)).data;
   const runs = await pages(
     api,
-    `${base}/actions/workflows/${workflow.id}/runs?event=pull_request&head_sha=${identity.headSha}`,
+    `${base}/actions/workflows/${workflow.id}/runs?event=${event}&head_sha=${source}${rc ? '&branch=main' : ''}`,
     'workflow_runs',
   );
   const selected = runs
     .filter(
       (r) =>
-        r.head_sha === identity.headSha &&
-        r.event === 'pull_request' &&
-        control.sameRepo(r.head_repository, identity.repository),
+        r.head_sha === source &&
+        r.event === event &&
+        control.sameRepo(r.head_repository, identity.repository) &&
+        (!rc || (r.head_branch === 'main' && control.sameRepo(r.repository, identity.repository))),
     )
     .sort((a, b) => b.id - a.id)[0];
   if (!selected) return { workflow, runs, runsComplete: true, jobs: [], jobsComplete: true };
+  if (rc && (!Number.isSafeInteger(selected.run_attempt) || selected.run_attempt <= 0)) fail('security-run');
   const attempt = (await api('GET', `${base}/actions/runs/${selected.id}/attempts/${selected.run_attempt}`)).data;
   const jobs = await pages(api, `${base}/actions/runs/${selected.id}/attempts/${selected.run_attempt}/jobs`, 'jobs');
   return { workflow, runs, attempt, jobs, runsComplete: true, jobsComplete: true };
@@ -711,13 +830,21 @@ async function ciVerdict(api, identity) {
 }
 async function requireSecurity(api, identity) {
   return withRefusal('security-evidence', async () => {
-    const w = await workflowEvidence(api, identity, 'codeql.yml'),
-      r = [...w.runs].sort((a, b) => b.id - a.id)[0];
+    const w = await workflowEvidence(api, identity, 'codeql.yml'), rc = identity.mode === 'rc',
+      source = rc ? identity.sourceSha : identity.headSha,
+      r = (rc ? w.runs.filter((r) => r.head_sha === source && r.event === 'push' &&
+        r.head_branch === 'main' && control.sameRepo(r.repository, identity.repository) &&
+        control.sameRepo(r.head_repository, identity.repository)) : [...w.runs]).sort((a, b) => b.id - a.id)[0];
     if (
       w.workflow.path !== '.github/workflows/codeql.yml' ||
       !r ||
-      r.head_sha !== identity.headSha ||
-      r.event !== 'pull_request' ||
+      r.head_sha !== source ||
+      r.event !== (rc ? 'push' : 'pull_request') ||
+      (rc && (r.head_branch !== 'main' || !control.sameRepo(r.repository, identity.repository) ||
+        !control.validSha(source) || w.attempt?.head_sha !== source ||
+        w.attempt?.event !== 'push' || w.attempt?.head_branch !== 'main' ||
+        !control.sameRepo(w.attempt?.repository, identity.repository) ||
+        !control.sameRepo(w.attempt?.head_repository, identity.repository))) ||
       !control.sameRepo(r.head_repository, identity.repository) ||
       r.workflow_id !== w.workflow.id ||
       r.path !== w.workflow.path ||
@@ -733,7 +860,8 @@ async function requireSecurity(api, identity) {
         jobs.length !== 1 ||
         !control.success(jobs[0]) ||
         jobs[0].run_id !== r.id ||
-        jobs[0].run_attempt !== r.run_attempt
+        jobs[0].run_attempt !== r.run_attempt ||
+        (rc && jobs[0].head_sha !== source)
       )
         fail('security-job');
     }
@@ -750,7 +878,8 @@ async function reserveAttempt(api, release, marker) {
   const url = release.upload_url.replace('{?name,label}', `?name=${enc(`publish-attempt-${marker.version}.json`)}`);
   const bytes = Buffer.from(JSON.stringify(marker) + '\n');
   const r = await api('POST', url, { raw: bytes, contentType: 'application/json' });
-  if (r.data?.state !== 'uploaded' || r.data.size !== bytes.length || !Number.isSafeInteger(r.data.id))
+  if (typeof marker.version === 'string' && marker.version.includes('-rc.') && r.status !== 201) fail('reservation-ambiguous');
+  if (r.data?.state !== 'uploaded' || r.data.size !== bytes.length || (!Number.isSafeInteger(r.data.id) || r.data.id <= 0))
     fail('reservation-ambiguous');
   return { assetId: r.data.id, fresh: true };
 }
@@ -955,6 +1084,11 @@ async function peeledTag(api, context, tag) {
   fail('tag-depth');
 }
 async function sourceReleaseNotes(api, context, version) {
+  if (typeof version === 'string' && version.includes('-rc.')) {
+    rcVersion.candidateCore(version);
+    if (!control.validSha(context.sha)) fail('rc-source');
+    return 'Release candidate ' + version + ' from ' + context.sha + '.\n';
+  }
   const changelog = await content(api, context, 'CHANGELOG.md');
   const lines = changelog.split('\n');
   const sections = lines.map((line, index) => ({ line, index })).filter((row) => row.line.startsWith('## '));
@@ -978,16 +1112,20 @@ async function sourceReleaseNotes(api, context, version) {
   return body + '\n';
 }
 function requireReleaseNotes(release, context, tag, notes) {
+  const prerelease = tag.includes('-rc.');
+  if (prerelease) rcVersion.candidateCore(tag.slice(1));
   if (
+    !release ||
     release.tag_name !== tag ||
     release.target_commitish !== context.sha ||
     release.body !== notes ||
     release.draft !== false ||
-    release.prerelease !== false
+    release.prerelease !== prerelease
   )
     fail('release-conflict');
 }
 async function releaseState(api, context, identity, archive, registry) {
+  const rc = identity.mode === 'rc';
   await assertCurrentMain(api, context);
   const base = prefix(context),
     name = `publish-attempt-${identity.version}.json`;
@@ -999,8 +1137,11 @@ async function releaseState(api, context, identity, archive, registry) {
     integrity: archive.integrity,
   };
   const existingTag = await peeledTag(api, context, identity.tag);
+  if (rc && existingTag !== null) fail('rc-existing-tag');
   if (existingTag && existingTag !== context.sha) fail('tag-conflict');
   let release = await optional(api, `${base}/releases/tags/${enc(identity.tag)}`);
+  if (rc && release !== null) fail('rc-existing-release');
+  if (rc && registry !== null) fail('rc-registry');
   const notes = await sourceReleaseNotes(api, context, identity.version);
   if (release) requireReleaseNotes(release, context, identity.tag, notes);
   const assets = release ? await pages(api, `${base}/releases/${release.id}/assets`) : [];
@@ -1011,31 +1152,59 @@ async function releaseState(api, context, identity, archive, registry) {
   if (decision.action === 'verify-only')
     return { fresh: false, assetId: matching[0]?.id ?? null, runId: context.runId, runAttempt: context.runAttempt };
   await assertCurrentMain(api, context);
-  if (!existingTag) await api('POST', `${base}/git/refs`, { ref: `refs/tags/${identity.tag}`, sha: context.sha });
-  if (!release)
-    release = (
-      await api('POST', `${base}/releases`, {
+  if (!existingTag) {
+    const reply = await api('POST', `${base}/git/refs`, { ref: `refs/tags/${identity.tag}`, sha: context.sha });
+    if (rc && reply.status !== 201) fail('rc-tag-create');
+    const created = reply.data;
+    if (rc && (created?.ref !== 'refs/tags/' + identity.tag ||
+        created.object?.type !== 'commit' || created.object.sha !== context.sha)) fail('rc-tag-create');
+  }
+  if (rc) {
+    await assertCurrentMain(api, context);
+    if ((await peeledTag(api, context, identity.tag)) !== context.sha) fail('tag-conflict');
+  }
+  if (!release) {
+    const reply = await api('POST', `${base}/releases`, {
         tag_name: identity.tag,
         target_commitish: context.sha,
         name: identity.tag,
         body: notes,
         draft: false,
-        prerelease: false,
-      })
-    ).data;
+        prerelease: rc,
+        ...(rc ? { make_latest: 'false' } : {}),
+      });
+    if (rc && reply.status !== 201) fail('rc-release-create');
+    release = reply.data;
+  }
+  if (rc) {
+    requireReleaseNotes(release, context, identity.tag, notes);
+    if (!Number.isSafeInteger(release.id) || release.id <= 0 ||
+        release.upload_url !== 'https://uploads.github.com' + base + '/releases/' + release.id + '/assets{?name,label}')
+      fail('release-upload-url');
+    await assertCurrentMain(api, context);
+  }
   const reserved = await reserveAttempt(api, release, marker);
   return { ...reserved, runId: context.runId, runAttempt: context.runAttempt };
 }
 async function publishGrant(api, context, identity, archive, grant) {
   await assertCurrentMain(api, context);
   if (!Number.isSafeInteger(grant.assetId)) fail('journal-asset');
+  if (identity.mode === 'rc') {
+    const release = await optional(api, prefix(context) + '/releases/tags/' + enc(identity.tag));
+    if (!Number.isSafeInteger(release?.id) || release.id <= 0) fail('release-conflict');
+    requireReleaseNotes(release, context, identity.tag, await sourceReleaseNotes(api, context, identity.version));
+    const assets = await pages(api, prefix(context) + '/releases/' + release.id + '/assets');
+    if (assets.filter(a => a.id === grant.assetId && a.name === 'publish-attempt-' + identity.version + '.json').length !== 1)
+      fail('journal-grant');
+  }
   const asset = (await api('GET', `${prefix(context)}/releases/assets/${grant.assetId}`)).data;
   if (asset.name !== `publish-attempt-${identity.version}.json` || asset.state !== 'uploaded' || asset.size > 4096)
     fail('journal-asset');
   const raw = (
     await api('GET', `${prefix(context)}/releases/assets/${grant.assetId}`, { accept: 'application/octet-stream' })
   ).data;
-  const marker = parseJson('journal-json', Buffer.from(raw).toString('utf8'));
+  const marker = identity.mode === 'rc' ? markerData(Buffer.from(raw), identity.version, context.sha, asset.size) :
+    parseJson('journal-json', Buffer.from(raw).toString('utf8'));
   const expected = {
     version: identity.version,
     runId: context.runId,
@@ -1124,9 +1293,9 @@ function makeApi(token, fetcher = fetch, appIdentity) {
         body?.accept !== 'application/octet-stream' &&
         !route.endsWith('/zip') &&
         response.headers.get('content-type')?.includes('json');
-      if (!isJson) return { data: bytes };
+      if (!isJson) return { data: bytes, status: response.status };
       try {
-        return { data: JSON.parse(bytes.toString('utf8')) };
+        return { data: JSON.parse(bytes.toString('utf8')), status: response.status };
       } catch {
         throw diagnostic('github-json');
       }
@@ -1137,7 +1306,9 @@ function makeApi(token, fetcher = fetch, appIdentity) {
   };
 }
 async function registryVersion(version, fetcher = fetch) {
-  if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(version)) fail('version');
+  if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(version)) {
+    try { rcVersion.candidateCore(version); } catch { fail('version'); }
+  }
   const response = await registryFetch(`https://registry.npmjs.org/foottrace/${version}`, fetcher);
   if (response.status === 404) return null;
   if (!response.ok || response.status !== 200) fail('registry-unavailable');
@@ -1210,57 +1381,93 @@ async function requireUnpublishedLatest(version, fetcher) {
   const latest = parseJson('registry-latest-json', (await responseBytes(response, 2 * 1024 * 1024, 'registry-body')).toString('utf8'));
   if (latest.name !== 'foottrace' || preparation.versionOrder(latest.version, version) >= 0) fail('recovery-state');
 }
-async function verifyPublished(api, context, pinned, fetcher = fetch) {
-  const tag = `v${pinned.version}`,
+async function verifyPublished(api, context, pinned, fetcher = fetch,
+  wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))) {
+  const rc = pinned.mode === 'rc';
+  if (rc) {
+    rcVersion.candidateCore(pinned.version);
+    preparation.parseVersion(pinned.fromVersion);
+  }
+  // Verification grants no effects: a later attempt may verify this run's
+  // pinned source after main advances. Absence never permits a repeated write.
+  const present = async (read) => {
+    for (let n = 0; n < (rc ? 3 : 1); n++) {
+      const value = await read();
+      if (value !== null) return value;
+      if (rc && n < 2) await wait(1000);
+    }
+    return null;
+  };
+  const rcTags = async (absenceCode) => {
+    const responses = [];
+    for (const tag of ['latest', 'next'])
+      responses.push(await registryFetch('https://registry.npmjs.org/foottrace/' + tag, fetcher));
+    const decode = async (response, tag) => {
+      if (tag === 'next' && response.status === 404) return null;
+      if (!response.ok || response.status !== 200) fail('registry-unavailable');
+      const value = parseJson(
+        'registry-' + tag + '-json',
+        (await responseBytes(response, 2 * 1024 * 1024, 'registry-body')).toString('utf8'),
+      );
+      if (value.name !== 'foottrace') fail('registry-shape');
+      return value;
+    };
+    const latest = await decode(responses[0], 'latest');
+    // An RC on latest is the strongest failure, including when next is absent.
+    if (latest.version !== pinned.fromVersion) fail('rc-latest');
+    const next = await decode(responses[1], 'next');
+    if (absenceCode) fail(absenceCode);
+    if (next?.version !== pinned.version) fail('rc-next');
+    return { latest, next };
+  };
+  const tag = 'v' + pinned.version,
     base = prefix(context),
-    release = await optional(api, `${base}/releases/tags/${enc(tag)}`);
-  if (!release) return { state: 'pending-release' };
+    release = await present(() => optional(api, base + '/releases/tags/' + enc(tag)));
+  if (!release) {
+    if (rc) await rcTags('rc-release-missing');
+    return { state: 'pending-release' };
+  }
   const notes = await sourceReleaseNotes(api, context, pinned.version);
   requireReleaseNotes(release, context, tag, notes);
   if ((await peeledTag(api, context, tag)) !== context.sha) fail('release-conflict');
-  const assets = await pages(api, `${base}/releases/${release.id}/assets`),
-    markers = assets.filter((a) => a.name === `publish-attempt-${pinned.version}.json`);
+  const assets = await pages(api, base + '/releases/' + release.id + '/assets'),
+    markers = assets.filter((a) => a.name === 'publish-attempt-' + pinned.version + '.json');
   if (markers.length !== 1 || markers[0].state !== 'uploaded' || markers[0].size > 4096) fail('journal-conflict');
-  const marker = parseJson(
-    'journal-json',
-    Buffer.from(
-      (await api('GET', `${base}/releases/assets/${markers[0].id}`, { accept: 'application/octet-stream' })).data,
-    ).toString('utf8'),
-  );
+  const markerBytes = Buffer.from(
+      (await api('GET', base + '/releases/assets/' + markers[0].id, { accept: 'application/octet-stream' })).data),
+    marker = rc ? markerData(markerBytes, pinned.version, context.sha, markers[0].size) :
+      parseJson('journal-json', markerBytes.toString('utf8'));
+  if (rc && marker.runId !== context.runId) fail('journal-conflict');
   if (marker.sha !== context.sha || marker.version !== pinned.version) fail('journal-conflict');
-  const registry = await registryVersion(pinned.version, fetcher);
-  if (!registry) return { state: 'pending-registry' };
+  const registry = await present(() => registryVersion(pinned.version, fetcher));
+  if (!registry) {
+    if (rc) await rcTags('rc-registry-missing');
+    return { state: 'pending-registry' };
+  }
   if (
     registry.integrity !== marker.integrity ||
-    registry.tarball !== `https://registry.npmjs.org/foottrace/-/foottrace-${pinned.version}.tgz`
+    registry.tarball !== 'https://registry.npmjs.org/foottrace/-/foottrace-' + pinned.version + '.tgz'
   )
     fail('registry-conflict');
   const response = await registryFetch(registry.tarball, fetcher);
   if (!response.ok) fail('registry-unavailable');
   const archive = require('./release-archive.cjs').inspectArchive(
-    await responseBytes(response, 16 * 1024 * 1024, 'registry-body'),
-    {
-      package: 'foottrace',
-      version: pinned.version,
-    },
-  );
+    await responseBytes(response, 16 * 1024 * 1024, 'registry-body'), { package: 'foottrace', version: pinned.version });
   if (archive.integrity !== marker.integrity || archive.shasum !== registry.shasum) fail('registry-bytes');
-  const latestResponse = await registryFetch('https://registry.npmjs.org/foottrace/latest', fetcher);
-  if (!latestResponse.ok) fail('registry-unavailable');
-  const latest = parseJson(
-    'registry-latest-json',
-    (await responseBytes(latestResponse, 2 * 1024 * 1024, 'registry-body')).toString('utf8'),
-  );
+  let latest, next;
+  if (rc) ({ latest, next } = await rcTags());
+  else {
+    const response = await registryFetch('https://registry.npmjs.org/foottrace/latest', fetcher);
+    if (!response.ok) fail('registry-unavailable');
+    latest = parseJson('registry-latest-json',
+      (await responseBytes(response, 2 * 1024 * 1024, 'registry-body')).toString('utf8'));
+  }
   return {
-    state: latest.version === pinned.version ? 'verified' : 'pending-latest',
-    version: pinned.version,
-    latest: latest.version,
-    sha: context.sha,
-    integrity: archive.integrity,
-    shasum: archive.shasum,
-    sha256: archive.sha256,
-    provenance: registry.attestations ?? null,
-    provenanceCryptographicallyVerified: false,
+    state: rc ? 'verified' : latest.version === pinned.version ? 'verified' : 'pending-latest',
+    ...(rc ? { next: next.version } : {}),
+    version: pinned.version, latest: latest.version, sha: context.sha,
+    integrity: archive.integrity, shasum: archive.shasum, sha256: archive.sha256,
+    provenance: registry.attestations ?? null, provenanceCryptographicallyVerified: false,
     docs: 'No separate FootTrace docs deployment is configured.',
   };
 }
@@ -1273,8 +1480,11 @@ function environmentContext(env) {
     runId: Number(env.RUN_ID),
     runAttempt: Number(env.RUN_ATTEMPT),
     verify: env.VERIFY_ONLY === 'true',
+    rc: env.RC === 'true',
+    bump: env.RC_BUMP,
   };
   prefix(context);
+  if (!context.rc && context.bump && context.bump !== 'none') fail('rc-bump-without-rc');
   if (
     !control.validSha(context.sha) ||
     !Number.isSafeInteger(context.runId) ||
@@ -1295,6 +1505,11 @@ async function runStage(stage, { api, context, env, io, fetcher = fetch }) {
       fail('plan-substitution');
   };
   const freshAuthority = async () => {
+    if (pinned.mode === 'rc') {
+      const fresh = await collectRcAuthority(api, context, pinned, stage, phaseOptions);
+      exactData(fresh.identity, identity, 'identity-changed');
+      return fresh.registry;
+    }
     const fresh = await collectAuthority(api, context, settings);
     if (JSON.stringify(fresh) !== JSON.stringify(identity)) fail('identity-changed');
     await requireSecurity(api, fresh);
@@ -1340,6 +1555,10 @@ async function runStage(stage, { api, context, env, io, fetcher = fetch }) {
     };
   }
   if (stage === 'authority') {
+    if (pinned.mode === 'rc') {
+      const { identity: id } = await collectRcAuthority(api, context, pinned, 'authority', phaseOptions);
+      return { identity: JSON.stringify(id), authorized: 'true' };
+    }
     const id = await collectAuthority(api, context, settings);
     if (id.tree !== pinned.tree || id.version !== pinned.version) fail('authority-plan');
     await requireSecurity(api, id);
@@ -1347,6 +1566,11 @@ async function runStage(stage, { api, context, env, io, fetcher = fetch }) {
     return { identity: JSON.stringify(id), authorized: 'true' };
   }
   if (stage === 'verdict') {
+    if (pinned.mode === 'rc') {
+      if (identity?.mode !== 'rc' || identity.sourceSha !== context.sha ||
+          identity.tree !== pinned.tree || identity.version !== pinned.version) fail('identity');
+      return { tested: 'false' };
+    }
     if (!identity || identity.mergeSha !== context.sha || identity.tree !== pinned.tree) fail('identity');
     return { tested: String((await ciVerdict(api, identity)).tested) };
   }
@@ -1354,10 +1578,11 @@ async function runStage(stage, { api, context, env, io, fetcher = fetch }) {
     if (io.gitTree() !== pinned.tree) fail('build-tree');
     io.requireClean();
     const pkg = parseJson('package-json', io.read('package.json')),
-      lock = parseJson('lock-json', io.read('package-lock.json'));
+      lock = parseJson('lock-json', io.read('package-lock.json')),
+      sourceVersion = pinned.mode === 'rc' ? pinned.fromVersion : pinned.version;
     if (
       pkg.name !== pinned.package ||
-      pkg.version !== pinned.version ||
+      pkg.version !== sourceVersion ||
       lock.version !== pkg.version ||
       lock.packages?.[''].version !== pkg.version
     )
@@ -1369,6 +1594,7 @@ async function runStage(stage, { api, context, env, io, fetcher = fetch }) {
       archive = require('./release-archive.cjs').inspectArchive(bytes, {
         package: pinned.package,
         version: pinned.version,
+        sourceManifest: pkg,
       }),
       job = await producerIdentity(api, context, 'build');
     io.write('release-artifact/package.tgz', bytes);
@@ -1393,12 +1619,13 @@ async function runStage(stage, { api, context, env, io, fetcher = fetch }) {
     return {};
   }
   if (stage === 'release' || stage === 'publish') {
-    await freshAuthority();
+    const firstRegistry = await freshAuthority();
     const artifact = await readArtifact(api, context, pinned, Number(env.ARTIFACT_ID), 'build'),
       bytes = artifact.members['package.tgz'],
       archive = require('./release-archive.cjs').inspectArchive(bytes, {
         package: pinned.package,
         version: pinned.version,
+        sourceManifest: parseJson('package-json', await content(api, context, 'package.json')),
       });
     if (
       artifact.manifest.integrity !== archive.integrity ||
@@ -1406,9 +1633,17 @@ async function runStage(stage, { api, context, env, io, fetcher = fetch }) {
       artifact.manifest.shasum !== archive.shasum
     )
       fail('archive-manifest');
-    const registry = await registryVersion(pinned.version, fetcher);
+    let registry = await registryVersion(pinned.version, fetcher);
+    if (pinned.mode === 'rc') {
+      const lastRegistry = await freshAuthority();
+      // A later absence must not erase an already observed publication.
+      for (const observed of [firstRegistry, registry, lastRegistry]) if (observed !== null) {
+        if (observed?.version !== pinned.version || observed.integrity !== archive.integrity) fail('registry-conflict');
+        registry = observed;
+      }
+    }
     if (stage === 'release') {
-      if (await requireRecoverySource(api, context, identity, phaseOptions)) {
+      if (pinned.mode !== 'rc' && await requireRecoverySource(api, context, identity, phaseOptions)) {
         if (!registry) await requireUnpublishedLatest(pinned.version, fetcher);
       }
       const grant = await releaseState(api, context, identity, archive, registry);
@@ -1417,7 +1652,7 @@ async function runStage(stage, { api, context, env, io, fetcher = fetch }) {
     const grant = parseJson('grant-json', env.GRANT_JSON ?? 'null');
     // Rebind recovery source independently of any plan flag. The unchanged
     // current-attempt grant and registry checks below own submission authority.
-    if (await requireRecoverySource(api, context, identity, phaseOptions)) {
+    if (pinned.mode !== 'rc' && await requireRecoverySource(api, context, identity, phaseOptions)) {
       if (!registry) await requireUnpublishedLatest(pinned.version, fetcher);
     }
     await publishGrant(api, context, identity, archive, grant);
@@ -1427,13 +1662,13 @@ async function runStage(stage, { api, context, env, io, fetcher = fetch }) {
     }
     const file = io.publishFile(context.runId, context.runAttempt);
     io.write(file, bytes);
-    return { submit: 'true', file };
+    return { submit: 'true', file, npmtag: rcVersion.distributionTag(archive.version) };
   }
   if (stage === 'verify') {
     // The publication workflow verifies its own exact current-source release
     // with the existing strict target/marker check. A standalone verify plan
     // uses the complete historical data witness; neither path grants submission.
-    if (pinned.mode === 'publish')
+    if (pinned.mode === 'publish' || pinned.mode === 'rc')
       return { verification: JSON.stringify(await verifyPublished(api, context, pinned, fetcher)) };
     if (pinned.mode !== 'verify') fail('recovery-phase');
     const input = await sourceInput(api, context);
@@ -1469,9 +1704,12 @@ module.exports = {
   plan,
   prepareProposal,
   collectAuthority,
+  collectRcAuthority,
   workflowEvidence,
   ciVerdict,
   requireSecurity,
+  rcSource,
+  rcTagRefs,
   reserveAttempt,
   sourceView,
   requireAncestor,

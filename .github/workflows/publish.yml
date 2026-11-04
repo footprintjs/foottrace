@@ -5,6 +5,15 @@ on:
     branches: [main]
   workflow_dispatch:
     inputs:
+      rc:
+        description: Publish a source release candidate without consuming fragments
+        type: boolean
+        default: false
+      bump:
+        description: Explicit candidate bump required when rc is true
+        type: choice
+        options: [none, patch, minor, major]
+        default: none
       verify_only:
         description: Inspect the existing release without preparation or submission
         type: boolean
@@ -25,6 +34,8 @@ env:
   RUN_ID: ${{ github.run_id }}
   RUN_ATTEMPT: ${{ github.run_attempt }}
   VERIFY_ONLY: ${{ inputs.verify_only == true && 'true' || 'false' }}
+  RC: ${{ inputs.rc == true && 'true' || 'false' }}
+  RC_BUMP: ${{ inputs.bump }}
   APP_CLIENT_ID: ${{ vars.RELEASE_APP_CLIENT_ID }}
   APP_SLUG: ${{ vars.RELEASE_APP_SLUG }}
   NODE_OPTIONS: ''
@@ -116,7 +127,7 @@ jobs:
         run: node scripts/release-runner.cjs proposal
   authority:
     needs: plan
-    if: needs.plan.outputs.mode == 'publish'
+    if: needs.plan.outputs.mode == 'publish' || needs.plan.outputs.mode == 'rc'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -209,7 +220,23 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm run check:package
-      - run: npm pack --ignore-scripts --json > pack.json
+      - if: needs.plan.outputs.mode != 'rc'
+        run: npm pack --ignore-scripts --json > pack.json
+      - name: Stage the RC package outside the checkout
+        if: needs.plan.outputs.mode == 'rc'
+        env:
+          PLAN_JSON: ${{ needs.plan.outputs.plan }}
+        run: |
+          VERSION="$(jq -er '.version | strings' <<< "$PLAN_JSON")"
+          SOURCE_VERSION="$(jq -er '.version | strings' package.json)"
+          STAGE="$(mktemp -d "$RUNNER_TEMP/foottrace-rc.XXXXXX")"
+          npm pack --ignore-scripts --json > "$STAGE/source-pack.json"
+          SOURCE_PACK="$(jq -er 'select(length == 1) | .[0].filename | strings' "$STAGE/source-pack.json")"
+          [ "$SOURCE_PACK" = "foottrace-$SOURCE_VERSION.tgz" ]
+          tar -xzf "$SOURCE_PACK" -C "$STAGE"
+          jq --arg version "$VERSION" '.version = $version' "$STAGE/package/package.json" > "$STAGE/package.json"
+          cp "$STAGE/package.json" "$STAGE/package/package.json"
+          npm pack "$STAGE/package" --ignore-scripts --json > pack.json
       - env:
           GH_TOKEN: ${{ github.token }}
           PLAN_JSON: ${{ needs.plan.outputs.plan }}
@@ -294,8 +321,14 @@ jobs:
         working-directory: ${{ runner.temp }}/foottrace-publish-${{ github.run_id }}-${{ github.run_attempt }}
         env:
           PACKAGE_FILE: ${{ steps.control.outputs.file }}
+          NPM_TAG: ${{ steps.control.outputs.npmtag }}
           NODE_AUTH_TOKEN: ''
-        run: npm publish "$PACKAGE_FILE" --ignore-scripts --access public --registry=https://registry.npmjs.org
+        run: |
+          case "$NPM_TAG" in
+            next) npm publish "$PACKAGE_FILE" --ignore-scripts --access public --tag next --registry=https://registry.npmjs.org ;;
+            latest) npm publish "$PACKAGE_FILE" --ignore-scripts --access public --registry=https://registry.npmjs.org ;;
+            *) exit 1 ;;
+          esac
   verify:
     needs: [plan, authority, build, release, publish]
     if: >-

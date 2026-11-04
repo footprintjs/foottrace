@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { gzipSync } from 'node:zlib';
 import { createHash } from 'node:crypto';
-import { call, sha, authorityApiFixture, executeWorkflowStage } from './helpers.mjs';
+import { call, sha, authorityApiFixture, executeWorkflowStage, artifactZip as zip } from './helpers.mjs';
 
 // Tiny synthetic USTAR fixture builder. Never extracts or executes its members.
 function tar(members) {
@@ -179,47 +179,6 @@ for (const [name, change] of [
     change(world);
     assert.equal(call('release-control', 'validateArtifactBinding', world).valid, false);
   });
-function zip(entries) {
-  const locals = [],
-    central = [];
-  let offset = 0;
-  const crc = (bytes) => {
-    let n = 0xffffffff;
-    for (const b of bytes) {
-      n ^= b;
-      for (let i = 0; i < 8; i++) n = n & 1 ? (n >>> 1) ^ 0xedb88320 : n >>> 1;
-    }
-    return (n ^ 0xffffffff) >>> 0;
-  };
-  for (const [name, value] of entries) {
-    const data = Buffer.from(value),
-      n = Buffer.from(name),
-      h = Buffer.alloc(30),
-      c = Buffer.alloc(46);
-    h.writeUInt32LE(0x04034b50);
-    h.writeUInt32LE(crc(data), 14);
-    h.writeUInt32LE(data.length, 18);
-    h.writeUInt32LE(data.length, 22);
-    h.writeUInt16LE(n.length, 26);
-    c.writeUInt32LE(0x02014b50);
-    c.writeUInt32LE(crc(data), 16);
-    c.writeUInt32LE(data.length, 20);
-    c.writeUInt32LE(data.length, 24);
-    c.writeUInt16LE(n.length, 28);
-    c.writeUInt32LE(offset, 42);
-    locals.push(h, n, data);
-    central.push(c, n);
-    offset += h.length + n.length + data.length;
-  }
-  const end = Buffer.alloc(22),
-    dir = Buffer.concat(central);
-  end.writeUInt32LE(0x06054b50);
-  end.writeUInt16LE(entries.length, 8);
-  end.writeUInt16LE(entries.length, 10);
-  end.writeUInt32LE(dir.length, 12);
-  end.writeUInt32LE(offset, 16);
-  return Buffer.concat([...locals, dir, end]);
-}
 test('artifact ZIP is read without extraction and admits only the fixed members', () => {
   const result = call(
     'release-archive',
@@ -277,12 +236,11 @@ function paxPath(path) {
   while (String(n).length + line.length !== n) n = String(n).length + line.length;
   return String(n) + line;
 }
-test('archive: a bounded PAX long path is retained without extracting it', () => {
+test('archive: PAX long paths are outside the canonical npm-pack profile', () => {
   const path = 'package/dist/' + 'long/'.repeat(30) + 'index.js';
   const m = members();
   m.push({ name: 'PaxHeader/long', type: 'x', body: paxPath(path) }, { name: 'truncated', body: 'safe' });
-  const r = call('release-archive', 'inspectArchive', tar(m), expected());
-  assert(r.files.some((f) => f.path === path));
+  assert.throws(() => call('release-archive', 'inspectArchive', tar(m), expected()), { code: 'archive-profile' });
 });
 test('archive: PAX cannot disguise a traversal or add extraction directives', () => {
   for (const body of [paxPath('package/../escape'), paxPath('package/dist/good') + paxPath('package/dist/again')]) {
@@ -290,7 +248,7 @@ test('archive: PAX cannot disguise a traversal or add extraction directives', ()
     m.push({ name: 'PaxHeader/x', type: 'x', body }, { name: 'truncated', body: 'bad' });
     assert.throws(
       () => call('release-archive', 'inspectArchive', tar(m), expected()),
-      (e) => e.code === 'invalid-archive',
+      (e) => e.code === 'archive-profile',
     );
   }
 });
@@ -347,7 +305,9 @@ test('actual artifact reader checks producer attempt before consuming the fixed 
 });
 test('actual release/reservation/grant/registry path preserves checked bytes and never repeats a reservation', async (t) => {
   const auth = authorityApiFixture();
-  const bytes = tar(members()),
+  const nativeMembers = members();
+  nativeMembers[0].body = JSON.stringify({ name: 'foottrace', version: '1.9.0' });
+  const bytes = tar(nativeMembers),
     archive = call('release-archive', 'inspectArchive', bytes, expected());
   const context = {
     repository: { id: 123, full_name: 'footprintjs/foottrace' },
@@ -543,6 +503,68 @@ test('actual release/reservation/grant/registry path preserves checked bytes and
   assert(workflow.output.includes('submit=true\n'));
   assert.equal(workflow.writes.length, 1);
   assert.deepEqual(workflow.writes[0].bytes, bytes);
+
+  for (const stage of ['release', 'publish'])
+    for (const key of ['tag', 'scripts', 'dependencies', 'bin', 'dist', 'publishConfig'])
+      await t.test('stable ' + stage + ' refuses pinned-source ' + key + ' drift before effects', async () => {
+        const changed = members();
+        changed[0].body = JSON.stringify({
+          name: 'foottrace',
+          version: '1.9.0',
+          [key]: key === 'tag' ? 'next' : { unreviewed: 'change' },
+        });
+        const poisoned = tar(changed),
+          digest = (alg, enc = 'hex') => createHash(alg).update(poisoned).digest(enc);
+        const altered = async (method, route, body) => {
+          if (method === 'GET' && route.endsWith('/actions/artifacts/400/zip'))
+            return {
+              data: zip([
+                [
+                  'manifest.json',
+                  JSON.stringify({
+                    ...binding().manifest,
+                    sha256: digest('sha256'),
+                    shasum: digest('sha1'),
+                    integrity: 'sha512-' + digest('sha512', 'base64'),
+                  }),
+                ],
+                ['package.tgz', poisoned],
+              ]),
+            };
+          return api(method, route, body);
+        };
+        const before = calls.filter((c) => c.method !== 'GET').length;
+        const held = await executeWorkflowStage(stage, {
+          api: altered,
+          env: {
+            REPO_ID: '123',
+            REPO_NAME: 'footprintjs/foottrace',
+            SOURCE_SHA: context.sha,
+            SOURCE_REF: 'refs/heads/main',
+            EVENT_NAME: 'push',
+            RUN_ID: '200',
+            RUN_ATTEMPT: '2',
+            PLAN_JSON: JSON.stringify({
+              ...pinned,
+              package: 'foottrace',
+              tree: sha('3'),
+              sha: context.sha,
+              repository: context.repository,
+            }),
+            IDENTITY_JSON: JSON.stringify(identity),
+            APP_SLUG: 'release-app',
+            APP_CLIENT_ID: 'public-client-id',
+            ARTIFACT_ID: '400',
+            GRANT_JSON: JSON.stringify(grant),
+          },
+          fetcher: async () => new Response('not-yet', { status: 404 }),
+        });
+        assert.equal(held.exit, 1);
+        assert.equal(held.failure, 'manifest-source:' + key);
+        assert.equal(held.output, '');
+        assert.equal(held.writes.length, 0);
+        assert.equal(calls.filter((c) => c.method !== 'GET').length, before);
+      });
   const workflowVerified = await executeWorkflowStage('verify', {
     api,
     env: {
@@ -613,4 +635,35 @@ test('actual release/reservation/grant/registry path preserves checked bytes and
       });
   release.body = originalNotes;
   changelog = originalChangelog;
+});
+
+for (const publishConfig of [
+  { registry: 'http://127.0.0.1:9/evil/' },
+  { 'https-proxy': 'http://127.0.0.1:9/' },
+  { tag: 'latest' },
+  {},
+  null,
+  false,
+  'invalid',
+]) {
+  test('archive publishConfig refuses ' + JSON.stringify(publishConfig), () => {
+    const fixture = members();
+    fixture[0].body = JSON.stringify({ name: 'foottrace', version: '1.9.0', publishConfig });
+    assert.throws(() => call('release-archive', 'inspectArchive', tar(fixture), expected()), {
+      code: 'invalid-archive',
+    });
+  });
+}
+test('archive publishConfig absence preserves the exact admitted bytes', () => {
+  const bytes = tar(members());
+  let result;
+  assert.doesNotThrow(() => {
+    result = call('release-archive', 'inspectArchive', bytes, expected());
+  });
+  assert.equal(result.sha256, createHash('sha256').update(bytes).digest('hex'));
+});
+test('archive refuses a later foreign-root manifest that npm could otherwise select', () => {
+  const fixture = members();
+  fixture.push({ name: 'x/package.json', body: JSON.stringify({ name: 'foottrace', version: '99.0.0' }) });
+  assert.throws(() => call('release-archive', 'inspectArchive', tar(fixture), expected()), { code: 'invalid-archive' });
 });

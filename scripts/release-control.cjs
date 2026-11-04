@@ -1,10 +1,24 @@
 'use strict';
+const rcVersion = require('./release-rc-version.cjs');
 const SHA = /^[a-f0-9]{40}$/;
 const validSha = (value) => typeof value === 'string' && SHA.test(value);
 const sameRepo = (a, b) =>
   a && b && Number.isSafeInteger(a.id) && a.id > 0 && a.id === b.id && a.full_name === b.full_name;
 const success = (x) => x?.status === 'completed' && x.conclusion === 'success';
 const hold = (reason) => ({ authorized: false, mode: 'hold', reason });
+function appMatches(app) {
+  return !(
+    !app ||
+    typeof app.expectedSlug !== 'string' ||
+    !/^[a-z0-9-]+$/.test(app.expectedSlug) ||
+    !app.expectedClientId ||
+    app.metadata?.slug !== app.expectedSlug ||
+    app.metadata.client_id !== app.expectedClientId ||
+    app.bot?.login !== `${app.expectedSlug}[bot]` ||
+    app.bot.type !== 'Bot' ||
+    !Number.isSafeInteger(app.bot.id)
+  );
+}
 function decideAuthority(w) {
   try {
     const e = w.expected,
@@ -45,18 +59,7 @@ function decideAuthority(w) {
       return hold('incomplete');
     const p = w.pulls[0],
       app = w.app;
-    if (
-      !app ||
-      typeof app.expectedSlug !== 'string' ||
-      !/^[a-z0-9-]+$/.test(app.expectedSlug) ||
-      !app.expectedClientId ||
-      app.metadata?.slug !== app.expectedSlug ||
-      app.metadata.client_id !== app.expectedClientId ||
-      app.bot?.login !== `${app.expectedSlug}[bot]` ||
-      app.bot.type !== 'Bot' ||
-      !Number.isSafeInteger(app.bot.id)
-    )
-      return hold('app');
+    if (!appMatches(app)) return hold('app');
     if (
       p.number !== e.pr ||
       p.state !== 'closed' ||
@@ -96,6 +99,81 @@ function decideAuthority(w) {
     return hold('invalid-evidence');
   }
 }
+
+/** Initial absence and post-reservation continuation are different questions.
+ * This is source eligibility only; the native publish grant remains mandatory. */
+function decideRcAuthority(w, phase) {
+  try {
+    const e = w.expected,
+      ev = w.event;
+    if (!['initial', 'publish'].includes(phase)) return hold('rc-phase');
+    if (
+      !e ||
+      e.mode !== 'rc' ||
+      e.package !== 'foottrace' ||
+      !validSha(e.sourceSha) ||
+      !validSha(e.tree) ||
+      e.tag !== 'v' + e.version
+    )
+      return hold('rc-identity');
+    try {
+      if (rcVersion.candidateCore(e.version) !== rcVersion.targetVersion(e.fromVersion, w.bump))
+        return hold('rc-version');
+    } catch {
+      return hold('rc-version');
+    }
+    if (
+      ev?.name !== 'workflow_dispatch' ||
+      ev.ref !== 'refs/heads/main' ||
+      ev.sha !== e.sourceSha ||
+      !sameRepo(ev.repository, e.repository)
+    )
+      return hold('rc-event');
+    if (
+      w.sourceCommit?.sha !== e.sourceSha ||
+      w.sourceCommit.tree?.sha !== e.tree ||
+      w.sourcePackage?.name !== e.package ||
+      w.sourcePackage.version !== e.fromVersion
+    )
+      return hold('rc-source');
+    if (
+      w.publication?.state !== 'published' ||
+      w.publication.version !== e.fromVersion ||
+      w.publication.latest !== e.fromVersion
+    )
+      return hold('rc-stable');
+    if (w.pullsComplete !== true || !Array.isArray(w.pulls) || w.pulls.length !== 0) return hold('rc-proposal');
+    if (!appMatches(w.app)) return hold('rc-app');
+    const p = w.producer;
+    if (
+      !Number.isSafeInteger(w.runId) ||
+      w.runId <= 0 ||
+      !Number.isSafeInteger(w.runAttempt) ||
+      w.runAttempt <= 0 ||
+      !Number.isSafeInteger(p?.id) ||
+      p.id <= 0 ||
+      p.status !== 'in_progress' ||
+      p.conclusion !== null ||
+      p.run_id !== w.runId ||
+      p.run_attempt !== w.runAttempt ||
+      p.head_sha !== e.sourceSha ||
+      !(phase === 'publish' ? ['publish'] : ['authority', 'release']).includes(p.name)
+    )
+      return hold('rc-producer');
+    if (phase === 'initial') {
+      if (w.selectedVersion !== e.version) return hold('rc-plan');
+      if (w.tag !== null) return hold('rc-tag');
+      if (w.registry !== null) return hold('rc-registry');
+    } else {
+      if (w.tag !== e.sourceSha) return hold('rc-tag');
+      if (w.registry !== null && w.registry?.version !== e.version) return hold('rc-registry');
+    }
+    return { authorized: true, identity: e, mayPublish: false };
+  } catch {
+    return hold('rc-evidence');
+  }
+}
+
 function decideCiReuse(w) {
   const no = (reason) => ({ tested: false, fallback: 'both-full-runtime-gates', reason });
   try {
@@ -253,6 +331,7 @@ module.exports = {
   sameRepo,
   success,
   decideAuthority,
+  decideRcAuthority,
   decideCiReuse,
   decideProposalState,
   validateArtifactBinding,

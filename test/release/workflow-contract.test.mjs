@@ -40,8 +40,8 @@ test('legacy GitHub release event is not a publication shortcut', () => {
 });
 test('one exact archive is published with project lifecycle scripts disabled', () => {
   const lines = publish.split('\n').filter((line) => line.includes('npm publish'));
-  assert.equal(lines.length, 1);
-  assert.match(lines[0], /--ignore-scripts/);
+  assert.equal(lines.length, 2);
+  for (const line of lines) assert.match(line, /--ignore-scripts/);
 });
 test('no automatic or force merge/rewrite path is introduced', () => {
   assert.doesNotMatch(publish, /--force(?:-with-lease)?\b|--admin\b|gh pr merge\b|enablePullRequestAutoMerge/);
@@ -83,8 +83,14 @@ test('controls check out exactly the event source, without persisted credentials
           (name === 'publish' &&
             [
               'test "$(npm --version)" = \'11.19.0\'',
-              'npm publish "$PACKAGE_FILE" --ignore-scripts --access public --registry=https://registry.npmjs.org',
-            ].includes(command)),
+              [
+                'case "$NPM_TAG" in',
+                '  next) npm publish "$PACKAGE_FILE" --ignore-scripts --access public --tag next --registry=https://registry.npmjs.org ;;',
+                '  latest) npm publish "$PACKAGE_FILE" --ignore-scripts --access public --registry=https://registry.npmjs.org ;;',
+                '  *) exit 1 ;;',
+                'esac',
+              ].join('\n'),
+            ].includes(command.trimEnd())),
         `Unexpected ${name} command: ${command}`,
       );
   }
@@ -281,7 +287,7 @@ test('trusted workflow triggers and context stay bound to the actual event', () 
   const triggers = /^on:\n([\s\S]*?)^permissions:/m.exec(publish)?.[1];
   assert.equal(
     triggers,
-    '  push:\n    branches: [main]\n  workflow_dispatch:\n    inputs:\n      verify_only:\n        description: Inspect the existing release without preparation or submission\n        type: boolean\n        default: false\n',
+    '  push:\n    branches: [main]\n  workflow_dispatch:\n    inputs:\n      rc:\n        description: Publish a source release candidate without consuming fragments\n        type: boolean\n        default: false\n      bump:\n        description: Explicit candidate bump required when rc is true\n        type: choice\n        options: [none, patch, minor, major]\n        default: none\n      verify_only:\n        description: Inspect the existing release without preparation or submission\n        type: boolean\n        default: false\n',
   );
   assert.equal(condition('plan'), "github.ref == 'refs/heads/main'");
   for (const [name, field] of [

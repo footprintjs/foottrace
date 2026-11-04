@@ -157,11 +157,15 @@ test('real IO adapter retains fixed checkout identity/tree and cleanliness reads
 test('production release helper closure is static, builtin-only and closed', () => {
   const closure = new Map([
     ['release-runner', ['release-github', 'release-control']],
-    ['release-github', ['release-prepare', 'release-control', 'release-archive', 'release-app-auth']],
+    [
+      'release-github',
+      ['release-prepare', 'release-control', 'release-archive', 'release-app-auth', 'release-rc-version'],
+    ],
     ['release-app-auth', []],
     ['release-prepare', ['release-changes']],
     ['release-changes', []],
-    ['release-control', []],
+    ['release-control', ['release-rc-version']],
+    ['release-rc-version', ['release-changes']],
     ['release-archive', []],
   ]);
   const builtins = new Set(['node:fs', 'node:path', 'node:child_process', 'node:crypto', 'node:zlib']);
@@ -235,33 +239,52 @@ test('publisher uses the actual isolated CWD/argv, ignoring hostile checkout con
       .replace('${{ runner.temp }}', runnerTemp)
       .replace('${{ github.run_id }}', '500')
       .replace('${{ github.run_attempt }}', '1');
-    const command = /        run: (.+)/.exec(block)?.[1];
-    assert.equal(
-      command,
-      'npm publish "$PACKAGE_FILE" --ignore-scripts --access public --registry=https://registry.npmjs.org',
-    );
+    const body = /        run: \|\n([\s\S]*)/.exec(block)?.[1];
+    assert(body, 'actual multiline publisher command is required');
+    const command = body
+      .split('\n')
+      .map((line) => line.slice(10))
+      .join('\n')
+      .trimEnd();
+    assert(command, 'actual multiline publisher command is required');
     fs.writeFileSync(
       path.join(bins, 'npm'),
       `#!${process.execPath}\nprocess.stdout.write(JSON.stringify({cwd:process.cwd(),argv:process.argv.slice(2)}));\n`,
       { mode: 0o700 },
     );
-    const r = child.spawnSync('/bin/sh', ['-c', command], {
-      cwd,
-      env: {
-        PATH: bins + ':/usr/bin:/bin',
-        PACKAGE_FILE: archive,
-        NODE_AUTH_TOKEN: '',
-        NODE_OPTIONS: '',
-        NODE_PATH: '',
-      },
-      encoding: 'utf8',
-      timeout: 3000,
-    });
-    assert.equal(r.status, 0, r.stderr);
-    assert.deepEqual(JSON.parse(r.stdout), {
-      cwd: fs.realpathSync(path.dirname(archive)),
-      argv: ['publish', archive, '--ignore-scripts', '--access', 'public', '--registry=https://registry.npmjs.org'],
-    });
+    for (const tag of ['next', 'latest', 'unknown']) {
+      const r = child.spawnSync('/bin/sh', ['-c', command], {
+        cwd,
+        env: {
+          PATH: bins + ':/usr/bin:/bin',
+          PACKAGE_FILE: archive,
+          NPM_TAG: tag,
+          NODE_AUTH_TOKEN: '',
+          NODE_OPTIONS: '',
+          NODE_PATH: '',
+        },
+        encoding: 'utf8',
+        timeout: 3000,
+      });
+      if (tag === 'unknown') {
+        assert.equal(r.status, 1);
+        assert.equal(r.stdout, '');
+        continue;
+      }
+      assert.equal(r.status, 0, r.stderr);
+      assert.deepEqual(JSON.parse(r.stdout), {
+        cwd: fs.realpathSync(path.dirname(archive)),
+        argv: [
+          'publish',
+          archive,
+          '--ignore-scripts',
+          '--access',
+          'public',
+          ...(tag === 'next' ? ['--tag', 'next'] : []),
+          '--registry=https://registry.npmjs.org',
+        ],
+      });
+    }
     assert.deepEqual(fs.readdirSync(path.dirname(archive)), ['package.tgz']);
     assert(!fs.existsSync(path.join(checkout, 'NEVER_RUN')));
   } finally {

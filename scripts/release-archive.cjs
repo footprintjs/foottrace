@@ -1,11 +1,77 @@
 'use strict';
-const { gunzipSync, inflateRawSync } = require('node:zlib');
+const { inflateRawSync } = require('node:zlib');
 const { createHash } = require('node:crypto');
-const fail = () => {
-  const e = new Error('invalid-archive');
-  e.code = 'invalid-archive';
+const refusals = new WeakMap();
+const fieldNames = new Set([
+  'name',
+  'version',
+  'type',
+  'description',
+  'license',
+  'author',
+  'repository',
+  'bugs',
+  'homepage',
+  'engines',
+  'sideEffects',
+  'main',
+  'module',
+  'types',
+  'files',
+  'exports',
+  'scripts',
+  'dependencies',
+  'devDependencies',
+  'peerDependencies',
+  'peerDependenciesMeta',
+  'optionalDependencies',
+  'bundleDependencies',
+  'bundledDependencies',
+  'bin',
+  'dist',
+  'tag',
+  'publishConfig',
+  'keywords',
+  'packageManager',
+  'workspaces',
+  'root',
+]);
+const fail = (code = 'invalid-archive', key) => {
+  const e = new Error(code);
+  e.code = code;
+  const field =
+    key === undefined
+      ? ''
+      : ':' + (fieldNames.has(key) ? key : 'key-' + createHash('sha256').update(key).digest('hex').slice(0, 12));
+  refusals.set(e, code + field);
   throw e;
 };
+const archiveRefusalCode = (error) => refusals.get(error);
+function canonical(value) {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return '[' + value.map(canonical).join(',') + ']';
+  return (
+    '{' +
+    Object.keys(value)
+      .sort()
+      .map((key) => JSON.stringify(key) + ':' + canonical(value[key]))
+      .join(',') +
+    '}'
+  );
+}
+function requireSourceManifest(manifest, source) {
+  if (!source || typeof source !== 'object' || Array.isArray(source)) fail('manifest-source', 'root');
+  const keys = [...new Set([...Object.keys(manifest), ...Object.keys(source)])]
+    .filter((key) => key !== 'version')
+    .sort();
+  for (const key of keys)
+    if (
+      !Object.hasOwn(manifest, key) ||
+      !Object.hasOwn(source, key) ||
+      canonical(manifest[key]) !== canonical(source[key])
+    )
+      fail('manifest-source', key);
+}
 const hash = (bytes, algorithm, encoding = 'hex') => createHash(algorithm).update(bytes).digest(encoding);
 function text(bytes) {
   try {
@@ -15,38 +81,51 @@ function text(bytes) {
   }
 }
 function field(bytes) {
-  const i = bytes.indexOf(0);
-  return text(i < 0 ? bytes : bytes.subarray(0, i));
+  const end = bytes.indexOf(0);
+  if (end >= 0 && bytes.subarray(end).some((n) => n !== 0)) fail();
+  if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) fail();
+  return text(end < 0 ? bytes : bytes.subarray(0, end));
 }
-function octal(bytes) {
-  const value = field(bytes).trim();
-  if (!/^[0-7]+$/.test(value)) fail();
+function octal(bytes, { empty = false, checksum = false } = {}) {
+  if (empty && bytes.every((n) => n === 0)) return 0;
+  const value = bytes.toString('latin1');
+  const shape = checksum
+    ? /^[0-7]{6}(?:\0 | \0)$/
+    : bytes.length === 8
+    ? /^(?:[0-7]{7}\0|[0-7]{6} \0)$/
+    : /^(?:[0-7]{11}\0|[0-7]{10} \0)$/;
+  if (!shape.test(value)) fail();
   const n = Number.parseInt(value, 8);
   if (!Number.isSafeInteger(n)) fail();
   return n;
 }
-function pax(bytes) {
-  const result = Object.create(null);
-  let at = 0;
-  while (at < bytes.length) {
-    const space = bytes.indexOf(32, at);
-    if (space < 0 || space - at > 9) fail();
-    const sizeText = text(bytes.subarray(at, space));
-    if (!/^[1-9]\d*$/.test(sizeText)) fail();
-    const size = Number(sizeText),
-      end = at + size;
-    if (!Number.isSafeInteger(size) || end > bytes.length || size <= space - at + 2 || bytes[end - 1] !== 10) fail();
-    const entry = text(bytes.subarray(space + 1, end - 1)),
-      eq = entry.indexOf('=');
-    if (eq <= 0) fail();
-    const key = entry.slice(0, eq),
-      value = entry.slice(eq + 1);
-    // No inherited ownership, link, size or extraction directives are accepted.
-    if (key !== 'path' || Object.prototype.hasOwnProperty.call(result, key)) fail();
-    result[key] = value;
-    at = end;
-  }
-  return result;
+function headerSize(header) {
+  const magic = Buffer.from([117, 115, 116, 97, 114, 0, 48, 48]);
+  if (!header.subarray(257, 265).equals(magic)) fail();
+  let sum = 0;
+  for (let i = 0; i < 512; i++) sum += i >= 148 && i < 156 ? 32 : header[i];
+  if (sum !== octal(header.subarray(148, 156), { checksum: true })) fail();
+  octal(header.subarray(100, 108));
+  for (const [start, end] of [
+    [108, 116],
+    [116, 124],
+    [329, 337],
+    [337, 345],
+  ])
+    if (octal(header.subarray(start, end), { empty: true }) !== 0) fail();
+  octal(header.subarray(136, 148));
+  // npm uses prefix/PAX for long or non-ASCII paths; this closed profile refuses them explicitly.
+  if ([120, 103, 76, 75].includes(header[156]) || header.subarray(345, 500).some((n) => n !== 0))
+    fail('archive-profile');
+  // Portable regular-file packs have no link, owner, prefix or extension bytes.
+  if (
+    header[156] !== 48 ||
+    header.subarray(157, 257).some((n) => n !== 0) ||
+    header.subarray(265, 329).some((n) => n !== 0) ||
+    header.subarray(345, 512).some((n) => n !== 0)
+  )
+    fail();
+  return octal(header.subarray(124, 136));
 }
 function inspectArchive(bytes, expected) {
   try {
@@ -59,39 +138,38 @@ function inspectArchive(bytes, expected) {
       bytes.length > maxArchive
     )
       fail();
-    const tar = gunzipSync(bytes, { maxOutputLength: maxExpanded });
+    // One flags-zero gzip member only. Never publish bytes hidden after its trailer.
+    if (bytes.length < 18 || bytes[0] !== 31 || bytes[1] !== 139 || bytes[2] !== 8 || bytes[3] !== 0) fail();
+    const decoded = inflateRawSync(bytes.subarray(10), { maxOutputLength: maxExpanded, info: true }),
+      tar = decoded.buffer,
+      trailer = 10 + decoded.engine.bytesWritten;
+    if (
+      trailer + 8 !== bytes.length ||
+      bytes.readUInt32LE(trailer) !== crc32(tar) ||
+      bytes.readUInt32LE(trailer + 4) !== tar.length
+    )
+      fail();
     if (tar.length % 512 !== 0) fail();
     const names = new Set(),
       files = [];
     let at = 0,
-      pending = null,
       identity = null,
       ended = false;
     while (at + 512 <= tar.length) {
       const header = tar.subarray(at, at + 512);
       at += 512;
       if (header.every((n) => n === 0)) {
-        if (pending || at + 512 > tar.length || !tar.subarray(at).every((n) => n === 0)) fail();
+        if (at + 512 > tar.length || !tar.subarray(at).every((n) => n === 0)) fail();
         ended = true;
         break;
       }
-      let sum = 0;
-      for (let i = 0; i < 512; i++) sum += i >= 148 && i < 156 ? 32 : header[i];
-      if (sum !== octal(header.subarray(148, 156)) || field(header.subarray(257, 263)) !== 'ustar') fail();
-      const size = octal(header.subarray(124, 136));
-      if (at + size > tar.length) fail();
+      const size = headerSize(header);
+      const padded = Math.ceil(size / 512) * 512;
+      if (at + padded > tar.length || tar.subarray(at + size, at + padded).some((n) => n !== 0)) fail();
       const data = tar.subarray(at, at + size);
-      at += Math.ceil(size / 512) * 512;
-      const type = field(header.subarray(156, 157)) || '0';
-      if (type === 'x') {
-        if (pending || size > 65536) fail();
-        pending = pax(data);
-        continue;
-      }
-      if (type !== '0' || field(header.subarray(157, 257))) fail();
-      const prefix = field(header.subarray(345, 500));
-      const name = pending?.path ?? `${prefix ? prefix + '/' : ''}${field(header.subarray(0, 100))}`;
-      pending = null;
+      at += padded;
+      const name = field(header.subarray(0, 100));
+      if (Buffer.byteLength(name) >= 100 || /[^\x20-\x7e]/.test(name)) fail('archive-profile');
       if (
         !name.startsWith('package/') ||
         /[\\\x00-\x1f]/.test(name) ||
@@ -112,11 +190,13 @@ function inspectArchive(bytes, expected) {
         identity = JSON.parse(text(data));
       }
     }
+    if (identity && Object.hasOwn(expected, 'sourceManifest')) requireSourceManifest(identity, expected.sourceManifest);
     if (
       !ended ||
       !identity ||
       identity.name !== expected.package ||
       identity.version !== expected.version ||
+      Object.prototype.hasOwnProperty.call(identity, 'publishConfig') ||
       !files.some((f) => f.path.startsWith('package/dist/'))
     )
       fail();
@@ -130,7 +210,7 @@ function inspectArchive(bytes, expected) {
       files,
     };
   } catch (e) {
-    if (e?.code === 'invalid-archive') throw e;
+    if (refusals.has(e)) throw e;
     fail();
   }
 }
@@ -213,8 +293,8 @@ function readArtifactZip(bytes, allowedNames) {
     if (at !== end || allowedNames.some((n) => !Object.prototype.hasOwnProperty.call(result, n))) fail();
     return result;
   } catch (e) {
-    if (e?.code === 'invalid-archive') throw e;
+    if (refusals.has(e)) throw e;
     fail();
   }
 }
-module.exports = { inspectArchive, readArtifactZip };
+module.exports = { inspectArchive, readArtifactZip, archiveRefusalCode };
