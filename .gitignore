@@ -6,6 +6,9 @@
 /dist
 /coverage
 
+# Vitest 5 writes reports and attachments here by default
+/.vitest
+
 # Logs
 *.log
 build.log

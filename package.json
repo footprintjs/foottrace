@@ -124,7 +124,7 @@
     "@types/node": "^22.0.0",
     "@typescript-eslint/eslint-plugin": "^8.71.1",
     "@typescript-eslint/parser": "^8.71.1",
-    "@vitest/coverage-v8": "4.1.11",
+    "@vitest/coverage-v8": "5.1.0",
     "esbuild": "0.28.2",
     "eslint": "^8.57.1",
     "fast-check": "^4.4.0",
@@ -132,7 +132,7 @@
     "prettier": "^2.8.1",
     "publint": "^0.3.0",
     "typescript": "~5.4.5",
-    "vitest": "4.1.11"
+    "vitest": "5.1.0"
   },
   "keywords": [
     "typescript",
