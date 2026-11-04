@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { read } from './helpers.mjs';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 const ci = read('.github/workflows/ci.yml');
 const publish = read('.github/workflows/publish.yml');
 const codeql = read('.github/workflows/codeql.yml');
@@ -304,5 +308,56 @@ test('trusted workflow triggers and context stay bound to the actual event', () 
       `  ${name}: \u0024{{ github.${field} }}`,
     );
     assert.doesNotMatch(publish, new RegExp(`^ {4,}${name}:`, 'm'));
+  }
+});
+
+test('archive build pins and verifies npm before install, pack and manifest binding', () => {
+  const bodies = runBodies(jobBlock('build'));
+  const pin = bodies.indexOf('npm install -g npm@11.19.0');
+  const verify = bodies.indexOf('test "$(npm --version)" = \'11.19.0\'');
+  assert(pin >= 0, 'build must install the reviewed npm version');
+  assert(verify > pin, 'build must check the installed npm version');
+  for (const command of [
+    'npm ci',
+    'npm run build',
+    'npm run check:package',
+    'npm pack --ignore-scripts --json > pack.json',
+    'node scripts/release-runner.cjs build-manifest',
+  ])
+    assert(bodies.indexOf(command) > verify, command + ' must follow the npm guard');
+});
+test('RC repair docs select failed jobs without re-running candidate planning', () => {
+  const guide = read('docs/RELEASING.md');
+  assert.match(
+    guide,
+    /Use \*\*Re-run failed jobs\*\* to repair a failed RC verification, never \*\*Re-run all jobs\*\*/,
+  );
+});
+
+test('actual build npm guard accepts only the reviewed toolchain', (t) => {
+  const command = runBodies(jobBlock('build')).find((body) => body.includes('npm --version'));
+  assert(command, 'build npm version guard must exist');
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'ft-build-npm-'));
+  t.after(() => fs.rmSync(temporary, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(temporary, 'npm'), '#!/bin/sh\nprintf "%s\\n" "$SYNTHETIC_NPM_VERSION"\n', {
+    mode: 0o755,
+  });
+  for (const [version, status] of [
+    ['11.19.0', 0],
+    ['11.18.0', 1],
+    ['12.2.1', 1],
+  ]) {
+    const result = spawnSync('bash', ['-e', '-c', command], {
+      encoding: 'utf8',
+      env: {
+        PATH: temporary + ':/usr/bin:/bin',
+        HOME: temporary,
+        TMPDIR: process.env.TMPDIR,
+        SYNTHETIC_NPM_VERSION: version,
+      },
+    });
+    assert.equal(result.status, status);
+    assert.equal(result.stdout, '');
+    assert.equal(result.stderr, '');
   }
 });

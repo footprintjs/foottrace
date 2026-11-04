@@ -42,3 +42,11 @@ for (const offset of [8, 4])
     changed[changed.length - offset] ^= 1;
     assert.throws(() => inspectArchive(changed, expected), { code: 'invalid-archive' });
   });
+
+test('gzip flags policy refuses FTEXT and every reserved flag bit', () => {
+  for (const bit of [1, 32, 64, 128]) {
+    const changed = Buffer.from(bytes);
+    changed[3] = bit;
+    assert.throws(() => inspectArchive(changed, expected), { code: 'invalid-archive' });
+  }
+});

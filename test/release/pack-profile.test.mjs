@@ -26,7 +26,13 @@ function fixture(t, file = 'dist/index.js') {
   const run = (args) =>
     spawnSync('git', args, {
       cwd,
-      env: { PATH: process.env.PATH, HOME: cwd, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' },
+      env: {
+        PATH: process.env.PATH,
+        HOME: cwd,
+        TMPDIR: process.env.TMPDIR,
+        GIT_CONFIG_NOSYSTEM: '1',
+        GIT_CONFIG_GLOBAL: '/dev/null',
+      },
       encoding: 'utf8',
     });
   for (const args of [
@@ -37,10 +43,10 @@ function fixture(t, file = 'dist/index.js') {
     assert.equal(run(args).status, 0);
   return { cwd, source, run };
 }
-function check(cwd) {
+function check(cwd, executable = npmCli) {
   return spawnSync(process.execPath, [checker], {
     cwd,
-    env: { PATH: process.env.PATH, HOME: cwd, npm_execpath: npmCli },
+    env: { PATH: process.env.PATH, HOME: cwd, TMPDIR: process.env.TMPDIR, npm_execpath: executable },
     encoding: 'utf8',
     timeout: 30000,
     maxBuffer: 1024 * 1024,
@@ -79,4 +85,31 @@ test('real-pack check compares with pinned HEAD, not a changed staging manifest'
   const r = check(f.cwd);
   assert.equal(r.status, 1);
   assert.equal(r.stderr.trim(), 'manifest-source:tag');
+});
+
+test('real pack child keeps the caller temporary directory', (t) => {
+  const f = fixture(t),
+    temporary = path.join(f.cwd, 'child-temp'),
+    log = path.join(f.cwd, 'pack-argv.json');
+  fs.mkdirSync(temporary);
+  const wrapper = path.join(f.cwd, 'capture-npm.cjs');
+  fs.writeFileSync(
+    wrapper,
+    'require("node:fs").writeFileSync(' +
+      JSON.stringify(log) +
+      ',JSON.stringify({destination:process.argv.at(-1)}));require(' +
+      JSON.stringify(npmCli) +
+      ');\n',
+  );
+  const prior = process.env.TMPDIR;
+  let result;
+  try {
+    process.env.TMPDIR = temporary;
+    result = check(f.cwd, wrapper);
+  } finally {
+    if (prior === undefined) delete process.env.TMPDIR;
+    else process.env.TMPDIR = prior;
+  }
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(path.dirname(JSON.parse(fs.readFileSync(log, 'utf8')).destination), temporary);
 });
