@@ -6,6 +6,26 @@ import { syntheticPackageArchive } from './helpers.mjs';
 const require = createRequire(import.meta.url),
   runtime = require('../../scripts/release-github.cjs'),
   arc = require('../../scripts/release-archive.cjs');
+const markerUpload = (route) => {
+  try {
+    return new URL(route, 'https://api.github.com').origin === 'https://uploads.github.com';
+  } catch {
+    return false;
+  }
+};
+test('marker fault injection matches only the exact upload origin', () => {
+  assert.equal(
+    markerUpload('https://uploads.github.com/repos/footprintjs/foottrace/releases/1/assets?name=marker'),
+    true,
+  );
+  for (const route of [
+    '/repos/footprintjs/foottrace/git/refs',
+    'https://uploads.github.com.attacker.invalid/repos/footprintjs/foottrace/releases/1/assets',
+    'https://uploads.github.com@attacker.invalid/repos/footprintjs/foottrace/releases/1/assets',
+    'unparseable URL',
+  ])
+    assert.equal(markerUpload(route), false);
+});
 async function prepared() {
   const f = rcWriteFixture(),
     p = await runtime.plan(f.api, f.context, f.options),
@@ -154,9 +174,7 @@ test('RC writer does not issue a grant for an unusable marker acknowledgement', 
     api = x.f.api;
   x.f.api = async (...args) => {
     const result = await api(...args);
-    return args[0] === 'POST' && args[1].startsWith('https://uploads.github.com')
-      ? { ...result, data: { ...result.data, id: 0 } }
-      : result;
+    return args[0] === 'POST' && markerUpload(args[1]) ? { ...result, data: { ...result.data, id: 0 } } : result;
   };
   await assert.rejects(() => write(x), { code: 'reservation-ambiguous' });
   assert.equal(x.f.calls.filter((c) => c.method === 'POST').length, 3);
@@ -194,7 +212,7 @@ test('RC publish grant cannot move to an asset outside the pinned release', asyn
 for (const [name, predicate, code] of [
   ['tag', (route) => route.endsWith('/git/refs'), 'rc-tag-create'],
   ['release', (route) => route.endsWith('/releases'), 'rc-release-create'],
-  ['marker', (route) => route.startsWith('https://uploads.github.com'), 'reservation-ambiguous'],
+  ['marker', (route) => markerUpload(route), 'reservation-ambiguous'],
 ])
   test('RC create requires its own 201 acknowledgement for ' + name, async () => {
     const x = await prepared(),
