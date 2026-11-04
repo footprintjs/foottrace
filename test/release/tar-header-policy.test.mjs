@@ -46,7 +46,7 @@ test('canonical header checksum authenticates all actual header bytes', () => {
   );
   assert.throws(() => inspectArchive(bytes, expected), { code: 'invalid-archive' });
 });
-for (const [name, edit] of [
+for (const [name, edit, code = 'invalid-archive'] of [
   [
     'name bytes after NUL',
     (h) => {
@@ -82,6 +82,7 @@ for (const [name, edit] of [
     (h) => {
       h[345] = 120;
     },
+    'archive-profile',
   ],
   [
     'unused header tail',
@@ -112,5 +113,5 @@ for (const [name, edit] of [
   ],
 ])
   test('canonical header refuses ' + name, () => {
-    assert.throws(() => inspectArchive(changed(edit), expected), { code: 'invalid-archive' });
+    assert.throws(() => inspectArchive(changed(edit), expected), { code });
   });
