@@ -86,16 +86,28 @@ describe('native exact root read sources', () => {
     expect(record.snapshot().occurrences.every((o) => o.source.kind === 'staged')).toBe(true);
   });
 
-  it.each(['full', 'delta'] as const)(
-    'reports the actual old live source for the separate delete bug in %s',
-    (mode) => {
-      const { frame } = setup({ count: 1 });
+  it.each(['full', 'delta'] as const)('returns staged undefined without claiming a proved absence in %s', (mode) => {
+    for (const verb of ['delete', 'set'] as const) {
+      const { state, frame } = setup({ count: 1 });
       frame.useEncoding({ commitValues: mode, writeProvenance: 'off' });
-      frame.write(['count'], undefined, 'delete');
-      // Existing FootPrint #124 defect, not a new promise: the runtime falls back to live state.
-      expect(read(frame, 'count')).toMatchObject({ value: 1, occurrence: { source: { kind: 'base' } } });
-    },
-  );
+      frame.write(['count'], undefined, verb);
+      expect(read(frame, 'count')).toMatchObject({
+        value: undefined,
+        occurrence: { source: { kind: 'unavailable', reason: 'undefined-presence-unknown' } },
+      });
+      expect(state.getState().count).toBe(1); // the stage's deletion has not committed yet
+    }
+  });
+
+  it.each(['full', 'delta'] as const)('keeps a staged deletion redacted in %s', (mode) => {
+    const { frame } = setup({ count: 1 });
+    frame.useEncoding({ commitValues: mode, writeProvenance: 'off' });
+    frame.write(['count'], undefined, 'delete');
+    expect(read(frame, 'count', owner, 'redacted')).toMatchObject({
+      value: undefined,
+      occurrence: { source: { kind: 'unavailable', reason: 'redacted' } },
+    });
+  });
 
   it('never attributes an unlogged direct write to a nearby recorded commit', () => {
     const { state, record, frame } = setup({ count: 1 });

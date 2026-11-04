@@ -21,9 +21,9 @@ import { captureFor } from '../read-sources/bindings.js';
  *      is held by reference, never cloned: the read view before the first write and the buffer's
  *      net-change diff base after it.
  *   3. TWO TIERS. A read is served from the stage's own view (the buffer's working copy once the stage
- *      wrote, else the first-touch base); a key absent there is served from LIVE state (at the
- *      address, then the root). After the first write the buffer's diff base is first given a private
- *      copy at that path (`TransactionBuffer · detachBase`).
+ *      wrote, else the first-touch base). Hard sets/deletes own their path and descendants, even
+ *      when undefined. Only unresolved, unshadowed reads use LIVE state (at the address, then root).
+ *      After the first write, a live container's diff base is detached before it is returned.
  *   4. LAZY BUFFER. The buffer is built at the first write — on the first-touch base, at the address,
  *      under the encoding. A frame that never writes builds none, and its commit is the empty bundle.
  *   5. READ KEYS. Under `writeProvenance: 'reads-prefix'` every noted read puts its user-level key
@@ -185,10 +185,10 @@ export class RecordFrame {
    * Anchoring the view at first touch restores the EXACT eager semantics — sequential AND parallel —
    * at zero clone cost.
    *
-   * Read visibility is two-tier, matching eager byte-for-byte: keys present in the view at first
-   * touch read repeatably from it; keys ABSENT from it fall back to LIVE state (the eager engine's
-   * exact fallback — a mid-flight sibling root-key write was always visible to reads, and stays
-   * visible; only the DIFF BASE is pinned).
+   * Read visibility is two-tier: first-touch values read repeatably unless overwritten. An unresolved
+   * key falls back to LIVE state only when no staged hard set/delete owns its path or an ancestor.
+   * Mid-flight sibling root-key writes remain visible at those unshadowed paths; the diff base stays
+   * pinned at first touch.
    */
   private firstTouch(): Record<string, unknown> {
     if (!this.base) {
@@ -291,18 +291,20 @@ export class RecordFrame {
   }
 
   /**
-   * The frame's read, mirroring the eager engine's read order byte-for-byte (law 3):
+   * The frame's read order (law 3):
    *
    *    1. staged writes + first-touch snapshot — `buffer.get` over its workingCopy when the buffer
    *       exists, else `nativeGet` over the zero-clone first-touch base (the buffer's base IS that
-   *       view, so the two tiers agree on content);
-   *    2. LIVE state via `SharedMemory · getValue` for keys absent from the snapshot — including its
-   *       address→root fallback. The eager engine had this exact live fallback for snapshot-missing
-   *       keys; byte-identity over purity. After the frame's first write such a value can be the very
-   *       container the buffer's diff base holds at the path (the stage deleted or unset it, or
-   *       replaced a container above it), so the base is detached there first
-   *       (`TransactionBuffer · detachBase`): an in-place edit of the value (out of contract) written
-   *       back is recorded, as on 9.28.0, whose base was a clone taken at the first write.
+   *       view). A defined value or a path covered by a hard set/delete returns from this tier,
+   *       including undefined. Merges alone do not mask unresolved reads;
+   *    2. LIVE state via `SharedMemory · getValue` for unresolved, unshadowed keys, including its
+   *       address→root fallback. After the first write, a returned live container may share the diff
+   *       base, so `TransactionBuffer · detachBase` protects that base before it goes out: a borrowed
+   *       in-place edit (out of contract) written back is still recorded.
+   *
+   * At the root, deletion stays undefined in the next stage unless rewritten. In a namespace,
+   * release ends the stage's mask and the next stage may read an existing global value. This is
+   * the existing namespace fallback, not a persistent tombstone.
    *
    * Reads never construct the buffer (#13): a frame that never writes performs zero clones of the
    * shared state.
@@ -392,7 +394,7 @@ export class RecordFrame {
     const fromSnapshot = this.buffer
       ? this.buffer.get(at, undefined, observation)
       : nativeGet(this.firstTouch(), at, undefined, observation);
-    if (typeof fromSnapshot !== 'undefined') return fromSnapshot;
+    if (typeof fromSnapshot !== 'undefined' || this.buffer?.hasHardWrite(at)) return fromSnapshot;
     if (observation) observation.live = true;
     const live = this.state.getValue(this._address, path, key, observation);
     // Tier 2 after the first write: keep the diff base exact (see above).

@@ -10,7 +10,7 @@ const list = (dir) => readdirSync(dir, { withFileTypes: true }).flatMap(e =>
   e.isDirectory() ? list(join(dir, e.name)) : e.name.endsWith('.ts') ? [join(dir, e.name)] : []);
 
 export function checkLayers(root = ROOT, layers = ranks) {
-  const files = list(join(root, 'src'));
+  const files = list(join(root, 'src')).filter(file => !file.endsWith('.test.ts'));
   const local = f => relative(root, f).split('\\').join('/');
   const known = new Set(files.map(local));
   const problems = [];

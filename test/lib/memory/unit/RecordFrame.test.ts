@@ -5,7 +5,7 @@
  *
  *   1  address      reads and writes at a path prefix the caller computed; moves only while nothing is staged
  *   2  first touch  the generation first touched is held by reference — the read view, then the diff base
- *   3  two tiers    the stage's view first, LIVE state for a key absent there; `detachBase` after the first write
+ *   3  two tiers    hard writes own their paths; unshadowed missing keys use LIVE state with `detachBase`
  *   4  lazy buffer  built at the first write, on the first-touch base, at the address, under the encoding
  *   5  readKeys     under 'reads-prefix' each row carries the keys noted before it; `release` keeps them
  *   6  commit       the payload, then the names, to `recordCommit`; `release` ends the hold; `discard` drops everything
@@ -136,13 +136,15 @@ describe('RecordFrame — law 3: two tiers', () => {
   });
 
   it('detaches the diff base before a tier-2 container goes out, so a write-back is recorded', () => {
-    const { log, frame } = setup({ obj: { n: 1 } });
-    frame.write(['obj'], undefined, 'delete'); // the working copy holds nothing at obj now
-    const live = frame.read([], 'obj') as Loose; // tier 2: committed state itself
+    const { log, frame } = setup({ obj: { child: { n: 1 } } });
+    frame.write(['other'], 1, 'set');
+    const borrowed = frame.read([], 'obj') as Loose;
+    delete borrowed.child; // out of contract, without staging a hard write at obj or child
+    const live = frame.read(['obj'], 'child') as Loose; // legitimate, unshadowed tier-2 fallback
     live.n = 2; // out of contract — an in-place edit of a borrowed read
-    frame.write(['obj'], live, 'set');
+    frame.write(['obj', 'child'], live, 'set');
     commitAs(frame, 's');
-    expect(last(log).overwrite).toEqual({ obj: { n: 2 } }); // against a detached base, the edit is a change
+    expect(last(log).overwrite).toEqual({ other: 1, obj: { child: { n: 2 } } });
   });
 });
 
@@ -433,5 +435,94 @@ describe('RecordFrame — law 7: write, with the bytes of a verdict', () => {
     commitAs(frame, 'second');
     expect(last(log).overwrite).toEqual({ token: 'new' });
     expect(last(log).redactedPaths).toEqual([]);
+  });
+});
+
+// #124: the staged view owns hard writes, including an undefined value.
+describe('#124 staged-read regressions', () => {
+  for (const mode of [undefined, 'full', 'delta'] as const) {
+    for (const verb of ['delete', 'set'] as const) {
+      it(`${mode ?? 'default'} ${verb}(undefined) stays absent at the root in this and the next stage`, () => {
+        const { state, log, frame } = setup({ count: 7 });
+        if (mode) frame.useEncoding({ commitValues: mode, writeProvenance: 'off' });
+        frame.write(['count'], undefined, verb);
+        const sameStage = frame.read([], 'count');
+        commitAs(frame, 'remove');
+        const nextStage = new RecordFrame(state, log).read([], 'count');
+        expect({ sameStage, nextStage }).toEqual({ sameStage: undefined, nextStage: undefined });
+      });
+
+      it(`${mode ?? 'default'} ${verb}(undefined) stays absent in a namespace without a global value`, () => {
+        const { state, log, frame } = setup({ runs: { p1: { count: 7 } } }, RUN);
+        if (mode) frame.useEncoding({ commitValues: mode, writeProvenance: 'off' });
+        frame.write(frame.at([], 'count'), undefined, verb);
+        const sameStage = frame.read([], 'count');
+        commitAs(frame, 'remove');
+        const nextStage = new RecordFrame(state, log, RUN).read([], 'count');
+        expect({ sameStage, nextStage }).toEqual({ sameStage: undefined, nextStage: undefined });
+      });
+    }
+
+    it(`${mode ?? 'default'} namespaced deletion masks this stage but reveals the existing global next stage`, () => {
+      const { state, log, frame } = setup({ count: 'global', runs: { p1: { count: 'local' } } }, RUN);
+      if (mode) frame.useEncoding({ commitValues: mode, writeProvenance: 'off' });
+      frame.write(frame.at([], 'count'), undefined, 'delete');
+      const sameStage = frame.read([], 'count');
+      commitAs(frame, 'remove');
+      const nextStage = new RecordFrame(state, log, RUN).read([], 'count');
+      expect({ sameStage, nextStage }).toEqual({ sameStage: undefined, nextStage: 'global' });
+    });
+  }
+
+  it('a hard ancestor replacement masks removed descendants through a later merge', () => {
+    const { frame } = setup({ cfg: { gone: 7, keep: 1 } });
+    frame.write(['cfg'], { keep: 1 }, 'set');
+    frame.write(['cfg'], { extra: 2 }, 'merge');
+    expect(frame.read(['cfg'], 'gone')).toBeUndefined();
+    expect(frame.read(['cfg'], 'extra')).toBe(2);
+  });
+
+  it('a whole-array replacement cannot resurrect an old index', () => {
+    const { frame } = setup({ items: [7] });
+    frame.write(['items'], [], 'set');
+    expect(frame.read(['items'], '0')).toBeUndefined();
+  });
+
+  it('an untouched missing descendant still falls back after an additive ancestor merge', () => {
+    const { state, log, frame } = setup({ cfg: { keep: 1 } });
+    frame.read(['cfg'], 'keep');
+    frame.write(['cfg'], { extra: 2 }, 'merge');
+    commitElsewhere(state, log, 'cfg', { keep: 1, later: 9 });
+    expect(frame.read(['cfg'], 'later')).toBe(9);
+  });
+
+  it('a hard-write name is not a prefix match for a different segment', () => {
+    const { state, log, frame } = setup({ a: 1 });
+    frame.read([], 'a');
+    frame.write(['a'], undefined, 'delete');
+    commitElsewhere(state, log, 'ab', 9);
+    expect(frame.read([], 'ab')).toBe(9);
+  });
+
+  it('a later defined set wins over a staged delete', () => {
+    const { frame } = setup({ count: 7 });
+    frame.write(['count'], undefined, 'delete');
+    frame.write(['count'], 9, 'set');
+    expect(frame.read([], 'count')).toBe(9);
+  });
+
+  it('discarding a retry attempt removes its staged masking', () => {
+    const { frame } = setup({ count: 7 });
+    frame.write(['count'], undefined, 'delete');
+    frame.discard();
+    expect(frame.read([], 'count')).toBe(7);
+  });
+
+  it('commit clears staging classification even before release', () => {
+    const { state, log, frame } = setup({ count: 7 });
+    frame.write(['count'], undefined, 'delete');
+    frame.commit(() => ({ stage: 'remove', stageId: 'remove', runtimeStageId: 'remove#0' }));
+    commitElsewhere(state, log, 'count', 9);
+    expect(frame.read([], 'count')).toBe(9);
   });
 });

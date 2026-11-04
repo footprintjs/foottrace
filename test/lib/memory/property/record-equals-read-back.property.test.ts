@@ -9,7 +9,7 @@
  * stay where they provably fold back; a family of rows that does not is
  * recorded as `set` rows of the values the stage read.
  *
- * The property drives `TransactionBuffer` directly — no scope, no engine — so
+ * The original arms drive `TransactionBuffer` directly — no scope, no engine — so
  * every shape the buffer can be handed is reachable:
  *   MAIN        1–8 ops over root keys and depth-2 paths: `set` (containers at
  *               depth 1; scalars or objects at depth 2), `merge` (objects,
@@ -46,6 +46,8 @@
  * the oracle shares no code with what it checks. Its semantics are the
  * record's: an own `undefined` is a deleted key, arrays compare by index, key
  * order does not count.
+ * The #124 arm also drives `RecordFrame`: each program prefix's actual staged
+ * reads must agree with that prefix's own commit folded onto its original base.
  *
  * RED on 9.29.0 (03a16d5 + only the behaviour-free `dryFold` export), every
  * arm but ROOT-ONLY, at the first program each seed reaches (shrunk):
@@ -73,7 +75,10 @@ import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 
 import { commitValueAt } from '../../../../src/lib/memory/commitLogUtils';
+import { EventLog } from '../../../../src/lib/memory/EventLog';
 import { nativeGet, nativeHas } from '../../../../src/lib/memory/pathOps';
+import { RecordFrame } from '../../../../src/lib/memory/RecordFrame';
+import { SharedMemory } from '../../../../src/lib/memory/SharedMemory';
 import { TransactionBuffer } from '../../../../src/lib/memory/TransactionBuffer';
 import type { CommitBundle, MemoryPatch, TraceEntry } from '../../../../src/lib/memory/types';
 import { applySmartMerge, DELIM } from '../../../../src/lib/memory/utils';
@@ -315,6 +320,76 @@ function admitted(program: Program, encoding: 'full' | 'delta', address: string[
 const RUNS = Number(process.env.ADMITTED_RUNS ?? 1_000);
 const SEED = process.env.ADMITTED_SEED === undefined ? undefined : Number(process.env.ADMITTED_SEED);
 const seedOf = (fixed: number) => (SEED === undefined ? fixed : SEED + (fixed % 100));
+
+type FrameOp = { t: 'set' | 'merge' | 'delete'; path: string[]; v?: unknown };
+const frameHardOpArb: fc.Arbitrary<FrameOp> = fc.oneof(
+  fc.record({
+    t: fc.constant('set' as const),
+    path: rootPath,
+    v: fc.oneof(containerArb, scalarArb, fc.constant(undefined)),
+  }),
+  fc.record({ t: fc.constant('set' as const), path: deepPath, v: fc.oneof(leafArb, fc.constant(undefined)) }),
+  fc.record({ t: fc.constant('delete' as const), path: anyPath }),
+);
+const frameOpArb: fc.Arbitrary<FrameOp> = fc.oneof(
+  frameHardOpArb,
+  fc.record({ t: fc.constant('merge' as const), path: anyPath, v: mergeValueArb }),
+);
+const frameProgramArb = fc
+  .tuple(frameHardOpArb, fc.array(frameOpArb, { maxLength: 7 }))
+  .map(([first, rest]) => [first, ...rest]);
+
+/** An independent own-path reader: neither the frame nor the production getter is the oracle. */
+function ownPath(value: unknown, path: string[]): unknown {
+  for (const key of path) {
+    if (value == null || !Object.prototype.hasOwnProperty.call(value, key)) {
+      return undefined;
+    }
+    value = (value as Record<string, unknown>)[key];
+  }
+  return value;
+}
+
+/** Every prefix gets its own frame: its reads are compared only with its own real commit. */
+function frameReadsFoldBack(base: Record<string, unknown>, ops: FrameOp[], encoding: 'full' | 'delta'): void {
+  const candidates = ROOTS.flatMap((root) => [[root], ...SUBS.map((sub) => [root, sub])]);
+  for (let length = 1; length <= ops.length; length++) {
+    const state = new SharedMemory(undefined, base);
+    const log = new EventLog(state.getState());
+    const frame = new RecordFrame(state, log);
+    frame.useEncoding({ commitValues: encoding, writeProvenance: 'off' });
+    const prefix = ops.slice(0, length);
+    for (const op of prefix) frame.write(op.path, structuredClone(op.v), op.t);
+    // The new law owns hard-written paths. Merge-only/unwritten paths retain
+    // live fallback, which is deliberately not the recorded-fold read law.
+    const paths = candidates.filter((path) =>
+      prefix.some(
+        (op) =>
+          op.t !== 'merge' &&
+          op.path.length <= path.length &&
+          op.path.every((segment, index) => path[index] === segment),
+      ),
+    );
+    const reads = paths.map((path) => canon(frame.read(path.slice(0, -1), path[path.length - 1])));
+    frame.commit(() => ({ stage: 'S', stageId: 's', runtimeStageId: 's#0' }));
+    const folded = log.list().reduce((value, bundle) => fold(value, bundle), structuredClone(base) as unknown);
+    expect(reads).toEqual(paths.map((path) => canon(ownPath(folded, path))));
+  }
+}
+
+describe('#124 frame read-back property — the staged read agrees with its recorded fold', () => {
+  for (const [encoding, seed] of [
+    ['full', 20261104],
+    ['delta', 20261105],
+  ] as const) {
+    it(`checks every prefix including delete and set(undefined) (${encoding})`, () => {
+      fc.assert(
+        fc.property(baseArb, frameProgramArb, (base, ops) => frameReadsFoldBack(base, ops, encoding)),
+        { numRuns: RUNS, seed: seedOf(seed) },
+      );
+    });
+  }
+});
 
 describe('the admitted record — every commit folds back to what the stage read', () => {
   for (const [encoding, seed] of [
