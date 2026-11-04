@@ -36,7 +36,7 @@ import {
   writesOnlyInside,
 } from '../memory/keyPaths.js';
 import { logModel } from '../memory/logModel.js';
-import { pathSegments } from '../memory/paths.js';
+import { pathSegments } from '../record-paths/codec.js';
 import type { CommitBundle, TraceEntry } from '../memory/types.js';
 import type { HonestyNote } from './types.js';
 

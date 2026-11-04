@@ -1,6 +1,6 @@
 import { boundedList, ownData } from '../evidence/admission.js';
 import { buildWriterIndex, type WriterIndex } from '../memory/keyPaths.js';
-import { pathSegments } from '../memory/paths.js';
+import { pathSegments } from '../record-paths/codec.js';
 import { TraceMetadataError } from './errors.js';
 import type {
   TraceMetadata,

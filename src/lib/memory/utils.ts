@@ -6,7 +6,7 @@
  * `getNestedValue`) walk a nested object by path with
  * prototype-pollution protection. Everything else this file used to hold has an
  * owner of its own and is re-exported, so no importer moved: the path codec
- * (`paths.ts`), structural equality (`equality.ts`) and the union merge
+ * (`../record-paths/codec.ts`), structural equality (`equality.ts`) and the union merge
  * (`merge.ts`) at L0, and the verb law (`verbs.ts`) at L1 — `applySmartMerge`,
  * `nextGeneration`, `applySmartMergeInto`, `dryFold`, `supersededByNextSet`.
  * The log's scrub, `redactPatch`, moved out in 9.33.0; it is the record's own, `scrub.ts` (C4).
@@ -17,12 +17,12 @@
 
 import { setOwnValue } from '../capture/ownData.js';
 import { isDeniedSegment, nativeGet as _get, observedOwn, type NativeReadObservation } from './pathOps.js';
-import { DELIM } from './paths.js';
+import { DELIM } from '../record-paths/codec.js';
 import type { MemoryPatch } from './types.js';
 
 export { deepEqual } from './equality.js';
 export { deepSmartMerge } from './merge.js';
-export { DELIM, normalisePath, pathSegments } from './paths.js';
+export { DELIM, normalisePath, pathSegments } from '../record-paths/codec.js';
 export { applySmartMerge, applySmartMergeInto, dryFold, nextGeneration, supersededByNextSet } from './verbs.js';
 
 type NestedObject = { [key: string]: any };

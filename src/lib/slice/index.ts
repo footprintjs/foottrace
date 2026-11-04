@@ -23,7 +23,7 @@ export { keysReadFromExecutionTree, keysReadFromMap, resolveKeysReadSource } fro
 export { type KeyTimelineOptions, keyTimeline } from './keyTimeline.js';
 export { formatForwardSlice, formatSlice, formatTimeline, forwardSliceToJSON, sliceToJSON } from './serialize.js';
 export { type SliceForKeyOptions, sliceForKey } from './sliceForKey.js';
-export { normaliseStateKey } from '../memory/paths.js';
+export { normaliseStateKey } from '../record-paths/codec.js';
 export type {
   ArrayProvenance,
   AttributionBasis,

@@ -60,7 +60,7 @@ import { commitValueAt, commitValueAtWithBasis } from '../../../../src/lib/memor
 import { deepEqual } from '../../../../src/lib/memory/equality';
 import { deepSmartMerge } from '../../../../src/lib/memory/merge';
 import { nativeDelete, nativeGet, nativeSet, own, ownedRootOf, ownSpine } from '../../../../src/lib/memory/pathOps';
-import { DELIM } from '../../../../src/lib/memory/paths';
+import { DELIM } from '../../../../src/lib/record-paths/codec';
 import type { CommitBundle, MemoryPatch, TraceEntry } from '../../../../src/lib/memory/types';
 import { applySmartMerge, applySmartMergeInto, dryFold, nextGeneration } from '../../../../src/lib/memory/utils';
 import { UnknownVerbError } from '../../../../src/lib/memory/verbs';

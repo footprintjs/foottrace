@@ -1,11 +1,11 @@
-import { bindCapture, captureFor, nextSourceSegment } from './bindings.js';
+import { bindCapture, captureFor, nextSourceSegment } from '../read-sources/bindings.js';
 import type { LogAddress } from '../memory/eventPosition.js';
 import { EventLog } from '../memory/EventLog.js';
 import type { RecordSink } from '../memory/sink.js';
 import type { SharedMemory } from '../memory/SharedMemory.js';
-import { sourceAddress, sourceLimits, sourceOwn, sourceNamespaces } from './admission.js';
-import { ReadSourceCapture } from './capture.js';
-import type { ReadSourceLimits, ReadSourceSnapshot } from './types.js';
+import { sourceAddress, sourceLimits, sourceOwn, sourceNamespaces } from '../read-sources/admission.js';
+import { ReadSourceCapture } from '../read-sources/capture.js';
+import type { ReadSourceLimits, ReadSourceSnapshot } from '../read-sources/types.js';
 
 export interface ReadSourceRecordOptions {
   readonly limits?: Partial<ReadSourceLimits>;

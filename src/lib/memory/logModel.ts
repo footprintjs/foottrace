@@ -43,7 +43,7 @@ import {
   subtreePositions,
 } from './keyPaths.js';
 import { nativeGet } from './pathOps.js';
-import { DELIM } from './paths.js';
+import { DELIM } from '../record-paths/codec.js';
 import type { CommitBundle } from './types.js';
 import { type Touch, foldKey, isVerb, UnknownVerbError } from './verbs.js';
 

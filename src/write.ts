@@ -62,9 +62,9 @@ export type { WriteProvenanceMode } from './lib/memory/types.js';
 export { deepFreeze, freezeRecord } from './lib/capture/freeze.js';
 export { LOG_PLACEHOLDER } from './lib/memory/placeholders.js';
 
-export { createReadSourceRecord } from './lib/read-sources/writer.js';
+export { createReadSourceRecord } from './lib/recording/readSourceRecord.js';
 export { decodeReadSourceSnapshot } from './lib/read-sources/codec.js';
-export type { ReadSourceRecord, ReadSourceRecordOptions } from './lib/read-sources/writer.js';
+export type { ReadSourceRecord, ReadSourceRecordOptions } from './lib/recording/readSourceRecord.js';
 export type {
   ReadSource,
   ReadSourceGap,

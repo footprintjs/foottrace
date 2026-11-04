@@ -1,5 +1,5 @@
 import { buildKeyIndex, lastIndexBefore, writeEntry } from '../slice/keyIndex.js';
-import { pathSegments } from '../memory/paths.js';
+import { pathSegments } from '../record-paths/codec.js';
 import { reference } from './translation.js';
 import type { ProvMapping } from './mapping.js';
 import type { AdmittedRow } from './types.js';

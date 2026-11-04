@@ -18,7 +18,7 @@
  */
 
 import { nativeGet, nativeHas, nativeSet, ownedRootOf, ownSpine } from './pathOps.js';
-import { DELIM } from './paths.js';
+import { DELIM } from '../record-paths/codec.js';
 import { LOG_PLACEHOLDER } from './placeholders.js';
 import type { MemoryPatch } from './types.js';
 

@@ -3,7 +3,7 @@ import { commitValueAtWithBasis } from '../memory/commitLogUtils.js';
 import type { LogAddress } from '../memory/eventPosition.js';
 import { relation } from '../memory/keyPaths.js';
 import { nativeGet, nativeHas } from '../memory/pathOps.js';
-import { normaliseStateKey, pathSegments } from '../memory/paths.js';
+import { normaliseStateKey, pathSegments } from '../record-paths/codec.js';
 import type { CommitBundle } from '../memory/types.js';
 import { nativeExecution } from '../ids/nativeExecution.js';
 import { decodeReadSourceSnapshot } from '../read-sources/codec.js';

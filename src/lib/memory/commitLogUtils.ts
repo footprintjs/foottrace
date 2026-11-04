@@ -10,7 +10,7 @@ import type { RegisteredCode } from './honesty.js';
 import { queryWork, relation, rootOf, writesOnlyInside } from './keyPaths.js';
 import { leavesStringAbove, logModel, memoisedModel } from './logModel.js';
 import { nativeGet } from './pathOps.js';
-import { DELIM } from './paths.js';
+import { DELIM } from '../record-paths/codec.js';
 import type { CommitBundle, CommitPhase } from './types.js';
 import { type Touch, foldKey, isTotal, isVerb, UnknownVerbError } from './verbs.js';
 

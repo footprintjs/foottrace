@@ -2,7 +2,7 @@ import { Session } from '../cause/session.js';
 import type { CauseGraph, GraphEdge } from '../cause/types.js';
 import { walk } from '../cause/walk.js';
 import { relation, writerCandidates } from '../memory/keyPaths.js';
-import { pathSegments } from '../memory/paths.js';
+import { pathSegments } from '../record-paths/codec.js';
 import { earlier, metadataOf, queryOf } from './admission.js';
 import { TraceMetadataError } from './errors.js';
 import type {

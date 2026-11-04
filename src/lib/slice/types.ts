@@ -35,7 +35,7 @@ import type { CommitBundle, TraceEntry, UntrackedSource } from '../memory/types.
  * normalised internally — the engine's path delimiter never appears in this
  * public contract.
  */
-export type { StateKey } from '../memory/paths.js';
+export type { StateKey } from '../record-paths/codec.js';
 
 // ── KeysRead sourcing (strategy interface) ─────────────────────────────────
 

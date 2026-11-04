@@ -7,7 +7,7 @@
  * merge delta once however many `merge` rows share it. Counted, never timed.
  */
 import { commitValueAt } from '../../../../src/lib/memory/commitLogUtils';
-import { DELIM } from '../../../../src/lib/memory/paths';
+import { DELIM } from '../../../../src/lib/record-paths/codec';
 import type { CommitBundle, MemoryPatch, TraceEntry } from '../../../../src/lib/memory/types';
 import { applySmartMerge, dryFold, nextGeneration } from '../../../../src/lib/memory/utils';
 import { foldRows } from '../../../../src/lib/memory/verbs';

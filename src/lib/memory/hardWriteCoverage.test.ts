@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { hardWriteCovers } from './hardWriteCoverage.js';
-import { normalisePath } from './paths.js';
+import { normalisePath } from '../record-paths/codec.js';
 
 const covers = (writes: (string | number)[][], path: (string | number)[]) =>
   hardWriteCovers(new Set(writes.map(normalisePath)), path);

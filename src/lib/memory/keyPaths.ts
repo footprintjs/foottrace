@@ -39,7 +39,7 @@
  * ```
  */
 
-import { DELIM } from './paths.js';
+import { DELIM } from '../record-paths/codec.js';
 import type { CommitBundle } from './types.js';
 
 /**

@@ -1,5 +1,5 @@
 import type { LogAddress } from '../memory/eventPosition.js';
-import { DELIM } from '../memory/paths.js';
+import { DELIM } from '../record-paths/codec.js';
 import type { TraceEntry } from '../memory/types.js';
 import { sourceBytes, sourceKey, sourceList, sourceOwner } from './admission.js';
 import { createOriginIndex, type OriginIndex } from './originIndex.js';
