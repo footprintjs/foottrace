@@ -76,7 +76,7 @@ import {
   writtenPaths,
 } from './keyIndex.js';
 import { resolveKeysReadSource } from './keysReadSources.js';
-import { normaliseStateKey } from '../memory/paths.js';
+import { normaliseStateKey } from '../record-paths/codec.js';
 import type { FedBasis, ForwardNode, ForwardSlice, HonestyNote, KeysReadSource, StateKey } from './types.js';
 
 /** Options for {@link forwardSliceForKey} — anchoring plus walk budgets. */

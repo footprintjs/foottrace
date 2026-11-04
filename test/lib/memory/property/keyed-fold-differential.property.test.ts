@@ -26,7 +26,7 @@ import { commitValueAt, findLastWriter } from '../../../../src/lib/memory/commit
 import { deepEqual } from '../../../../src/lib/memory/equality';
 import { relation } from '../../../../src/lib/memory/keyPaths';
 import { nativeGet, nativeSet } from '../../../../src/lib/memory/pathOps';
-import { DELIM } from '../../../../src/lib/memory/paths';
+import { DELIM } from '../../../../src/lib/record-paths/codec';
 import type { CommitBundle, MemoryPatch, TraceEntry } from '../../../../src/lib/memory/types';
 import { forwardSliceForKey } from '../../../../src/lib/slice/forwardSliceForKey';
 import { keysReadFromMap } from '../../../../src/lib/slice/keysReadSources';

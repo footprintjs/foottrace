@@ -10,7 +10,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { DELIM } from '../../../../src/lib/memory/paths';
+import { DELIM } from '../../../../src/lib/record-paths/codec';
 import { LOG_PLACEHOLDER } from '../../../../src/lib/memory/placeholders';
 import { redactPatch, scrubPatch } from '../../../../src/lib/memory/scrub';
 

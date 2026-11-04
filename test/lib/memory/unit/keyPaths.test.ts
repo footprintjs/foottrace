@@ -23,7 +23,7 @@ import {
   subtreePositions,
   writerCandidates,
 } from '../../../../src/lib/memory/keyPaths';
-import { DELIM } from '../../../../src/lib/memory/paths';
+import { DELIM } from '../../../../src/lib/record-paths/codec';
 import type { CommitBundle, TraceEntry } from '../../../../src/lib/memory/types';
 
 const at = (...segments: string[]) => segments.join(DELIM);

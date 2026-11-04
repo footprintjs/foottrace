@@ -11,7 +11,7 @@ import {
 } from '../../../../src/write';
 import * as origins from '../../../../src/lib/read-sources/originIndex';
 import { recordCommit } from '../../../../src/lib/memory/recordCommit';
-import { DELIM } from '../../../../src/lib/memory/paths';
+import { DELIM } from '../../../../src/lib/record-paths/codec';
 
 const address = { logRunId: 'leg', drillPath: [] };
 const owner = { runtimeStageId: 'step#0' };

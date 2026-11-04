@@ -1,4 +1,4 @@
-import { pathSegments } from '../memory/paths.js';
+import { pathSegments } from '../record-paths/codec.js';
 import type { LogAddress } from '../memory/eventPosition.js';
 
 /** Length-prefixed encoded components preserve empty segments and literal delimiter-looking text. */

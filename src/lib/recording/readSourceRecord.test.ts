@@ -1,7 +1,7 @@
-import { captureFor } from '../../../../src/lib/read-sources/bindings';
+import { captureFor } from '../read-sources/bindings';
 import { describe, expect, it } from 'vitest';
-import * as writer from '../../../../src/write';
-import { EventLog, RecordFrame, SharedMemory } from '../../../../src/write';
+import * as writer from '../../write';
+import { EventLog, RecordFrame, SharedMemory } from '../../write';
 
 const owner = { runtimeStageId: 'reader#0' };
 const address = { logRunId: 'leg-1', drillPath: [] };

@@ -10,7 +10,7 @@
  * nothing a refused or inert row did reaches `Object.prototype`.
  */
 import { commitValueAt } from '../../../../src/lib/memory/commitLogUtils';
-import { DELIM } from '../../../../src/lib/memory/paths';
+import { DELIM } from '../../../../src/lib/record-paths/codec';
 import type { CommitBundle, TraceEntry } from '../../../../src/lib/memory/types';
 import { applySmartMerge, dryFold, nextGeneration } from '../../../../src/lib/memory/utils';
 import { type Verb, isVerb, UnknownVerbError } from '../../../../src/lib/memory/verbs';

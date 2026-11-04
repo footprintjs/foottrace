@@ -14,7 +14,7 @@
  * `path: 'k', relation: 'exact'` (the only change to them; every assertion
  * stands); the cases after them pin the rows inside, around and beside a key.
  */
-import { DELIM } from '../../../../src/lib/memory/paths';
+import { DELIM } from '../../../../src/lib/record-paths/codec';
 import type { CommitBundle, MemoryPatch, TraceEntry } from '../../../../src/lib/memory/types';
 import {
   type Touch,

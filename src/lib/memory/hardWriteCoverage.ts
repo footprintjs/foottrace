@@ -1,4 +1,4 @@
-import { DELIM } from './paths.js';
+import { DELIM } from '../record-paths/codec.js';
 
 /** A hard write owns its exact path and descendants, using the writer's path codec. */
 export function hardWriteCovers(keys: ReadonlySet<string>, path: readonly (string | number)[]): boolean {

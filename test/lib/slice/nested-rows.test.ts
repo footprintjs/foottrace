@@ -23,7 +23,7 @@
  */
 import { deepFreeze } from '../../../src/lib/capture/freeze';
 import { nativeGet } from '../../../src/lib/memory/pathOps';
-import { DELIM } from '../../../src/lib/memory/paths';
+import { DELIM } from '../../../src/lib/record-paths/codec';
 import type { CommitBundle, ExecutionTree } from '../../../src/index';
 import {
   arrayProvenance,

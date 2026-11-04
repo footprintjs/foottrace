@@ -1,4 +1,4 @@
-import { DELIM, pathSegments } from '../memory/paths.js';
+import { DELIM, pathSegments } from '../record-paths/codec.js';
 import type { TraceEntry } from '../memory/types.js';
 import type { OriginIndex } from './originIndex.js';
 

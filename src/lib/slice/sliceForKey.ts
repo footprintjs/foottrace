@@ -16,7 +16,7 @@
 import { type CausalChainOptions, type KeysReadLookup, causalChainFromCommit } from '../memory/backtrack.js';
 import { commitValueAtWithBasis, findLastWriterWithBasis } from '../memory/commitLogUtils.js';
 import type { CommitBundle } from '../memory/types.js';
-import { normaliseStateKey } from '../memory/paths.js';
+import { normaliseStateKey } from '../record-paths/codec.js';
 import { fromInitialStateNote, nestedRowsNote, redactedValueNote } from './keyIndex.js';
 import { resolveKeysReadSource } from './keysReadSources.js';
 import type { KeysReadSource, StateKey, VariableSlice } from './types.js';

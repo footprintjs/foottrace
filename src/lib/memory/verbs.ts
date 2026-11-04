@@ -33,7 +33,7 @@ import type { CommitIdx } from '../ids/runtimeStageId.js';
 import type { PathRelation } from './keyPaths.js';
 import { deepSmartMerge } from './merge.js';
 import { nativeDelete, nativeGet, nativeSet, own, ownedRootOf, ownSpine } from './pathOps.js';
-import { DELIM, pathSegments } from './paths.js';
+import { DELIM, pathSegments } from '../record-paths/codec.js';
 import type { CommitBundle, MemoryPatch, TraceEntry } from './types.js';
 
 // ─── The vocabulary ──────────────────────────────────────────────────────────

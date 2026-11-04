@@ -43,6 +43,8 @@ Each entry is stored as a `RecordEntry`: the method's entry plus the method's na
 
 ## Diagnostics are not records
 
+The shared state path codec lives in [record-paths](../record-paths/README.md). [Recording](../recording/README.md) composes a memory log with read-source capture above both libraries; memory does not import that factory.
+
 `setNestedValue` and `updateNestedValue` on `foottrace/paths` retain the nested-write law. Dangerous selector segments are refused before mutation; literal segment arrays preserve dotted keys; arrays concatenate without deduplication; empty collections replace. Payload keys are data. These helpers do not produce commit bundles or define a second replay law.
 
 ## Honest readers
