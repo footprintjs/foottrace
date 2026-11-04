@@ -115,3 +115,29 @@ for (const [name, edit, code = 'invalid-archive'] of [
   test('canonical header refuses ' + name, () => {
     assert.throws(() => inspectArchive(changed(edit), expected), { code });
   });
+
+test('archive member names keep the ASCII and 100-byte boundaries independently', () => {
+  const renamed = (name) => {
+    const tar = gunzipSync(syntheticPackageArchive(expected.version));
+    const firstSize = Number.parseInt(tar.subarray(124, 136).toString('ascii'), 8);
+    const start = 512 + Math.ceil(firstSize / 512) * 512,
+      header = tar.subarray(start, start + 512);
+    assert.match(header.subarray(0, 100).toString(), /^package\/dist\/index.js/);
+    header.fill(0, 0, 100);
+    header.write(name, 0, 100, 'utf8');
+    header.fill(32, 148, 156);
+    header.write(
+      [...header]
+        .reduce((a, b) => a + b, 0)
+        .toString(8)
+        .padStart(6, '0') + '\0 ',
+      148,
+      'ascii',
+    );
+    return gzipSync(tar);
+  };
+  const prefix = 'package/dist/';
+  assert.equal(inspectArchive(renamed(prefix + 'a'.repeat(99 - prefix.length)), expected).version, expected.version);
+  for (const name of [prefix + 'é.js', prefix + 'a'.repeat(100 - prefix.length)])
+    assert.throws(() => inspectArchive(renamed(name), expected), { code: 'archive-profile' });
+});
