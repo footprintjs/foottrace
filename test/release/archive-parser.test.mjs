@@ -23,10 +23,10 @@ function npmRoot() {
 }
 const root = npmRoot(),
   cases = JSON.parse(fs.readFileSync(path.join(fixture, 'cases.json'), 'utf8'));
-function npmManifest(file) {
+function npmManifest(file, defaultTag = 'latest') {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ft-npm-reader-'));
   try {
-    const r = spawnSync(process.execPath, [path.join(here, 'npm-manifest-reader.cjs'), file, root], {
+    const r = spawnSync(process.execPath, [path.join(here, 'npm-manifest-reader.cjs'), file, root, defaultTag], {
       cwd: home,
       env: { HOME: home, NPM_TEST_CACHE: path.join(home, 'cache') },
       encoding: 'utf8',
@@ -47,13 +47,19 @@ for (const row of cases)
     const file = path.join(fixture, row.file),
       bytes = fs.readFileSync(file);
     assert.equal(createHash('sha256').update(bytes).digest('hex'), row.sha256);
-    const npm = npmManifest(file),
+    const defaultTag = row.version.includes('-rc.') ? 'next' : 'latest',
+      npm = npmManifest(file, defaultTag),
       expected = { package: 'foottrace', version: row.version };
     if (!row.canonicalAllowed) {
-      assert.throws(() => inspectArchive(bytes, expected), { code: 'invalid-archive' });
+      assert.throws(() => inspectArchive(bytes, expected), { code: row.refusal ?? 'invalid-archive' });
     } else {
       const actual = inspectArchive(bytes, expected);
-      assert.deepEqual(npm, { name: actual.package, version: actual.version, hasPublishConfig: false });
+      assert.deepEqual(npm, {
+        name: actual.package,
+        version: actual.version,
+        hasPublishConfig: false,
+        effectiveTag: row.manifestTag || defaultTag,
+      });
     }
   });
 
@@ -98,7 +104,12 @@ for (const version of ['1.12.0', '1.12.0-rc.0'])
       assert.equal(rows[0].filename, 'foottrace-' + version + '.tgz');
       const file = path.join(home, rows[0].filename),
         actual = inspectArchive(fs.readFileSync(file), { package: 'foottrace', version });
-      assert.deepEqual(npmManifest(file), { name: actual.package, version: actual.version, hasPublishConfig: false });
+      assert.deepEqual(npmManifest(file, version.includes('-rc.') ? 'next' : 'latest'), {
+        name: actual.package,
+        version: actual.version,
+        hasPublishConfig: false,
+        effectiveTag: version.includes('-rc.') ? 'next' : 'latest',
+      });
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
     }

@@ -129,7 +129,6 @@ function decideRcAuthority(w, phase) {
       !sameRepo(ev.repository, e.repository)
     )
       return hold('rc-event');
-    if (w.currentMain !== e.sourceSha) return hold('rc-main');
     if (
       w.sourceCommit?.sha !== e.sourceSha ||
       w.sourceCommit.tree?.sha !== e.tree ||

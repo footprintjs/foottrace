@@ -17,7 +17,14 @@ const pacote = require(path.join(root, 'node_modules/pacote')),
       fullMetadata: true,
       fullReadJson: true,
     });
-    console.log(JSON.stringify({ name: m.name, version: m.version, hasPublishConfig: Boolean(m.publishConfig) }));
+    console.log(
+      JSON.stringify({
+        name: m.name,
+        version: m.version,
+        hasPublishConfig: Boolean(m.publishConfig),
+        effectiveTag: m.tag || process.argv[4] || 'latest',
+      }),
+    );
   } catch (error) {
     const code = typeof error?.code === 'string' && /^[A-Z0-9_]+$/.test(error.code) ? error.code : 'NPM_READER_REFUSED';
     console.log(JSON.stringify({ error: code }));

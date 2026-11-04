@@ -51,31 +51,36 @@
     "file": "17-prefix-split-dup.tgz",
     "sha256": "b3ccfb8470848106d346250b27fcea74c1e78b5715f432dbec84652dcfe092c4",
     "version": "1.12.0-rc.0",
-    "canonicalAllowed": false
+    "canonicalAllowed": false,
+    "refusal": "archive-profile"
   },
   {
     "file": "18-pax-dup.tgz",
     "sha256": "9d2544e43c839ed2b5547fd75a8633358f10c978cdf0000ce57a6e3f49602d57",
     "version": "1.12.0-rc.0",
-    "canonicalAllowed": false
+    "canonicalAllowed": false,
+    "refusal": "archive-profile"
   },
   {
     "file": "19-pax-size.tgz",
     "sha256": "e557bd3b413ad31d95808c6d0972147572fd6ec89f9bc0f182a2f33ecb916c21",
     "version": "1.12.0-rc.0",
-    "canonicalAllowed": false
+    "canonicalAllowed": false,
+    "refusal": "archive-profile"
   },
   {
     "file": "20-pax-global.tgz",
     "sha256": "509f7e77256154a8a0223d71693783f1c4d56d55fc9d21bf30cc7a73aec3ff96",
     "version": "1.12.0-rc.0",
-    "canonicalAllowed": false
+    "canonicalAllowed": false,
+    "refusal": "archive-profile"
   },
   {
     "file": "21-gnu-longname.tgz",
     "sha256": "10f150f3d05e65780fdeb64a9134693d32d61cbb533ca3c472c6d10b43804af6",
     "version": "1.12.0-rc.0",
-    "canonicalAllowed": false
+    "canonicalAllowed": false,
+    "refusal": "archive-profile"
   },
   {
     "file": "22-publishConfig-direct.tgz",
@@ -135,7 +140,8 @@
     "file": "33-D3-pax-bom-key.tgz",
     "sha256": "d6d798d31223fedb59365fca24ec25ce96430981b6025fee281188158ee9b5d9",
     "version": "1.12.0-rc.0",
-    "canonicalAllowed": false
+    "canonicalAllowed": false,
+    "refusal": "archive-profile"
   },
   {
     "file": "34-D4-link-nul-newline-desync.tgz",
@@ -165,13 +171,15 @@
     "file": "38-D6-prefix-bom-hides-visible.tgz",
     "sha256": "e9bed93b75f8a2c10cdcd290e98e09646dba3b115278c323913d85146e541e22",
     "version": "1.12.0-rc.0",
-    "canonicalAllowed": false
+    "canonicalAllowed": false,
+    "refusal": "archive-profile"
   },
   {
     "file": "39-D7-pax-plus-prefix.tgz",
     "sha256": "16d98968f257bd96f0dfe526acd10791eba3944e30efdbb792e5038e45bf64f2",
     "version": "1.12.0-rc.0",
-    "canonicalAllowed": false
+    "canonicalAllowed": false,
+    "refusal": "archive-profile"
   },
   {
     "file": "40-D8-name-nul-newline.tgz",
@@ -201,13 +209,14 @@
     "file": "44-G1-gzip-zero-then-member.tgz",
     "sha256": "20bac02ad91e7ee9bf65d329b5f1eae9916d8845560ad34a86d599ccd39fbba6",
     "version": "1.12.0-rc.0",
-    "canonicalAllowed": true
+    "canonicalAllowed": false
   },
   {
     "file": "50-D3-hidden-publishConfig-proxy.tgz",
     "sha256": "b7c138572dbcfd09b8b94284ce981f0b7dbd90607c9b9b5ef977636276ff2cf5",
     "version": "1.12.0-rc.0",
-    "canonicalAllowed": false
+    "canonicalAllowed": false,
+    "refusal": "archive-profile"
   },
   {
     "file": "51-D1-hidden-publishConfig-proxy.tgz",
@@ -219,6 +228,40 @@
     "file": "60-stable-visible-rc-hidden.tgz",
     "sha256": "aaef9ff497ec2553e86c757f449d411ffeb6f40a42859ef2180f26caf333de08",
     "version": "1.12.0",
-    "canonicalAllowed": false
+    "canonicalAllowed": false,
+    "refusal": "archive-profile"
+  },
+  {
+    "file": "T0-baseline-rc.tgz",
+    "sha256": "30f4742e88c56c22b40e26ecd7c2be72a214e5324ef57c8af01548f62ac71454",
+    "version": "1.12.0-rc.0",
+    "canonicalAllowed": true
+  },
+  {
+    "file": "T0-baseline-stable.tgz",
+    "sha256": "2847aabf2f9f38f4ef1a78f13497f7d4d221fa069025dda46070466f68bbd39a",
+    "version": "1.12.0",
+    "canonicalAllowed": true
+  },
+  {
+    "file": "T1-rc-tag-latest.tgz",
+    "sha256": "d24a15ab065c97acf41b813b63ecf1581f3b9845bfc6d57a7ab83f3ed81665b9",
+    "version": "1.12.0-rc.0",
+    "canonicalAllowed": true,
+    "manifestTag": "latest"
+  },
+  {
+    "file": "T2-stable-tag-next.tgz",
+    "sha256": "d986cfa7b8b76906b9bdaafd0d7fd77ecbc78509c56c91d3663a79197acc4955",
+    "version": "1.12.0",
+    "canonicalAllowed": true,
+    "manifestTag": "next"
+  },
+  {
+    "file": "T3-rc-tag-scripts.tgz",
+    "sha256": "42e49449931b76236b6475800fdfb0c4f2041bf2d143e3a4c7614f2e822b72bc",
+    "version": "1.12.0-rc.0",
+    "canonicalAllowed": true,
+    "manifestTag": "latest"
   }
 ]

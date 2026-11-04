@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
+import { createHash } from 'node:crypto';
 import { rcWriteFixture } from './rc-fixture.mjs';
 import { artifactZip, syntheticPackageArchive, executeWorkflowStage } from './helpers.mjs';
 const require = createRequire(import.meta.url),
@@ -19,7 +20,7 @@ function outputs(result) {
       }),
   );
 }
-async function candidate() {
+async function candidate({ release = true } = {}) {
   const f = rcWriteFixture(),
     p = await runtime.plan(f.api, f.context, f.options);
   const env = {
@@ -41,9 +42,10 @@ async function candidate() {
   const verdict = outputs(await executeWorkflowStage('verdict', { env, api: f.api, fetcher: f.fetcher }));
   assert.equal(verdict.tested, 'false');
   f.setRole('build');
-  const bytes = syntheticPackageArchive(p.version),
-    files = new Map(),
-    source = f.trees.get(f.commits.get(f.context.sha).tree.sha);
+  const source = f.trees.get(f.commits.get(f.context.sha).tree.sha),
+    sourceManifest = JSON.parse(source.get('package.json').bytes),
+    bytes = syntheticPackageArchive(p.version, { ...sourceManifest, version: p.version }),
+    files = new Map();
   await runtime.runStage('build-manifest', {
     api: f.api,
     context: f.context,
@@ -86,11 +88,13 @@ async function candidate() {
   };
   env.ARTIFACT_ID = '400';
   f.setRole('release');
-  const released = outputs(await executeWorkflowStage('release', { env, api: f.api, fetcher: f.fetcher }));
-  assert.equal(released.fresh, 'true');
-  env.GRANT_JSON = released.grant;
-  assert.equal(f.releases.get('v' + p.version).prerelease, true);
-  f.setRole('publish');
+  if (release) {
+    const released = outputs(await executeWorkflowStage('release', { env, api: f.api, fetcher: f.fetcher }));
+    assert.equal(released.fresh, 'true');
+    env.GRANT_JSON = released.grant;
+    assert.equal(f.releases.get('v' + p.version).prerelease, true);
+    f.setRole('publish');
+  }
   return {
     f,
     p,
@@ -194,3 +198,43 @@ test('native RC publish retains an observed integrity conflict even if a later r
   assert.equal(r.output, '');
   assert.equal(r.writes.length, 0);
 });
+
+for (const stage of ['release', 'publish'])
+  for (const [key, value] of [
+    ['tag', 'latest'],
+    ['dependencies', { unreviewed: '9.0.0' }],
+    ['scripts', { postinstall: 'unreviewed' }],
+    ['bin', { x: 'dist/x' }],
+    ['dist', { tarball: 'unreviewed' }],
+    ['publishConfig', { tag: 'latest' }],
+  ])
+    test('native ' + stage + ' refuses source-manifest drift before effects: ' + key, async () => {
+      const x = await candidate({ release: stage === 'publish' }),
+        api = x.f.api;
+      const source = JSON.parse(x.f.trees.get(x.p.tree).get('package.json').bytes);
+      const bytes = syntheticPackageArchive(x.p.version, { ...source, version: x.p.version, [key]: value });
+      const hash = (algorithm, encoding = 'hex') => createHash(algorithm).update(bytes).digest(encoding);
+      const manifest = {
+        ...x.manifest,
+        sha256: hash('sha256'),
+        shasum: hash('sha1'),
+        integrity: 'sha512-' + hash('sha512', 'base64'),
+      };
+      x.f.api = async (method, route, body) => {
+        if (method === 'GET' && route === '/repos/footprintjs/foottrace/actions/artifacts/400/zip')
+          return {
+            data: artifactZip([
+              ['manifest.json', JSON.stringify(manifest)],
+              ['package.tgz', bytes],
+            ]),
+          };
+        return api(method, route, body);
+      };
+      const before = x.f.calls.filter((c) => c.method !== 'GET').length;
+      const result = await executeWorkflowStage(stage, { env: x.env, api: x.f.api, fetcher: x.f.fetcher });
+      assert.equal(result.exit, 1);
+      assert.equal(result.failure, 'manifest-source:' + key);
+      assert.equal(result.output, '');
+      assert.equal(result.writes.length, 0);
+      assert.equal(x.f.calls.filter((c) => c.method !== 'GET').length, before);
+    });

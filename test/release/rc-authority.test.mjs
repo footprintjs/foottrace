@@ -30,7 +30,6 @@ function world(phase = 'initial') {
     expected,
     event: { name: 'workflow_dispatch', ref: 'refs/heads/main', sha: source, repository },
     bump: 'major',
-    currentMain: source,
     sourceCommit: { sha: source, tree: { sha: tree } },
     sourcePackage: { name: 'foottrace', version: '1.11.0' },
     publication: { state: 'published', version: '1.11.0', latest: '1.11.0' },
@@ -54,7 +53,8 @@ function world(phase = 'initial') {
   };
 }
 const decide = (w, phase = 'initial') => control.decideRcAuthority(w, phase);
-test('RC authority: initial five admissions are source eligibility, not a publish grant', () => {
+// Current-main freshness is enforced by native assertCurrentMain, not a duplicate pure input.
+test('RC authority: phase admissions are source eligibility, not a publish grant', () => {
   const w = world(),
     r = decide(w);
   assert.equal(r.authorized, true);
@@ -74,7 +74,6 @@ for (const [name, change, reason] of [
   ['push event', (w) => (w.event.name = 'push'), 'rc-event'],
   ['foreign ref', (w) => (w.event.ref = 'refs/heads/other'), 'rc-event'],
   ['foreign event repository', (w) => (w.event.repository = { id: 124, full_name: 'other/repo' }), 'rc-event'],
-  ['moved main', (w) => (w.currentMain = sha('9')), 'rc-main'],
   ['wrong source tree', (w) => (w.sourceCommit.tree.sha = sha('9')), 'rc-source'],
   ['wrong stable source package', (w) => (w.sourcePackage.version = '1.10.0'), 'rc-source'],
   [
@@ -118,7 +117,6 @@ for (const [name, change, reason] of [
     assert.equal(r.reason, reason);
   });
 for (const [name, change, reason] of [
-  ['moved main', (w) => (w.currentMain = sha('9')), 'rc-main'],
   ['foreign tag source', (w) => (w.tag = sha('9')), 'rc-tag'],
   ['unknown tag', (w) => delete w.tag, 'rc-tag'],
   ['foreign registry version', (w) => (w.registry = { version: '2.0.0-rc.1' }), 'rc-registry'],

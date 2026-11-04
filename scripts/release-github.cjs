@@ -15,7 +15,6 @@ const fail = (code) => {
 const LEGACY_CODES = new Set([
   'rc-identity',
   'rc-event',
-  'rc-main',
   'rc-source',
   'rc-stable',
   'rc-proposal',
@@ -221,6 +220,8 @@ function ownData(value, key) {
   }
 }
 function refusalCode(error) {
+  const archive = require('./release-archive.cjs').archiveRefusalCode(error);
+  if (archive !== undefined) return archive;
   const code = ownData(error, 'code');
   return typeof code === 'string' && PRINTABLE_CODES.has(code) ? code : 'release-unexpected';
 }
@@ -230,6 +231,7 @@ function diagnostic(code, message = code) {
   return error;
 }
 function contextual(error, operation) {
+  if (require('./release-archive.cjs').archiveRefusalCode(error) !== undefined) return error;
   if (!OPERATIONS.has(operation)) return diagnostic('diagnostic-operation');
   const code = refusalCode(error);
   // Keep exact direct-caller contracts and already-contextualized failures intact.
@@ -620,8 +622,8 @@ async function rcSource(api, context, pinned, phase, options) {
   const tag = await peeledTag(api, context, expected.tag), registry = await registryVersion(version, options.fetcher);
   if (phase === 'initial' ? tag !== null : tag !== context.sha) fail('rc-tag');
   if (phase === 'initial' && registry !== null) fail('rc-registry');
-  const currentMain = await assertCurrentMain(api, context);
-  return { expected, input, publication, pulls, selectedVersion, tag, registry, currentMain };
+  await assertCurrentMain(api, context);
+  return { expected, input, publication, pulls, selectedVersion, tag, registry };
 }
 
 function requireFinalRcTarget(current, target, refs) {
@@ -718,7 +720,7 @@ async function collectRcAuthority(api, context, pinned, role, options = {}) {
     producer = await producerIdentity(api, context, role);
   const result = control.decideRcAuthority({ expected: e, bump: context.bump,
     event: { name: context.eventName, ref: context.ref, sha: context.sha, repository: context.repository },
-    currentMain: w.currentMain, sourceCommit: w.input.commit, sourcePackage: w.input.pkg,
+    sourceCommit: w.input.commit, sourcePackage: w.input.pkg,
     publication: w.publication, pullsComplete: true, pulls: w.pulls, app,
     runId: context.runId, runAttempt: context.runAttempt, producer,
     selectedVersion: w.selectedVersion, tag: w.tag, registry: w.registry }, phase);
@@ -1396,25 +1398,33 @@ async function verifyPublished(api, context, pinned, fetcher = fetch,
     }
     return null;
   };
-  const rcTags = async () => {
-    const values = [];
-    for (const tag of ['latest', 'next']) {
-      const response = await registryFetch('https://registry.npmjs.org/foottrace/' + tag, fetcher);
+  const rcTags = async (absenceCode) => {
+    const responses = [];
+    for (const tag of ['latest', 'next'])
+      responses.push(await registryFetch('https://registry.npmjs.org/foottrace/' + tag, fetcher));
+    const decode = async (response, tag) => {
+      if (tag === 'next' && response.status === 404) return null;
       if (!response.ok || response.status !== 200) fail('registry-unavailable');
-      values.push(parseJson('registry-' + tag + '-json',
-        (await responseBytes(response, 2 * 1024 * 1024, 'registry-body')).toString('utf8')));
-    }
-    const [latest, next] = values;
-    if (latest.name !== 'foottrace' || next.name !== 'foottrace') fail('registry-shape');
+      const value = parseJson(
+        'registry-' + tag + '-json',
+        (await responseBytes(response, 2 * 1024 * 1024, 'registry-body')).toString('utf8'),
+      );
+      if (value.name !== 'foottrace') fail('registry-shape');
+      return value;
+    };
+    const latest = await decode(responses[0], 'latest');
+    // An RC on latest is the strongest failure, including when next is absent.
     if (latest.version !== pinned.fromVersion) fail('rc-latest');
-    if (next.version !== pinned.version) fail('rc-next');
+    const next = await decode(responses[1], 'next');
+    if (absenceCode) fail(absenceCode);
+    if (next?.version !== pinned.version) fail('rc-next');
     return { latest, next };
   };
   const tag = 'v' + pinned.version,
     base = prefix(context),
     release = await present(() => optional(api, base + '/releases/tags/' + enc(tag)));
   if (!release) {
-    if (rc) { await rcTags(); fail('rc-release-missing'); }
+    if (rc) await rcTags('rc-release-missing');
     return { state: 'pending-release' };
   }
   const notes = await sourceReleaseNotes(api, context, pinned.version);
@@ -1431,7 +1441,7 @@ async function verifyPublished(api, context, pinned, fetcher = fetch,
   if (marker.sha !== context.sha || marker.version !== pinned.version) fail('journal-conflict');
   const registry = await present(() => registryVersion(pinned.version, fetcher));
   if (!registry) {
-    if (rc) { await rcTags(); fail('rc-registry-missing'); }
+    if (rc) await rcTags('rc-registry-missing');
     return { state: 'pending-registry' };
   }
   if (
@@ -1584,6 +1594,7 @@ async function runStage(stage, { api, context, env, io, fetcher = fetch }) {
       archive = require('./release-archive.cjs').inspectArchive(bytes, {
         package: pinned.package,
         version: pinned.version,
+        sourceManifest: pkg,
       }),
       job = await producerIdentity(api, context, 'build');
     io.write('release-artifact/package.tgz', bytes);
@@ -1614,6 +1625,7 @@ async function runStage(stage, { api, context, env, io, fetcher = fetch }) {
       archive = require('./release-archive.cjs').inspectArchive(bytes, {
         package: pinned.package,
         version: pinned.version,
+        sourceManifest: parseJson('package-json', await content(api, context, 'package.json')),
       });
     if (
       artifact.manifest.integrity !== archive.integrity ||

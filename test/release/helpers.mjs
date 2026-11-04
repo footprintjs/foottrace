@@ -332,8 +332,8 @@ export function managedReleaseFixture({ version = '1.10.0', published = false, m
   };
   return model;
 }
-export function syntheticPackageArchive(version) {
-  const members = { 'package/package.json': JSON.stringify({ name: 'foottrace', version }), 'package/dist/index.js': 'export const synthetic = true;\n' }, chunks = [];
+export function syntheticPackageArchive(version, manifest = { name: 'foottrace', version }) {
+  const members = { 'package/package.json': JSON.stringify(manifest), 'package/dist/index.js': 'export const synthetic = true;\n' }, chunks = [];
   for (const [name, value] of Object.entries(members)) {
     const bytes = Buffer.from(value), header = Buffer.alloc(512);
     header.write(name, 0); header.write('0000644\0', 100); header.write('0000000\0', 108); header.write('0000000\0', 116);
@@ -434,7 +434,9 @@ export async function executeWorkflowStage(stage, { env, api, fetcher }) {
   try {
     await runCli(actualControlArgv(stage), { env: context, io, fetcher: fetch });
   } catch (error) {
-    failure = error.code ?? error.message;
+    // Match the real runner's terminal boundary; raw codes/messages are not
+    // necessarily the diagnostic the CLI prints (including owned archive keys).
+    failure = require('../../scripts/release-github.cjs').refusalCode(error);
   }
   return { output, failure, exit: failure ? 1 : 0, writes, summary };
 }

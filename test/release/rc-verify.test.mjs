@@ -143,7 +143,7 @@ for (const [name, change, code] of [
     assert(f.calls.every((c) => c.method === 'GET'));
   });
 for (const [name, suffix, response, code] of [
-  ['unknown next', '/next', () => new Response('', { status: 404 }), 'registry-unavailable'],
+  ['unknown next', '/next', () => new Response('', { status: 404 }), 'rc-next'],
   ['unavailable latest', '/latest', () => new Response('', { status: 503 }), 'registry-unavailable'],
   [
     'malformed next',
@@ -174,7 +174,7 @@ test('RC verification can repair a prior failed attempt after main advances', as
   f.fetcher = (url, options) =>
     url.endsWith('/next') ? Promise.resolve(new Response('', { status: 404 })) : fetcher(url, options);
   await assert.rejects(() => runtime.verifyPublished(f.api, f.context, f.pinned, f.fetcher), {
-    code: 'registry-unavailable',
+    code: 'rc-next',
   });
   f.context.runAttempt = 3;
   f.main = sha('9');
@@ -323,3 +323,62 @@ test('actual verify CLI fails named without pending output when submitted RC sta
   assert.equal(f.reads.filter((u) => u.endsWith('/latest')).length, 1);
   assert(f.calls.every((c) => c.method === 'GET'));
 });
+
+for (const missing of ['release', 'registry'])
+  for (const nextState of ['absent', 'older'])
+    test('RC honest ' + missing + ' absence is named before ' + nextState + ' next', async () => {
+      const f = fixture(),
+        api = f.api,
+        fetcher = f.fetcher;
+      let attempts = 0,
+        waits = 0;
+      f.api = async (...args) => {
+        if (missing === 'release' && args[1].endsWith('/releases/tags/v' + f.pinned.version)) {
+          attempts++;
+          throw Object.assign(new Error('not-found'), { status: 404 });
+        }
+        return api(...args);
+      };
+      f.fetcher = async (url, options) => {
+        if (missing === 'registry' && url.endsWith('/' + f.pinned.version)) {
+          attempts++;
+          return new Response('', { status: 404 });
+        }
+        if (url.endsWith('/next'))
+          return nextState === 'absent'
+            ? new Response('', { status: 404 })
+            : Response.json({ name: 'foottrace', version: '1.12.0-rc.0' });
+        return fetcher(url, options);
+      };
+      await assert.rejects(
+        () =>
+          runtime.verifyPublished(f.api, f.context, f.pinned, f.fetcher, async () => {
+            waits++;
+          }),
+        { code: 'rc-' + missing + '-missing' },
+      );
+      assert.equal(attempts, 3);
+      assert.equal(waits, 2);
+      assert(f.calls.every((c) => c.method === 'GET'));
+    });
+for (const missing of ['release', 'registry', 'neither'])
+  test('RC on latest outranks absent next and ' + missing + ' absence', async () => {
+    const f = fixture(),
+      api = f.api,
+      fetcher = f.fetcher;
+    f.latest = f.pinned.version;
+    f.api = async (...args) => {
+      if (missing === 'release' && args[1].endsWith('/releases/tags/v' + f.pinned.version))
+        throw Object.assign(new Error('not-found'), { status: 404 });
+      return api(...args);
+    };
+    f.fetcher = async (url, options) => {
+      if (url.endsWith('/next') || (missing === 'registry' && url.endsWith('/' + f.pinned.version)))
+        return new Response('', { status: 404 });
+      return fetcher(url, options);
+    };
+    await assert.rejects(() => runtime.verifyPublished(f.api, f.context, f.pinned, f.fetcher, async () => {}), {
+      code: 'rc-latest',
+    });
+    assert(f.calls.every((c) => c.method === 'GET'));
+  });

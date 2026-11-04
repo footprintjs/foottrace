@@ -240,7 +240,7 @@ test('archive: PAX long paths are outside the canonical npm-pack profile', () =>
   const path = 'package/dist/' + 'long/'.repeat(30) + 'index.js';
   const m = members();
   m.push({ name: 'PaxHeader/long', type: 'x', body: paxPath(path) }, { name: 'truncated', body: 'safe' });
-  assert.throws(() => call('release-archive', 'inspectArchive', tar(m), expected()), { code: 'invalid-archive' });
+  assert.throws(() => call('release-archive', 'inspectArchive', tar(m), expected()), { code: 'archive-profile' });
 });
 test('archive: PAX cannot disguise a traversal or add extraction directives', () => {
   for (const body of [paxPath('package/../escape'), paxPath('package/dist/good') + paxPath('package/dist/again')]) {
@@ -248,7 +248,7 @@ test('archive: PAX cannot disguise a traversal or add extraction directives', ()
     m.push({ name: 'PaxHeader/x', type: 'x', body }, { name: 'truncated', body: 'bad' });
     assert.throws(
       () => call('release-archive', 'inspectArchive', tar(m), expected()),
-      (e) => e.code === 'invalid-archive',
+      (e) => e.code === 'archive-profile',
     );
   }
 });
@@ -305,7 +305,9 @@ test('actual artifact reader checks producer attempt before consuming the fixed 
 });
 test('actual release/reservation/grant/registry path preserves checked bytes and never repeats a reservation', async (t) => {
   const auth = authorityApiFixture();
-  const bytes = tar(members()),
+  const nativeMembers = members();
+  nativeMembers[0].body = JSON.stringify({ name: 'foottrace', version: '1.9.0' });
+  const bytes = tar(nativeMembers),
     archive = call('release-archive', 'inspectArchive', bytes, expected());
   const context = {
     repository: { id: 123, full_name: 'footprintjs/foottrace' },
@@ -501,6 +503,68 @@ test('actual release/reservation/grant/registry path preserves checked bytes and
   assert(workflow.output.includes('submit=true\n'));
   assert.equal(workflow.writes.length, 1);
   assert.deepEqual(workflow.writes[0].bytes, bytes);
+
+  for (const stage of ['release', 'publish'])
+    for (const key of ['tag', 'scripts', 'dependencies', 'bin', 'dist', 'publishConfig'])
+      await t.test('stable ' + stage + ' refuses pinned-source ' + key + ' drift before effects', async () => {
+        const changed = members();
+        changed[0].body = JSON.stringify({
+          name: 'foottrace',
+          version: '1.9.0',
+          [key]: key === 'tag' ? 'next' : { unreviewed: 'change' },
+        });
+        const poisoned = tar(changed),
+          digest = (alg, enc = 'hex') => createHash(alg).update(poisoned).digest(enc);
+        const altered = async (method, route, body) => {
+          if (method === 'GET' && route.endsWith('/actions/artifacts/400/zip'))
+            return {
+              data: zip([
+                [
+                  'manifest.json',
+                  JSON.stringify({
+                    ...binding().manifest,
+                    sha256: digest('sha256'),
+                    shasum: digest('sha1'),
+                    integrity: 'sha512-' + digest('sha512', 'base64'),
+                  }),
+                ],
+                ['package.tgz', poisoned],
+              ]),
+            };
+          return api(method, route, body);
+        };
+        const before = calls.filter((c) => c.method !== 'GET').length;
+        const held = await executeWorkflowStage(stage, {
+          api: altered,
+          env: {
+            REPO_ID: '123',
+            REPO_NAME: 'footprintjs/foottrace',
+            SOURCE_SHA: context.sha,
+            SOURCE_REF: 'refs/heads/main',
+            EVENT_NAME: 'push',
+            RUN_ID: '200',
+            RUN_ATTEMPT: '2',
+            PLAN_JSON: JSON.stringify({
+              ...pinned,
+              package: 'foottrace',
+              tree: sha('3'),
+              sha: context.sha,
+              repository: context.repository,
+            }),
+            IDENTITY_JSON: JSON.stringify(identity),
+            APP_SLUG: 'release-app',
+            APP_CLIENT_ID: 'public-client-id',
+            ARTIFACT_ID: '400',
+            GRANT_JSON: JSON.stringify(grant),
+          },
+          fetcher: async () => new Response('not-yet', { status: 404 }),
+        });
+        assert.equal(held.exit, 1);
+        assert.equal(held.failure, 'manifest-source:' + key);
+        assert.equal(held.output, '');
+        assert.equal(held.writes.length, 0);
+        assert.equal(calls.filter((c) => c.method !== 'GET').length, before);
+      });
   const workflowVerified = await executeWorkflowStage('verify', {
     api,
     env: {

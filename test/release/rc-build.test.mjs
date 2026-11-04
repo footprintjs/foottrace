@@ -107,6 +107,24 @@ for (const [name, options, code] of [
     assert.equal(w.writes.size, 0);
     assert.equal(w.calls.length, 0);
   });
+
+for (const rc of [false, true])
+  for (const key of ['tag', 'scripts', 'dependencies'])
+    test('build manifest refuses archive ' + key + ' drift for ' + (rc ? 'RC' : 'stable'), async () => {
+      const w = world({ rc }),
+        version = w.plan.version;
+      w.files['foottrace-' + version + '.tgz'] = syntheticPackageArchive(version, {
+        name: 'foottrace',
+        version,
+        [key]: key === 'tag' ? 'latest' : { unreviewed: 'change' },
+      });
+      await assert.rejects(
+        w.run,
+        (error) => require('../../scripts/release-archive.cjs').archiveRefusalCode(error) === 'manifest-source:' + key,
+      );
+      assert.equal(w.writes.size, 0);
+      assert.equal(w.calls.length, 0);
+    });
 test('RC build: actual workflow stages only package data outside the checkout with scripts disabled', (t) => {
   const yaml = readFileSync(path.join(ROOT, '.github/workflows/publish.yml'), 'utf8');
   const start = yaml.indexOf('      - name: Stage the RC package outside the checkout');
@@ -145,7 +163,7 @@ test('RC build: actual workflow stages only package data outside the checkout wi
     timeout: 30000,
     maxBuffer: 1024 * 1024,
     env: {
-      PATH: path.dirname(process.execPath) + ':/usr/bin:/bin',
+      PATH: process.env.PATH,
       RUNNER_TEMP: path.join(root, 'temp'),
       PLAN_JSON: JSON.stringify({ version: '2.0.0-rc.0' }),
       NPM_CONFIG_USERCONFIG: path.join(root, 'empty.npmrc'),
