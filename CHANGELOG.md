@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.11.1 — 2026-11-05
+
+### Fixed
+
+- Reading a value after deleting it in the same stage now returns undefined instead of the old value.
+
 ## 1.11.0 — 2026-11-02
 
 ### Added
