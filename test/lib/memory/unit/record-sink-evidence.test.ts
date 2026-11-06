@@ -211,7 +211,16 @@ describe('commit.about', () => {
     ['a reason outside the fixed list', { attention: [mark({ reason: 'privateValue' })] }],
     ['a kind that is not a name', { attention: [mark({ kind: 'private value' })] }],
     ['a mark with no evidence', { attention: [mark({ evidence: [] })] }],
-    ['a mark that is not a plain object', { attention: [new (class Mark { kind = 'retried'; })()] }],
+    [
+      'a mark that is not a plain object',
+      {
+        attention: [
+          new (class Mark {
+            kind = 'retried';
+          })(),
+        ],
+      },
+    ],
     ['reads whose length lies', { reads: lyingList(-1) }],
   ])('%s: lost on its own, counted and reported — the commit still goes', (_name, about) => {
     const failures: unknown[] = [];
