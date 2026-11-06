@@ -34,6 +34,19 @@ const checks = `
   assert.deepEqual(reader.stateAt(storedLog.source(), 1).skipped, [{ index: 0, reason: 'no readable commit entry for this index' }]);
   assert.equal(sinkLog.sinkFailures, 0);
   assert.equal(reader.parseAttemptId(reader.buildAttemptId('s#0', 2)).attempt, 2);
+  // Run evidence through /write: a commit's about beside its bundle, a stamped note, the count on close.
+  const evidenceSink = writer.memorySink();
+  const evidenceLog = new writer.EventLog({}, { sink: evidenceSink, address: { logRunId: 'e', drillPath: [] }, collects: { reads: 'keys' } });
+  assert.equal(evidenceLog.keepsEvidence, true);
+  evidenceLog.record({ stage: 'S', stageId: 's', runtimeStageId: 's#0', overwrite: {}, updates: {}, trace: [], redactedPaths: [] }, { reads: ['a'] });
+  evidenceLog.noteRun('run.stage', { id: 'm#1', parent: 's#0' });
+  evidenceLog.close('ok');
+  const [opened, commit, note, closed] = evidenceSink.entries;
+  assert.deepEqual(opened.collects, { v: 1, reads: 'keys' });
+  assert.deepEqual(commit.about, { reads: ['a'] });
+  assert.equal(note.data.seq, 0);
+  assert.equal(closed.runNotes, 1);
+  assert.equal(typeof writer.RUN_EVIDENCE_LIMITS.payloadSize, 'number');
 `;
 
 describe('built package public doors share record state', () => {

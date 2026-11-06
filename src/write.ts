@@ -20,6 +20,10 @@
  * record. `memorySink` is the reference adapter; `readStoredRecord` (`foottrace`) reads the stored
  * entries back. A failing sink never stops the writer (`EventLog · sinkFailures`).
  *
+ * A log that declares `collects` also keeps a run's evidence: `commit.about` (`record(bundle, about)`,
+ * or `CommitStamp.about` through a frame), three `run.*` notes (`noteRun`) and `closed.runNotes`.
+ * `keepsEvidence` is what a writer's seam asks first. `readRunEvidence` (`foottrace`) reads them back.
+ *
  * Every type this door names is the record's own: nothing here loads or names the engine
  * (test/architecture/layering.test.ts). Its names and the bytes they write are promised under the
  * record fixtures' re-pin policy (test/fixtures/README.md): a refactor never moves a byte.
@@ -52,6 +56,27 @@ export { SharedMemory } from './lib/memory/SharedMemory.js';
 // Where a log's entries go as they land (1.1.0): the port, the stored entry, the reference adapter.
 export type { RecordEntry, RecordSink } from './lib/memory/sink.js';
 export { memorySink } from './lib/memory/sink.js';
+
+// A run's evidence beside the log: what a writer hands `EventLog`, and the bounds the reader holds it to.
+export type {
+  CommitAbout,
+  LogCollects,
+  RunDecisionNote,
+  RunNoteData,
+  RunNoteKind,
+  RunStageNote,
+  RunStopNote,
+  StoredDecideEvidence,
+  StoredDecisionEvidence,
+  StoredFilterCondition,
+  StoredFilterRule,
+  StoredFunctionRule,
+  StoredReadInput,
+  StoredRetryLoopDecision,
+  StoredRule,
+  StoredSelectEvidence,
+} from './lib/run-evidence/kinds.js';
+export { RUN_EVIDENCE_LIMITS } from './lib/run-evidence/kinds.js';
 
 // One step's frame, and what it takes: the dials, the verbs, a verdict's bytes, the names on its bundle.
 export type { CommitStamp } from './lib/memory/recordCommit.js';

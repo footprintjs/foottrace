@@ -14,6 +14,11 @@
  * note's `kind` and `data`: opaque here — stored and handed back, never read or interpreted. Nothing in
  * this file names an engine.
  *
+ * RUN EVIDENCE (`run-evidence/kinds.ts`). A log that declares what it collects adds three optional fields,
+ * each named on the method that carries it: `collects` on `opened`, `about` on `commit`, `runNotes` on `closed`.
+ * An adapter that copies named fields must copy them too; one that does not stays a good adapter, and the reader
+ * says `not-collected` for what it dropped.
+ *
  * THE STORED FORM. A sink stores each entry as a {@link RecordEntry}: the method's entry plus the
  * method's name as `kind`. A note's own kind cannot also be called `kind`, so it is stored as `note`.
  * `memorySink` is the reference adapter; `readStoredRecord` (`foottrace`) reads the entries back.
@@ -32,6 +37,7 @@
  */
 
 import { deepFreeze } from '../capture/freeze.js';
+import type { CommitAbout, LogCollects } from '../run-evidence/kinds.js';
 import type { LogAddress } from './eventPosition.js';
 import type { CommitBundle } from './types.js';
 
@@ -59,6 +65,8 @@ export type RecordEntry =
       /** The fold base — the state before the log's first commit. */
       readonly initialState: Record<string, unknown>;
       readonly meta?: Meta;
+      /** What this log collects; absent for an older writer or with evidence off. */
+      readonly collects?: LogCollects;
     }
   | {
       readonly kind: 'commit';
@@ -66,6 +74,8 @@ export type RecordEntry =
       readonly at: number;
       /** The log's own bundle, frozen, its position stamped as `idx`. */
       readonly bundle: CommitBundle;
+      /** What this commit says about its execution, beside the bundle and never in it. */
+      readonly about?: CommitAbout;
     }
   | {
       readonly kind: 'note';
@@ -83,6 +93,8 @@ export type RecordEntry =
       /** The log's length when it closed — how many commits the stored log must hold to be whole. */
       readonly commits: number;
       readonly meta?: Meta;
+      /** How many `run.*` notes this log wrote; a lost tail shows here, a hole shows in their `seq`. */
+      readonly runNotes?: number;
     };
 
 /**
@@ -101,9 +113,15 @@ export interface RecordSink {
     readonly at: number;
     readonly initialState: Record<string, unknown>;
     readonly meta?: Meta;
+    readonly collects?: LogCollects;
   }): void;
   /** A bundle landed in the log at `address` (its position is `bundle.idx`). */
-  commit(entry: { readonly address: LogAddress; readonly at: number; readonly bundle: CommitBundle }): void;
+  commit(entry: {
+    readonly address: LogAddress;
+    readonly at: number;
+    readonly bundle: CommitBundle;
+    readonly about?: CommitAbout;
+  }): void;
   /** The writer noted something beside the log — `kind` and `data` are opaque. */
   note(entry: { readonly address: LogAddress; readonly at: number; readonly kind: string; readonly data: Meta }): void;
   /** The log at `address` closed with `outcome`, holding `commits` bundles. */
@@ -113,6 +131,7 @@ export interface RecordSink {
     readonly outcome: LogOutcome;
     readonly commits: number;
     readonly meta?: Meta;
+    readonly runNotes?: number;
   }): void;
   /** Drain whatever the adapter queued. The log never calls it; whoever owns the sink does. */
   flush?(): Promise<void>;
@@ -130,6 +149,17 @@ function withMeta(meta: Meta | undefined): { meta?: Meta } {
   return meta === undefined ? {} : { meta };
 }
 
+/** The same law for the three evidence fields. */
+function withCollects(collects: LogCollects | undefined): { collects?: LogCollects } {
+  return collects === undefined ? {} : { collects };
+}
+function withAbout(about: CommitAbout | undefined): { about?: CommitAbout } {
+  return about === undefined ? {} : { about };
+}
+function withRunNotes(runNotes: number | undefined): { runNotes?: number } {
+  return runNotes === undefined ? {} : { runNotes };
+}
+
 /**
  * Hand `entry` to the sink's method for its kind, as that method's entry; returns what the method
  * returned (a promise from an async adapter). Throws whatever the method throws — the log catches.
@@ -138,13 +168,26 @@ export function sendEntry(sink: RecordSink, entry: RecordEntry): unknown {
   const { address, at } = entry;
   switch (entry.kind) {
     case 'opened':
-      return sink.opened({ address, at, initialState: entry.initialState, ...withMeta(entry.meta) });
+      return sink.opened({
+        address,
+        at,
+        initialState: entry.initialState,
+        ...withMeta(entry.meta),
+        ...withCollects(entry.collects),
+      });
     case 'commit':
-      return sink.commit({ address, at, bundle: entry.bundle });
+      return sink.commit({ address, at, bundle: entry.bundle, ...withAbout(entry.about) });
     case 'note':
       return sink.note({ address, at, kind: entry.note, data: entry.data });
     case 'closed':
-      return sink.closed({ address, at, outcome: entry.outcome, commits: entry.commits, ...withMeta(entry.meta) });
+      return sink.closed({
+        address,
+        at,
+        outcome: entry.outcome,
+        commits: entry.commits,
+        ...withMeta(entry.meta),
+        ...withRunNotes(entry.runNotes),
+      });
   }
 }
 
@@ -173,12 +216,12 @@ export function memorySink(): RecordSink & { readonly entries: readonly RecordEn
     get entries(): readonly RecordEntry[] {
       return stored.slice();
     },
-    opened: ({ address, at, initialState, meta }) =>
-      keep({ kind: 'opened', address, at, initialState, ...withMeta(meta) }),
-    commit: ({ address, at, bundle }) => keep({ kind: 'commit', address, at, bundle }),
+    opened: ({ address, at, initialState, meta, collects }) =>
+      keep({ kind: 'opened', address, at, initialState, ...withMeta(meta), ...withCollects(collects) }),
+    commit: ({ address, at, bundle, about }) => keep({ kind: 'commit', address, at, bundle, ...withAbout(about) }),
     note: ({ address, at, kind, data }) => keep({ kind: 'note', address, at, note: kind, data }),
-    closed: ({ address, at, outcome, commits, meta }) =>
-      keep({ kind: 'closed', address, at, outcome, commits, ...withMeta(meta) }),
+    closed: ({ address, at, outcome, commits, meta, runNotes }) =>
+      keep({ kind: 'closed', address, at, outcome, commits, ...withMeta(meta), ...withRunNotes(runNotes) }),
     flush: () => Promise.resolve(),
   };
 }

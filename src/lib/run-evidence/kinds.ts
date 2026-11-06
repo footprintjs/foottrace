@@ -1,0 +1,279 @@
+/**
+ * kinds.ts — the shapes of a run's evidence in a stored log: one place for the writer and the reader.
+ *
+ * A log that declares `opened.collects` keeps, beside its commits, what an offline reader needs to say why a
+ * stage ran: `commit.about` on an execution's first bundle, and three note kinds. Everything else is folded at
+ * read time (`read.ts`, `control.ts`). No new top-level entry kind exists on purpose: a 1.11 reader refuses one,
+ * and a note or an extra field passes through it untouched.
+ *
+ * WHO FILLS WHAT. The writer serves each value before it gets here: nothing in this file or in `EventLog` masks
+ * anything. `runtimeStageId` is the join key everywhere; no entry stores a `commitIdx`.
+ */
+
+import type { Attention } from '../cause/types.js';
+
+/** The one integer `opened.collects.v` holds. Additive fields keep it; a reader of a larger `v` says `newer-writer`. */
+export const RUN_EVIDENCE_VERSION = 1;
+
+/**
+ * The bounds of a run's evidence. The writer applies the first three (`boundedAbout`) and must keep its notes
+ * inside the rest, because the reader refuses a row past any of them; a reader may raise them per call.
+ *
+ * Text sizes are UTF-16 code units, not transport bytes.
+ */
+export const RUN_EVIDENCE_LIMITS = /* @__PURE__ */ Object.freeze({
+  /** Names in `about.reads`; the rest are counted in `readsOmitted`. */
+  reads: 256,
+  /** Characters in one read name; a longer one is left out and counted, never cut. */
+  readLength: 256,
+  /** Characters in `about.description`. */
+  description: 512,
+  /** Marks in `about.attention` (the attention reader's own cap). */
+  marks: 32,
+  /** Evidence refs on one mark (the attention reader's own cap). */
+  markRefs: 16,
+  /** Rules in one decision's evidence. */
+  rules: 256,
+  /** Conditions in one filter rule. */
+  conditions: 64,
+  /** Inputs in one function rule. */
+  inputs: 64,
+  /** Names in `run.decision · chosen` and `evidence.selected`. */
+  chosen: 256,
+  /** Characters in any one text field of a note: label, reason, summary, error message, id. */
+  text: 4096,
+  /** Items in a threshold the writer stores as written; past it, or non-scalar, it stores a summary. */
+  thresholdItems: 16,
+  /** Size of a threshold the reader admits (a forged object, say), counted as {@link RUN_EVIDENCE_LIMITS.payloadSize}. */
+  thresholdSize: 4096,
+  /** Depth of a pause payload the reader admits. */
+  payloadDepth: 32,
+  /** Size of a pause payload the reader admits: characters of its text and keys, plus 8 per scalar and 2 per container. */
+  payloadSize: 1_048_576,
+});
+
+/** What a log says it collected, on its `opened` entry. Absent: an older writer, evidence off, or a dropped field. */
+export interface LogCollects {
+  readonly v: number;
+  /** `'off'` under a run that tracks no reads: `about.reads` then says nothing. */
+  readonly reads: 'keys' | 'off';
+}
+
+/**
+ * What a commit says about its execution — names only, never a value. On the FIRST bundle of an execution (no
+ * `phase`), the rule `tags` follows; under `collects` it is always there, so a missing one is "not collected" for
+ * that one stage. It sits beside the bundle, so the log's bytes, its served snapshot and any digest never move.
+ */
+export interface CommitAbout {
+  /** The runtimeStageId of the execution that led here; it may be in another log. */
+  readonly parent?: string;
+  /** The paused execution this re-entry continues. */
+  readonly resumes?: string;
+  /** Distinct tracked key names, first-read order. */
+  readonly reads?: readonly string[];
+  /** Names past the bound on {@link reads}. */
+  readonly readsOmitted?: number;
+  /** Build-time text: the first execution of this stage in this log only. */
+  readonly description?: string;
+  /** Fixed reasons and attempt ids; absent when empty. */
+  readonly attention?: readonly Attention[];
+}
+
+/** One rule's read, from `decide()` / `select()`. Its summary is already masked where the rule says so. */
+export interface StoredReadInput {
+  readonly key: string;
+  readonly valueSummary: string;
+  readonly redacted: boolean;
+}
+
+/** One filter condition. A masked threshold is a hole: its text is a placeholder, and `thresholdRedacted` says so. */
+export interface StoredFilterCondition {
+  readonly key: string;
+  readonly op: string;
+  readonly threshold: unknown;
+  readonly actualSummary: string;
+  readonly result: boolean;
+  readonly redacted: boolean;
+  /** The threshold was masked: `threshold` is a hole, not a value. The string `[REDACTED]` can be a real threshold. */
+  readonly thresholdRedacted?: true;
+  /** The threshold was too large or not a scalar: `threshold` is the writer's summary of it, not the value. */
+  readonly thresholdSummarized?: true;
+}
+
+interface StoredRuleBase {
+  readonly ruleIndex: number;
+  readonly branch: string;
+  readonly matched: boolean;
+  readonly label?: string;
+  readonly matchError?: string;
+}
+
+export interface StoredFunctionRule extends StoredRuleBase {
+  readonly type: 'function';
+  readonly inputs: readonly StoredReadInput[];
+}
+
+export interface StoredFilterRule extends StoredRuleBase {
+  readonly type: 'filter';
+  readonly conditions: readonly StoredFilterCondition[];
+}
+
+export type StoredRule = StoredFunctionRule | StoredFilterRule;
+
+/** An explicit retry loop's logical decision: no key, raw error or provider payload. */
+export interface StoredRetryLoopDecision {
+  readonly id: string;
+  readonly series: string;
+  readonly attempt: number;
+  readonly of: number;
+  readonly effect: 'applied' | 'none' | 'unknown';
+  readonly reconciled: boolean;
+  readonly next: 'retry' | 'done' | 'stop';
+  readonly reason: string;
+}
+
+/** What `decide()` recorded, as the writer served it. */
+export interface StoredDecideEvidence {
+  readonly retryLoop?: StoredRetryLoopDecision;
+  readonly rules: readonly StoredRule[];
+  readonly chosen: string;
+  readonly default: string;
+  readonly defaultLabel?: string;
+}
+
+/** What `select()` recorded, as the writer served it. */
+export interface StoredSelectEvidence {
+  readonly rules: readonly StoredRule[];
+  readonly selected: readonly string[];
+}
+
+export type StoredDecisionEvidence = StoredDecideEvidence | StoredSelectEvidence;
+
+/** A decider or selector dispatched: one per dispatch, after its commit. */
+export interface RunDecisionNote {
+  readonly id: string;
+  readonly by: 'decide' | 'select' | 'plain';
+  /** Display names: one branch for a decider, N for a selector. */
+  readonly chosen: string | readonly string[];
+  /** A selector's child count. */
+  readonly total?: number;
+  /** The returned id matched no child, so the default ran. */
+  readonly fellBack?: true;
+  readonly rationale?: string;
+  readonly evidence?: StoredDecisionEvidence;
+}
+
+/** A stage stopped early; at most one per stop. */
+export interface RunStopNote {
+  readonly id: string;
+  readonly by: 'break' | 'pause' | 'failure';
+  /** Break: why, as served. */
+  readonly reason?: string;
+  /** Break: the inner subflow that raised it. */
+  readonly propagatedFrom?: string;
+  /** Pause: which door raised it. */
+  readonly pausedBy?: 'pausable' | 'interrupt';
+  /** Pause: what it asked, as served. The checkpoint keeps the real one. */
+  readonly payload?: unknown;
+  /** Failure: the classified category. */
+  readonly category?: string;
+  /** Failure: the served text, never the raw value. */
+  readonly error?: { readonly name?: string; readonly message: string; readonly code?: string | number };
+}
+
+/**
+ * An execution seen before, or without, a commit of its own: every mount at entry, a fork node with no function. So a
+ * pause or a kill inside a subflow leaves a chain that resolves, and `resumes` is here because a re-entered mount's own
+ * `about` lands only after its subflow.
+ */
+export interface RunStageNote {
+  readonly id: string;
+  readonly parent?: string;
+  /** The paused execution this re-entry continues. */
+  readonly resumes?: string;
+}
+
+/** What each `run.*` note holds, by kind, before the log stamps its `seq`. */
+export interface RunNoteData {
+  readonly 'run.decision': RunDecisionNote;
+  readonly 'run.stop': RunStopNote;
+  readonly 'run.stage': RunStageNote;
+}
+
+/** The closed list `EventLog · noteRun` writes. The prefix keeps them apart from a writer's own `note('decision', …)`. */
+export type RunNoteKind = keyof RunNoteData;
+
+const RUN_NOTE_KINDS: ReadonlySet<string> = /* @__PURE__ */ new Set<RunNoteKind>([
+  'run.decision',
+  'run.stop',
+  'run.stage',
+]);
+
+/** Is `kind` one of the three the log writes? */
+export function isRunNoteKind(kind: unknown): kind is RunNoteKind {
+  return typeof kind === 'string' && RUN_NOTE_KINDS.has(kind);
+}
+
+/** Is `value` a count: a non-negative safe integer? */
+export function isCount(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+
+function textField(value: unknown, name: string): void {
+  if (value !== undefined && typeof value !== 'string') throw new TypeError(`about.${name} must be a string`);
+}
+
+/** The read names a sink keeps, and how many it left out. A list is scanned no further than its bound. */
+function boundedReads(reads: unknown): { readonly kept: string[]; readonly left: number } {
+  if (!Array.isArray(reads)) throw new TypeError('about.reads must be an array of strings');
+  const kept: string[] = [];
+  let left = 0;
+  for (let i = 0; i < reads.length; i++) {
+    if (kept.length === RUN_EVIDENCE_LIMITS.reads) return { kept, left: left + reads.length - i };
+    const name: unknown = reads[i];
+    if (typeof name !== 'string') throw new TypeError('about.reads must be an array of strings');
+    if (name.length === 0 || name.length > RUN_EVIDENCE_LIMITS.readLength) left++;
+    else kept.push(name);
+  }
+  return { kept, left };
+}
+
+/** A copy of the marks inside their two bounds, or a `TypeError`. A writer past them has a bug; the count shows it. */
+function copiedMarks(attention: unknown): readonly Attention[] {
+  if (!Array.isArray(attention)) throw new TypeError('about.attention must be an array');
+  if (attention.length > RUN_EVIDENCE_LIMITS.marks) throw new TypeError('about.attention holds too many marks');
+  for (let i = 0; i < attention.length; i++) {
+    const evidence: unknown = (attention[i] as { evidence?: unknown } | undefined)?.evidence;
+    if (Array.isArray(evidence) && evidence.length > RUN_EVIDENCE_LIMITS.markRefs) {
+      throw new TypeError('about.attention holds a mark with too many refs');
+    }
+  }
+  return structuredClone(attention) as readonly Attention[];
+}
+
+/**
+ * The `about` a sink keeps: the sink's own copy of the named fields only, in one key order, inside the bounds of
+ * {@link RUN_EVIDENCE_LIMITS}. Each field is read once. Throws a `TypeError` when a field is not its type: the log
+ * counts that as a lost `about`, and its commit still goes.
+ */
+export function boundedAbout(about: CommitAbout): CommitAbout {
+  if (typeof about !== 'object' || about === null || Array.isArray(about)) {
+    throw new TypeError('about must be a plain object');
+  }
+  const { parent, resumes, reads, readsOmitted, description, attention } = about;
+  textField(parent, 'parent');
+  textField(resumes, 'resumes');
+  textField(description, 'description');
+  if (readsOmitted !== undefined && !isCount(readsOmitted)) throw new TypeError('about.readsOmitted must be a count');
+  const named = reads === undefined ? undefined : boundedReads(reads);
+  const marks = attention === undefined ? undefined : copiedMarks(attention);
+  const omitted = (readsOmitted ?? 0) + (named?.left ?? 0);
+  return {
+    ...(parent === undefined ? {} : { parent }),
+    ...(resumes === undefined ? {} : { resumes }),
+    ...(named === undefined ? {} : { reads: named.kept }),
+    ...(omitted === 0 ? {} : { readsOmitted: Math.min(omitted, Number.MAX_SAFE_INTEGER) }),
+    ...(description === undefined ? {} : { description: description.slice(0, RUN_EVIDENCE_LIMITS.description) }),
+    ...(marks === undefined || marks.length === 0 ? {} : { attention: marks }),
+  };
+}

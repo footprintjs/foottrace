@@ -37,11 +37,16 @@ const { sessions } = JSON.parse(readFileSync(FILE, 'utf8')) as { sessions: Sessi
 const REDACT_WHOLE: WriteScrub = Object.freeze({ whole: true });
 
 /** The fixture's replay (hcifootprint-2.6.1.test.ts), with a sink on the log and a note after every step. */
-function replayWithSink({ name, open, transitions }: Session) {
+function replayWithSink({ name, open, transitions }: Session, evidence = false) {
   const sink = memorySink();
   const address = { logRunId: name, drillPath: [] };
   const state = new SharedMemory(undefined, revive(open.initialState));
-  const log = new EventLog(state.getState(), { sink, address, meta: { session: name } });
+  const log = new EventLog(state.getState(), {
+    sink,
+    address,
+    meta: { session: name },
+    ...(evidence ? { collects: { reads: 'keys' as const } } : {}),
+  });
   const encoding: RecordEncoding = { commitValues: open.commitValues, writeProvenance: open.writeProvenance };
   for (const t of transitions) {
     const frame = new RecordFrame(state, log);
@@ -50,8 +55,14 @@ function replayWithSink({ name, open, transitions }: Session) {
     for (const [key, value, redact] of t.writes) {
       frame.write(frame.at([], key), revive(value), 'set', redact ? REDACT_WHOLE : undefined);
     }
-    frame.commit(() => ({ stage: t.stage, stageId: t.stageId, runtimeStageId: t.runtimeStageId }));
+    frame.commit(() => ({
+      stage: t.stage,
+      stageId: t.stageId,
+      runtimeStageId: t.runtimeStageId,
+      ...(evidence ? { about: { reads: t.reads } } : {}),
+    }));
     log.note('step', { runtimeStageId: t.runtimeStageId });
+    if (evidence) log.noteRun('run.stage', { id: t.runtimeStageId });
   }
   log.close('ok');
   return { log, entries: sink.entries, address };
@@ -79,6 +90,25 @@ describe('a sink moves no byte — the hcifootprint 2.6.1 sessions', () => {
       stateAt({ initialState: log.getInitialState(), commitLog: log.list() }, end).state,
     );
   });
+
+  it.each(sessions.map((s) => [s.name, s] as const))(
+    '%s, with run evidence: the same pinned bytes',
+    (_name, session) => {
+      const { log, entries, address } = replayWithSink(session, true);
+      expect(log.sinkFailures).toBe(0);
+      const pinned = pinnedText({ commitLog: session.recorded.commitLog, initialState: session.recorded.initialState });
+      expect(pinnedText({ commitLog: log.list(), initialState: log.getInitialState() })).toBe(pinned);
+      const record = readStoredRecord(entries);
+      expect(record.unread).toEqual([]);
+      const stored = record.log(address)!;
+      expect(stored.complete).toBe(true);
+      expect(stored.gaps).toEqual([]);
+      expect(pinnedText({ commitLog: stored.commitLog, initialState: stored.initialState })).toBe(pinned);
+      // The evidence is beside the bundles, on the entries.
+      const commit = entries.find((e): e is Extract<RecordEntry, { kind: 'commit' }> => e.kind === 'commit')!;
+      expect(commit.about).toEqual({ reads: session.transitions[0].reads });
+    },
+  );
 
   it('the commit entries are the log’s own bundles, in order — the sink holds no second copy of a sealed one', () => {
     let sealed = 0;

@@ -102,7 +102,7 @@ describe('foottrace public ownership', () => {
         'stageIdOf',
         'subflowSegmentsOf',
       ],
-      './write': ['deepFreeze', 'freezeRecord', 'LOG_PLACEHOLDER'],
+      './write': ['deepFreeze', 'freezeRecord', 'LOG_PLACEHOLDER', 'RUN_EVIDENCE_LIMITS'],
       './paths': [
         'isDeniedSegment',
         'nativeGet',
