@@ -283,7 +283,7 @@ fields or notes, so a reader that knows none of them reads the same record.
 
 | Where | Holds |
 |---|---|
-| `commit.about` | On an execution's first bundle, beside it: `parent`, `resumes`, `reads` (names, at most 256 of at most 256 characters, the rest counted in `readsOmitted`), `description` (at most 512 characters), `attention`. Under `collects` it is always written, so a missing one means that stage was not collected. |
+| `commit.about` | On an execution's first bundle, beside it: `parent`, `resumes`, `reads` (names, at most 256 of at most 256 characters, the rest counted in `readsOmitted`), `description` (at most 512 characters), `attention` (only each mark's `kind`, `reason` and `evidence`, under the attention rule). Under `collects` it is always written, so a missing one means that stage was not collected. |
 | `note` `run.decision` | `{ seq, id, by, chosen, total?, fellBack?, rationale?, evidence? }`, one per decider or selector dispatch, after its commit. |
 | `note` `run.stop` | `{ seq, id, by, reason?, propagatedFrom?, pausedBy?, payload?, category?, error? }`, one per early stop. |
 | `note` `run.stage` | `{ seq, id, parent? }`, for every mount at entry and any execution with no commit of its own. |

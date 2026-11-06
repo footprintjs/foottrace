@@ -43,6 +43,32 @@ function evidenceLog() {
   return { sink, log };
 }
 
+/** A mark the attention rule admits, or one with the given field out of line. */
+function mark(fields: Record<string, unknown> = {}): Attention {
+  return { kind: 'retried', reason: 'RETRY_RECORDED', evidence: ['attempt:s#1.2'], ...fields } as Attention;
+}
+
+/** An array by every check that answers `length` as told, and a name for any index. */
+function lyingList(length: unknown): string[] {
+  return new Proxy<string[]>([], { get: (_target, key) => (key === 'length' ? length : `k${String(key)}`) });
+}
+
+/** An array of accessors: each entry counts the read and answers `name(i)`. */
+function accessorList(size: number, name: (i: number) => string): { list: string[]; reads: () => number } {
+  let reads = 0;
+  const list: string[] = [];
+  for (let i = 0; i < size; i++) {
+    Object.defineProperty(list, i, {
+      enumerable: true,
+      get() {
+        reads++;
+        return name(i);
+      },
+    });
+  }
+  return { list, reads: () => reads };
+}
+
 type Stored<K extends RecordEntry['kind']> = Extract<RecordEntry, { kind: K }>;
 const only = <K extends RecordEntry['kind']>(entries: readonly RecordEntry[], kind: K): Stored<K>[] =>
   entries.filter((entry) => entry.kind === kind) as Stored<K>[];
@@ -178,9 +204,15 @@ describe('commit.about', () => {
     ['an omitted count that is not a count', { readsOmitted: -1 }],
     ['a description that is not a string', { description: 1 }],
     ['attention that is not a list', { attention: {} }],
-    ['too many marks', { attention: Array.from({ length: 33 }, () => ({ kind: 'k', reason: 'r', evidence: [] })) }],
-    ['too many refs on a mark', { attention: [{ kind: 'k', reason: 'r', evidence: Array(17).fill('e') }] }],
-    ['marks that will not copy', { attention: [{ kind: 'k', reason: 'r', evidence: [() => 0] }] }],
+    ['too many marks', { attention: Array.from({ length: 33 }, () => mark()) }],
+    ['too many refs on a mark', { attention: [mark({ evidence: Array(17).fill('e') })] }],
+    ['a ref past its length', { attention: [mark({ evidence: ['e'.repeat(513)] })] }],
+    ['a ref that is not a name', { attention: [mark({ evidence: [() => 0] })] }],
+    ['a reason outside the fixed list', { attention: [mark({ reason: 'privateValue' })] }],
+    ['a kind that is not a name', { attention: [mark({ kind: 'private value' })] }],
+    ['a mark with no evidence', { attention: [mark({ evidence: [] })] }],
+    ['a mark that is not a plain object', { attention: [new (class Mark { kind = 'retried'; })()] }],
+    ['reads whose length lies', { reads: lyingList(-1) }],
   ])('%s: lost on its own, counted and reported — the commit still goes', (_name, about) => {
     const failures: unknown[] = [];
     const sink = memorySink();
@@ -198,6 +230,117 @@ describe('commit.about', () => {
     expect(commit).not.toHaveProperty('about');
     expect(log.sinkFailures).toBe(1);
     expect(failures).toHaveLength(1);
+  });
+
+  it('stores only a mark’s declared fields: an extra payload reaches no entry', () => {
+    const { sink, log } = evidenceLog();
+    const secret = 'privateValue-synthetic';
+    log.record(bundle('s#1'), { attention: [mark({ payload: { privateValue: secret } })] });
+    const [commit] = only(sink.entries, 'commit');
+    expect(commit.about!.attention).toEqual([mark()]);
+    expect(Object.keys(commit.about!.attention![0])).toEqual(['kind', 'reason', 'evidence']);
+    expect(JSON.stringify(sink.entries)).not.toContain(secret);
+    expect(log.sinkFailures).toBe(0);
+  });
+
+  it('stores what it checked: evidence that answers differently each time is refused unread', () => {
+    const { sink, log } = evidenceLog();
+    let reads = 0;
+    const twoFaced = Object.defineProperty(mark(), 'evidence', {
+      enumerable: true,
+      get() {
+        reads++;
+        return Array(reads === 1 ? 16 : 17).fill('attempt:s#1.2');
+      },
+    });
+    log.record(bundle('s#1'), { attention: [twoFaced] });
+    expect(reads).toBe(0);
+    expect(only(sink.entries, 'commit')[0]).not.toHaveProperty('about');
+    expect(log.sinkFailures).toBe(1);
+  });
+
+  it('stores what it checked: a list whose length grows between reads keeps the length that was checked', () => {
+    const { sink, log } = evidenceLog();
+    let asked = 0;
+    const evidence = new Proxy(Array(16).fill('attempt:s#1.2') as string[], {
+      getOwnPropertyDescriptor(target, key) {
+        const found = Reflect.getOwnPropertyDescriptor(target, key)!;
+        return key === 'length' ? { ...found, value: ++asked === 1 ? 16 : 17 } : found;
+      },
+      get: (target, key, receiver) => (key === 'length' ? 17 : Reflect.get(target, key, receiver)),
+    });
+    log.record(bundle('s#1'), { attention: [mark({ evidence })] });
+    expect(asked).toBe(1);
+    expect(only(sink.entries, 'commit')[0].about!.attention![0].evidence).toHaveLength(16);
+    expect(log.sinkFailures).toBe(0);
+  });
+
+  it('reads the attention field itself once: 32 marks, then 33, stores the 32 it checked', () => {
+    const { sink, log } = evidenceLog();
+    let reads = 0;
+    const about = {
+      get attention() {
+        reads++;
+        return Array.from({ length: reads === 1 ? 32 : 33 }, () => mark());
+      },
+    } as CommitAbout;
+    log.record(bundle('s#1'), about);
+    expect(reads).toBe(1);
+    expect(only(sink.entries, 'commit')[0].about!.attention).toHaveLength(32);
+    expect(log.sinkFailures).toBe(0);
+  });
+
+  it('admits marks at their bounds, and a not-collected mark with no evidence', () => {
+    const { sink, log } = evidenceLog();
+    const atBound = [
+      mark({ evidence: Array(16).fill('e'.repeat(512)) }),
+      mark({ kind: 'not-collected', reason: 'EVIDENCE_NOT_COLLECTED', evidence: [] }),
+      ...Array.from({ length: 30 }, () => mark()),
+    ];
+    log.record(bundle('s#1'), { attention: atBound });
+    expect(only(sink.entries, 'commit')[0].about!.attention).toEqual(atBound);
+    expect(log.sinkFailures).toBe(0);
+  });
+
+  it('looks at no more read entries than its bound, however many it keeps', () => {
+    const { sink, log } = evidenceLog();
+    const limit = RUN_EVIDENCE_LIMITS.reads;
+    const long = 'x'.repeat(RUN_EVIDENCE_LIMITS.readLength + 1);
+    const { list, reads } = accessorList(300, () => long);
+    log.record(bundle('s#1'), { reads: list });
+    expect(reads()).toBe(limit);
+    const { about } = only(sink.entries, 'commit')[0];
+    expect(about!.reads).toEqual([]);
+    expect(about!.readsOmitted).toBe(300);
+    expect(log.sinkFailures).toBe(0);
+  });
+
+  it('counts every entry it did not keep, looked at or not: kept + omitted is the list', () => {
+    const { sink, log } = evidenceLog();
+    const limit = RUN_EVIDENCE_LIMITS.reads;
+    const long = 'x'.repeat(RUN_EVIDENCE_LIMITS.readLength + 1);
+    const names = [...Array<string>(10).fill(long), '', ...Array.from({ length: 300 }, (_, i) => `k${i}`)];
+    log.record(bundle('s#1'), { reads: names });
+    const { about } = only(sink.entries, 'commit')[0];
+    expect(about!.reads).toEqual(names.slice(11, limit));
+    expect(about!.reads!.length + about!.readsOmitted!).toBe(names.length);
+  });
+
+  it('never reads an entry past the bound, and counts a list too long to walk without walking it', () => {
+    const { sink, log } = evidenceLog();
+    const limit = RUN_EVIDENCE_LIMITS.reads;
+    const { list } = accessorList(limit + 1, (i) => {
+      if (i === limit) throw new Error('read past the bound');
+      return `k${i}`;
+    });
+    log.record(bundle('s#1'), { reads: list });
+    log.record(bundle('s#2'), { reads: lyingList(2 ** 40) });
+    const [first, second] = only(sink.entries, 'commit');
+    expect(first.about!.reads).toHaveLength(limit);
+    expect(first.about!.readsOmitted).toBe(1);
+    expect(second.about!.reads).toHaveLength(limit);
+    expect(second.about!.readsOmitted).toBe(2 ** 40 - limit);
+    expect(log.sinkFailures).toBe(0);
   });
 
   it('never reaches the writer when `about` itself cannot be read', () => {
