@@ -297,6 +297,15 @@ const SHIPPED_1_0_3: Record<Exclude<keyof typeof entries, './cause' | './prov' |
   ],
 };
 
+describe('what a door says about another door', () => {
+  it('every name src/write.ts places on the root door is on the root door', () => {
+    const text = readFileSync(join(root, 'src/write.ts'), 'utf8');
+    const placed = [...text.matchAll(/`(\w+)` \(`foottrace`\)/g)].map((match) => match[1]);
+    expect(placed).toContain('readStoredRecord');
+    expect(placed.filter((name) => !exportsByDoor['.'].has(name))).toEqual([]);
+  });
+});
+
 describe('a minor removes nothing', () => {
   it('every name 1.0.3 shipped is still exported, from the same door', () => {
     for (const [door, names] of Object.entries(SHIPPED_1_0_3)) {

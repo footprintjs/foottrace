@@ -22,7 +22,7 @@
  *
  * A log that declares `collects` also keeps a run's evidence: `commit.about` (`record(bundle, about)`,
  * or `CommitStamp.about` through a frame), three `run.*` notes (`noteRun`) and `closed.runNotes`.
- * `keepsEvidence` is what a writer's seam asks first. `readRunEvidence` (`foottrace`) reads them back.
+ * `keepsEvidence` is what a writer's seam asks first. Reading them back is forthcoming: a root-door `readRunEvidence`.
  *
  * Every type this door names is the record's own: nothing here loads or names the engine
  * (test/architecture/layering.test.ts). Its names and the bytes they write are promised under the

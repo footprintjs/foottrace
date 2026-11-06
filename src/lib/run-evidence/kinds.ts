@@ -11,6 +11,7 @@
  */
 
 import type { Attention } from '../cause/types.js';
+import { attention as admittedMarks } from '../cause/validation.js';
 
 /** The one integer `opened.collects.v` holds. Additive fields keep it; a reader of a larger `v` says `newer-writer`. */
 export const RUN_EVIDENCE_VERSION = 1;
@@ -22,7 +23,7 @@ export const RUN_EVIDENCE_VERSION = 1;
  * Text sizes are UTF-16 code units, not transport bytes.
  */
 export const RUN_EVIDENCE_LIMITS = /* @__PURE__ */ Object.freeze({
-  /** Names in `about.reads`; the rest are counted in `readsOmitted`. */
+  /** Entries of `about.reads` looked at, so the most names kept; the rest are counted in `readsOmitted`, unread. */
   reads: 256,
   /** Characters in one read name; a longer one is left out and counted, never cut. */
   readLength: 256,
@@ -223,32 +224,32 @@ function textField(value: unknown, name: string): void {
   if (value !== undefined && typeof value !== 'string') throw new TypeError(`about.${name} must be a string`);
 }
 
-/** The read names a sink keeps, and how many it left out. A list is scanned no further than its bound. */
+/** The read names a sink keeps, and how many it left out. Only the bound's worth of entries is ever looked at. */
 function boundedReads(reads: unknown): { readonly kept: string[]; readonly left: number } {
   if (!Array.isArray(reads)) throw new TypeError('about.reads must be an array of strings');
+  const length: unknown = reads.length;
+  if (!isCount(length)) throw new TypeError('about.reads must be an array of strings');
+  const looked = Math.min(length, RUN_EVIDENCE_LIMITS.reads);
   const kept: string[] = [];
-  let left = 0;
-  for (let i = 0; i < reads.length; i++) {
-    if (kept.length === RUN_EVIDENCE_LIMITS.reads) return { kept, left: left + reads.length - i };
+  for (let i = 0; i < looked; i++) {
     const name: unknown = reads[i];
     if (typeof name !== 'string') throw new TypeError('about.reads must be an array of strings');
-    if (name.length === 0 || name.length > RUN_EVIDENCE_LIMITS.readLength) left++;
-    else kept.push(name);
+    if (name.length > 0 && name.length <= RUN_EVIDENCE_LIMITS.readLength) kept.push(name);
   }
-  return { kept, left };
+  return { kept, left: length - kept.length };
 }
 
-/** A copy of the marks inside their two bounds, or a `TypeError`. A writer past them has a bug; the count shows it. */
-function copiedMarks(attention: unknown): readonly Attention[] {
-  if (!Array.isArray(attention)) throw new TypeError('about.attention must be an array');
-  if (attention.length > RUN_EVIDENCE_LIMITS.marks) throw new TypeError('about.attention holds too many marks');
-  for (let i = 0; i < attention.length; i++) {
-    const evidence: unknown = (attention[i] as { evidence?: unknown } | undefined)?.evidence;
-    if (Array.isArray(evidence) && evidence.length > RUN_EVIDENCE_LIMITS.markRefs) {
-      throw new TypeError('about.attention holds a mark with too many refs');
-    }
+/**
+ * The marks a sink keeps, or a `TypeError`. The attention rule reads a mark's three declared fields once, as data (no
+ * accessor runs), checks what it read and returns those values in fresh objects: what was checked is what is stored,
+ * and an undeclared field has nowhere to go. A writer outside the rule has a bug; the count shows it.
+ */
+function copiedMarks(marks: unknown): readonly Attention[] {
+  try {
+    return admittedMarks(marks);
+  } catch {
+    throw new TypeError('about.attention must hold marks the attention rule admits');
   }
-  return structuredClone(attention) as readonly Attention[];
 }
 
 /**
