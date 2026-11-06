@@ -1,6 +1,7 @@
 /**
- * marks.ts — the one admission of attention marks: a fixed reason, a named kind, evidence references only. Both the cause
- * graph and the run-evidence reader read marks from stored data, each with its own refusal, through this rule.
+ * marks.ts — the one admission of attention marks: a fixed reason, a named kind, evidence references only. The cause graph
+ * and the run-evidence reader read marks through this rule, and the writer's `about` stores them through it, each with its
+ * own refusal: what a writer stores, its reader admits.
  */
 import type { Attention, AttentionReason } from '../cause/types.js';
 import { boundedList, boundedName, type RefuseEvidence, ownData } from './admission.js';

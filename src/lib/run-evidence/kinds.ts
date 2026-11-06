@@ -11,8 +11,7 @@
  */
 
 import type { Attention } from '../cause/types.js';
-import { attention as admittedMarks } from '../cause/validation.js';
-import { ATTENTION_LIMITS } from '../evidence/marks.js';
+import { admitMarks, ATTENTION_LIMITS } from '../evidence/marks.js';
 
 /** The one integer `opened.collects.v` holds. Additive fields keep it; a reader of a larger `v` says `newer-writer`. */
 export const RUN_EVIDENCE_VERSION = 1;
@@ -245,17 +244,15 @@ function boundedReads(reads: unknown): { readonly kept: string[]; readonly left:
   return { kept, left: length - kept.length };
 }
 
+const refuseMarks = (): TypeError => new TypeError('about.attention must hold marks the attention rule admits');
+
 /**
  * The marks a sink keeps, or a `TypeError`. The attention rule reads a mark's three declared fields once, as data (no
  * accessor runs), checks what it read and returns those values in fresh objects: what was checked is what is stored,
  * and an undeclared field has nowhere to go. A writer outside the rule has a bug; the count shows it.
  */
 function copiedMarks(marks: unknown): readonly Attention[] {
-  try {
-    return admittedMarks(marks);
-  } catch {
-    throw new TypeError('about.attention must hold marks the attention rule admits');
-  }
+  return admitMarks(marks, refuseMarks, { translateTrapErrors: true, requireOwnValue: true });
 }
 
 /**

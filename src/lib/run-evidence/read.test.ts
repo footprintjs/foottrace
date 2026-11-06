@@ -295,6 +295,33 @@ describe('attention', () => {
     expect(attention.status).toBe('collected');
     expect(attention.rows.map((row) => [row.id, row.marks])).toEqual([['s#1', marks]]);
   });
+
+  it('reads back what the writer checked: an extra payload reaches neither the file nor the answer', () => {
+    const clean = { kind: 'retried', reason: 'RETRY_RECORDED', evidence: ['attempt:s#1@1'] } as const;
+    const withPayload = { ...clean, payload: { privateValue: 'synthetic-private' } };
+    const s = evidenceStore();
+    s.commit(ROOT, 'seed#0', {});
+    s.commit(ROOT, 's#1', { parent: 'seed#0', attention: [withPayload] });
+    s.close(ROOT);
+    expect(JSON.stringify(s.entries())).not.toContain('synthetic-private');
+    const { attention } = evidenceOf(s.entries());
+    expect(attention.status).toBe('collected');
+    expect(attention.rows.map((row) => row.marks)).toEqual([[clean]]);
+  });
+
+  it('a mark the reader would refuse never reaches the file: that stage reads as not collected, not as invalid', () => {
+    const s = evidenceStore();
+    s.commit(ROOT, 'seed#0', {});
+    s.commit(ROOT, 's#1', {
+      parent: 'seed#0',
+      attention: [{ kind: 'retried', reason: 'private-value' as 'RETRY_RECORDED', evidence: ['attempt:s#1@1'] }],
+    });
+    s.close(ROOT);
+    expect(JSON.stringify(s.entries())).not.toContain('private-value');
+    const { attention } = evidenceOf(s.entries());
+    expect(attention.rows).toEqual([]);
+    expect(attention).toMatchObject({ status: 'partial', gaps: ['not-collected'] });
+  });
 });
 
 describe('what was running when a run ended', () => {
