@@ -226,10 +226,10 @@ method's entry plus the method's name as `kind`.
 
 | `kind` | Written | Fields besides `address` (`{ logRunId, drillPath }`) and `at` (epoch ms) |
 |---|---|---|
-| `opened` | once, from the log's constructor | `initialState` (the fold base, the sink's own copy), `meta?` |
-| `commit` | per `record`, after the bundle is frozen and appended | `bundle` (the log's own, `idx` stamped) |
-| `note` | per `note(kind, data)` | `note` (the note's own kind), `data` |
-| `closed` | per `close(outcome, meta?)` | `outcome` (`ok` · `failed` · `paused`), `commits` (the log's length then), `meta?` |
+| `opened` | once, from the log's constructor | `initialState` (the fold base, the sink's own copy), `meta?`, `collects?` |
+| `commit` | per `record`, after the bundle is frozen and appended | `bundle` (the log's own, `idx` stamped), `about?` |
+| `note` | per `note(kind, data)` or `noteRun(kind, data)` | `note` (the note's own kind), `data` |
+| `closed` | per `close(outcome, meta?)` | `outcome` (`ok` · `failed` · `paused`), `commits` (the log's length then), `meta?`, `runNotes?` |
 
 The laws:
 
@@ -274,6 +274,24 @@ run.complete; // false when no closing entry was stored
 run.notes; // [{ kind, at, data }] — in arrival order
 stateAt(run.source(), run.commitLog.length - 1); // the fold over what landed, gaps in `skipped`
 ```
+
+### Run evidence beside the log
+
+A log built with `collects: { reads: 'keys' | 'off' }` says so on `opened`
+(`collects: { v, reads }`) and keeps three more facts. All of them are optional
+fields or notes, so a reader that knows none of them reads the same record.
+
+| Where | Holds |
+|---|---|
+| `commit.about` | On an execution's first bundle, beside it: `parent`, `resumes`, `reads` (names, at most 256 of at most 256 characters, the rest counted in `readsOmitted`), `description` (at most 512 characters), `attention` (only each mark's `kind`, `reason` and `evidence`, under the attention rule). Under `collects` it is always written, so a missing one means that stage was not collected. |
+| `note` `run.decision` | `{ seq, id, by, chosen, total?, fellBack?, rationale?, evidence? }`, one per decider or selector dispatch, after its commit. |
+| `note` `run.stop` | `{ seq, id, by, reason?, propagatedFrom?, pausedBy?, payload?, category?, error? }`, one per early stop. |
+| `note` `run.stage` | `{ seq, id, parent? }`, for every mount at entry and any execution with no commit of its own. |
+| `closed.runNotes` | How many `run.*` notes the log wrote. A lost tail shows here, a lost note as a hole in `seq`. |
+
+The writer serves every value before it reaches the log; the log masks nothing.
+An adapter that copies named fields must copy `collects`, `about` and `runNotes`;
+one that does not stays a good adapter, and the reader says `not-collected`.
 
 Attempt IDs (`buildAttemptId` / `parseAttemptId`) address one attempt under a
 stage execution — `<runtimeStageId>@<n>`, and `<runtimeStageId>@<n>.<k>@<m>`
@@ -367,6 +385,9 @@ writer's `LOG_PLACEHOLDER` is the historical `'REDACTED'` record byte.
   `test/lib/memory/scenario/record-sink-same-bytes.test.ts` — the four entries
   and their order, a failing sink never reaching the writer, and the pinned
   hcifootprint bytes unchanged with a sink attached (in the log and read back).
+- `test/lib/memory/unit/record-sink-evidence.test.ts` — `collects`, `about`,
+  `runNotes` and `noteRun`: copied and bounded, every refusal counted, the
+  one-argument log's own fields unchanged, and a named-field adapter's view.
 - `test/lib/time-travel/stored-record.test.ts`,
   `stored-record.property.test.ts` and `stored-record.boundary.test.ts` — the
   stored-record laws above, every unread reason verbatim, and each limit pinned

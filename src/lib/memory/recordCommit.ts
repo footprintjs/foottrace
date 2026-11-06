@@ -16,12 +16,15 @@ import { captureFor } from '../read-sources/bindings.js';
  *      `stage`, `stageId`, `runtimeStageId`, then `untrackedSources`, `tags` and `phase`, each only
  *      when it has something to say (absent, never empty). `EventLog · record` appends `idx`. The
  *      names are names: no redaction reads them, and no encoding (`commitValues`) changes them.
+ *   4. `about` goes to the log BESIDE the bundle, read with the names; it is never in the bundle, so
+ *      it moves no byte of the log, the mirror or live state.
  *
  * The frame (`StageContext`) decides WHAT is committed — the payload, the names, whether the bundle
  * is a continuation — and keeps what is not the record: retention, diagnostics, the dev-mode
  * warnings and the commit observer.
  */
 
+import type { CommitAbout } from '../run-evidence/kinds.js';
 import type { EventLog } from './EventLog.js';
 import { scrubPatch } from './scrub.js';
 import type { SharedMemory } from './SharedMemory.js';
@@ -39,6 +42,8 @@ export interface CommitStamp {
   untrackedSources?: ReadonlySet<UntrackedSource>;
   tags?: readonly string[];
   phase?: CommitPhase;
+  /** What this commit says about its execution, for a log that keeps evidence (law 4). */
+  about?: CommitAbout;
 }
 
 /** Where a commit lands: live state always; the mirror and the log when the run keeps them. */
@@ -52,11 +57,12 @@ type Names = Pick<CommitBundle, 'stage' | 'stageId' | 'runtimeStageId' | 'untrac
 
 /** Record one commit (the module law). `payload` absent = the empty commit. */
 export function recordCommit(payload: CommitPayload | undefined, stamp: CommitStamp, into: CommitTargets): void {
+  const names = namesOf(stamp);
+  const about = stamp.about;
   if (payload === undefined) {
-    into.log?.record(bundleOf({}, {}, [], [], namesOf(stamp)));
+    into.log?.record(bundleOf({}, {}, [], [], names), about);
     return;
   }
-  const names = namesOf(stamp);
   const { redactedPaths, trace } = payload;
   into.state.applyPatch(payload.overwrite, payload.updates, trace);
   const capture = captureFor(into.state);
@@ -66,7 +72,7 @@ export function recordCommit(payload: CommitPayload | undefined, stamp: CommitSt
   into.mirror?.applyPatch(overwrite, updates, trace);
   if (!into.log) return;
   const bundle = bundleOf(overwrite, updates, [...redactedPaths], trace, names);
-  into.log.record(bundle);
+  into.log.record(bundle, about);
   if (capture && capture === captureFor(into.log) && sourceClock !== undefined && bundle.idx !== undefined) {
     capture.confirm(sourceClock, bundle.idx, trace, redactedPaths);
   }

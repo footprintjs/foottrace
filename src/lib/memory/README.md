@@ -41,6 +41,10 @@ log.sinkFailures;                 // 0 — or how many entries the sink did not 
 
 Each entry is stored as a `RecordEntry`: the method's entry plus the method's name as `kind`; a note's own kind is stored as `note`. `readStoredRecord` (`foottrace`) reads them back — see [time travel](../time-travel/README.md).
 
+## Run evidence rides the same doors
+
+A log built with `collects: { reads }` also keeps what an offline reader needs to say why a stage ran: `about` beside a commit (`record(bundle, about)`, or `CommitStamp.about` through a frame), three `run.*` notes (`noteRun`, which stamps `seq` as `record` stamps `idx`) and `runNotes` on `closed`. A lost `about` or note is counted like any lost entry, and the commit still goes. `keepsEvidence` is the one question a writer's seam asks first. The bundle never changes; the shapes and their bounds are in [run-evidence](../run-evidence/README.md).
+
 ## Diagnostics are not records
 
 The shared state path codec lives in [record-paths](../record-paths/README.md). [Recording](../recording/README.md) composes a memory log with read-source capture above both libraries; memory does not import that factory.

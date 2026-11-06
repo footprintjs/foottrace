@@ -24,7 +24,7 @@ source version numbers alone do not establish npm availability.
 | Import | Responsibility |
 | --- | --- |
 | `foottrace` | Record types, runtime and attempt IDs, replay, time-travel cursors, causal and variable slices, honesty codes, the stored-record reader |
-| `foottrace/write` | `SharedMemory`, `EventLog`, `RecordFrame`, encoding and write types, writer-owned freezing, the record sink port and `memorySink` |
+| `foottrace/write` | `SharedMemory`, `EventLog`, `RecordFrame`, encoding and write types, writer-owned freezing, the record sink port and `memorySink`, a run's evidence shapes |
 | `foottrace/paths` | Record-path encoding/decoding, nested access and safe diagnostic writes |
 | `foottrace/cause` | Optional bounded attention, cause and impact queries; in-memory and lazily loaded stored-record adapters |
 | `foottrace/metadata` | Optional bounded path-occurrence queries for value-free projections; candidate read links, no state replay |

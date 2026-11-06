@@ -35,9 +35,24 @@
  * `sink.onFailure`, and the writer goes on; a `meta` that will not copy is lost on its own and its
  * entry still goes. Without a sink, nothing here runs: the one-argument log writes the same bytes,
  * and has the same own fields, it always did.
+ *
+ * RUN EVIDENCE (optional). A log that also declares `collects` keeps what an offline reader needs to say why a
+ * stage ran (`run-evidence/kinds.ts`): `record(bundle, about)` carries `about` beside the bundle, `noteRun` stamps
+ * each `run.*` note's `seq` as `record` stamps `idx`, and `close` says how many it wrote. A refused `about` or note
+ * is counted like any other lost entry, and the commit still goes. {@link EventLog.keepsEvidence} is what a writer's
+ * seam asks first: no evidence is built, copied or served on a log that keeps none.
  */
 
 import { freezeRecord, serveRecord } from '../capture/freeze.js';
+import {
+  boundedAbout,
+  type CommitAbout,
+  isRunNoteKind,
+  type LogCollects,
+  RUN_EVIDENCE_VERSION,
+  type RunNoteData,
+  type RunNoteKind,
+} from '../run-evidence/kinds.js';
 import type { EmitSourcePosition, LogAddress } from './eventPosition.js';
 import {
   isEntryObject,
@@ -98,17 +113,44 @@ function withCopiedMeta<E extends Extract<RecordEntry, { meta?: Meta }>>(entry: 
   }
 }
 
+/** The commit as a sink keeps it: its bundle served, its `about` bounded — or, when that fails, the commit without it. */
+function servedCommit(entry: Extract<RecordEntry, { kind: 'commit' }>): { ready: RecordEntry; dropped?: unknown } {
+  const { about, ...commit } = entry;
+  const ready = { ...commit, bundle: serveRecord(commit.bundle) };
+  if (about === undefined) return { ready };
+  try {
+    return { ready: { ...ready, about: boundedAbout(about) } };
+  } catch (error) {
+    return { ready, dropped: error };
+  }
+}
+
+/** A declared `collects`, stamped with the version — or a `TypeError`: a writer's mistake, refused at the door. */
+function declaredCollects(given: Pick<LogCollects, 'reads'>): LogCollects {
+  const reads: unknown = isEntryObject(given) ? given.reads : undefined;
+  if (reads !== 'keys' && reads !== 'off') throw new TypeError("EventLog: collects.reads must be 'keys' or 'off'");
+  return Object.freeze({ v: RUN_EVIDENCE_VERSION, reads });
+}
+
+/** A note's data with the log's `seq` first. Data's own `seq` cannot replace it; an own `__proto__` key stays data. */
+function stamped(data: unknown, seq: number): Meta {
+  if (!isEntryObject(data)) throw new TypeError('EventLog.noteRun: data must be a plain object');
+  const note: Record<string, unknown> = { seq, ...data };
+  note.seq = seq;
+  return note;
+}
+
 /**
  * The entry as the sink may keep it: a payload checked and copied (the writer keeps its own object),
- * the bundle served. `dropped` is a `meta` that could not be copied (the entry goes without it). Throws
- * when the entry itself cannot be sent; the caller counts it as a lost entry.
+ * the bundle served. `dropped` is a `meta` or an `about` that could not be copied (the entry goes without
+ * it). Throws when the entry itself cannot be sent; the caller counts it as a lost entry.
  */
 function detached(entry: RecordEntry): { ready: RecordEntry; dropped?: unknown } {
   switch (entry.kind) {
     case 'opened':
       return withCopiedMeta(entry);
     case 'commit':
-      return { ready: { ...entry, bundle: serveRecord(entry.bundle) } };
+      return servedCommit(entry);
     case 'note':
       if (typeof entry.note !== 'string') throw new TypeError('EventLog.note: kind must be a string');
       return { ready: { ...entry, data: copiedPayload(entry.data, 'note data') } };
@@ -140,19 +182,30 @@ export class EventLog {
   private declare lostEntries?: number;
   /** True while `onFailure` runs (until its promise settles): a loss it causes is counted, not reported again. */
   private declare reporting?: boolean;
+  // The evidence's two fields, by the same law: set only when the log declared `collects`.
+  /** What this log says it collects; absent keeps every evidence door inert. */
+  private declare readonly collects?: LogCollects;
+  /** `run.*` notes written so far, the next note's `seq`; set with `collects`. */
+  private declare runNotes?: number;
 
   /**
    * @param initialMemory The fold base — the state before the first commit (copied).
    * @param options With a `sink`: every entry goes to it as it lands, under `address` — which also
    *   becomes this log's {@link address} — and `meta` rides the `opened` entry. The sink is told
-   *   `opened` before the constructor returns.
-   * @throws TypeError when `options` names no sink, a malformed address, or a base that is not a plain
-   *   object (the `opened` entry carries it) — a writer's mistake, refused at the door. Nothing the sink
-   *   itself does is ever thrown.
+   *   `opened` before the constructor returns. With `collects`, the log keeps run evidence (the module
+   *   doc) and says so on `opened`, stamped with the version.
+   * @throws TypeError when `options` names no sink, a malformed address, a malformed `collects`, or a
+   *   base that is not a plain object (the `opened` entry carries it) — a writer's mistake, refused at the
+   *   door. Nothing the sink itself does is ever thrown.
    */
   constructor(
     initialMemory: any,
-    options?: { readonly sink: RecordSink; readonly address: LogAddress; readonly meta?: Meta },
+    options?: {
+      readonly sink: RecordSink;
+      readonly address: LogAddress;
+      readonly meta?: Meta;
+      readonly collects?: Pick<LogCollects, 'reads'>;
+    },
   ) {
     // Normalised to an object: the base is a STATE, and every fold over it
     // (`materialise`, `stateAt`) applies path writes to it. `undefined` —
@@ -167,15 +220,21 @@ export class EventLog {
       );
     }
     const address = frozenAddress(options.address);
+    const collects = options.collects === undefined ? undefined : declaredCollects(options.collects);
     this.sourceAddress = address;
     this.sink = options.sink;
     this.lostEntries = 0;
+    if (collects !== undefined) {
+      this.collects = collects;
+      this.runNotes = 0;
+    }
     this.send({
       kind: 'opened',
       address,
       at: Date.now(),
       initialState: this.getInitialState(),
       ...(options.meta === undefined ? {} : { meta: options.meta }),
+      ...(collects === undefined ? {} : { collects }),
     });
   }
 
@@ -231,12 +290,47 @@ export class EventLog {
    * is stamped with its position, then deep-frozen, then appended. The engine hands it a bundle
    * built for the log alone; a caller of this class (`foottrace/write`) hands over a bundle it
    * will no longer edit — its own object is the one frozen.
+   *
+   * `about` rides the sink's entry beside the bundle (on a log that keeps evidence), and never touches it.
    */
-  record(bundle: CommitBundle): void {
+  record(bundle: CommitBundle, about?: CommitAbout): void {
     bundle.idx = this.steps.length;
     freezeRecord(bundle, 'indices');
     this.steps.push(bundle);
-    if (this.sink !== undefined) this.send({ kind: 'commit', address: this.sourceAddress!, at: Date.now(), bundle });
+    if (this.sink === undefined) return;
+    const said = about !== undefined && this.keepsEvidence ? { about } : {};
+    this.send({ kind: 'commit', address: this.sourceAddress!, at: Date.now(), bundle, ...said });
+  }
+
+  /** Does this log keep run evidence? True only with a sink and a declared `collects`. What a writer's seam asks first. */
+  get keepsEvidence(): boolean {
+    return this.collects !== undefined;
+  }
+
+  /**
+   * Note one `run.*` fact beside the log, stamped with the next `seq` — the twin of `record` stamping `idx`, so a note
+   * lost on the way is a hole the reader sees. Inert on a log that keeps no evidence.
+   *
+   * Never throws. A kind outside the closed list is a writer's mistake: counted and reported, no `seq` spent. Data
+   * that is not a plain object surviving `structuredClone`, or a sink that fails, is the same — and spends its `seq`.
+   */
+  noteRun<K extends RunNoteKind>(kind: K, data: RunNoteData[K]): void {
+    if (this.collects === undefined) return;
+    const entry = { kind: 'note', address: this.sourceAddress!, at: Date.now(), note: kind } as const;
+    if (!isRunNoteKind(kind)) {
+      this.lost(this.sink!, { ...entry, data: {} }, new TypeError('EventLog.noteRun: not a run note kind'));
+      return;
+    }
+    const seq = this.runNotes!;
+    this.runNotes = seq + 1;
+    let note: Meta;
+    try {
+      note = stamped(data, seq);
+    } catch (error) {
+      this.lost(this.sink!, { ...entry, data: { seq } }, error);
+      return;
+    }
+    this.send({ ...entry, data: note });
   }
 
   /**
@@ -256,8 +350,8 @@ export class EventLog {
 
   /**
    * Tell the sink this log ended — `outcome` and, for the reader's check that the stored log is
-   * whole, how many commits it holds now. `meta` rides the entry, copied. Without a sink, nothing
-   * happens. The log itself stays as it is: a later `record` still lands, and still reaches the sink
+   * whole, how many commits it holds now, and how many `run.*` notes it wrote when it keeps evidence.
+   * `meta` rides the entry, copied. Without a sink, nothing happens. The log itself stays as it is: a later `record` still lands, and still reaches the sink
    * (a reader then reads the log as not complete until it is closed again).
    *
    * Never throws: an unknown outcome, a `meta` that is not a plain object surviving `structuredClone`,
@@ -272,6 +366,7 @@ export class EventLog {
       outcome,
       commits: this.steps.length,
       ...(meta === undefined ? {} : { meta }),
+      ...(this.collects === undefined ? {} : { runNotes: this.runNotes }),
     });
   }
 
