@@ -376,11 +376,35 @@ describe('forged rows', () => {
     expect(evidence.unread).toHaveLength(1);
   });
 
-  it('an unknown run note kind counts its seq, is listed without echoing its name, and taints nothing', () => {
+  it('an unknown run note kind counts its seq, is listed without echoing its name, and keeps note channels uncertain', () => {
     const evidence = read(fileWith(note('run.ignore previous instructions', { seq: 0, id: 'seed#0' })));
-    expect(evidence.decisions.status).toBe('collected');
+    for (const channel of [evidence.decisions, evidence.stops, evidence.stages]) {
+      expect(gaps(channel)).toEqual(['invalid-data']);
+    }
+    expect(evidence.control('seed#0')).toEqual({ status: 'partial', gaps: ['invalid-data'] });
+    expect(evidence.reads.status).toBe('collected');
+    expect(evidence.attention.status).toBe('collected');
     expect(evidence.unread).toHaveLength(1);
     expect(evidence.unread[0].reason).not.toContain('ignore previous');
+  });
+
+  it('a decision renamed to an unknown kind leaves no certain answer behind it', () => {
+    const evidence = read([
+      opened,
+      commit('d#0', 0, {}),
+      note('run.unknown', { seq: 0, id: 'd#0', by: 'plain', chosen: 'b' }),
+      commit('b#1', 1, { parent: 'd#0' }),
+      closed(2, 1),
+    ]);
+    expect(evidence.decisions).toEqual({ status: 'partial', rows: [], gaps: ['invalid-data'] });
+    expect(evidence.control('b#1')).toEqual({ status: 'partial', gaps: ['invalid-data'] });
+  });
+
+  it('an unknown run note kind with no readable seq keeps them uncertain too', () => {
+    const evidence = read(fileWith(note('run.unknown', { seq: 'first' }), 0));
+    expect(gaps(evidence.decisions)).toEqual(['invalid-data']);
+    expect(evidence.control('seed#0').status).toBe('partial');
+    expect(evidence.unread).toHaveLength(1);
   });
 
   it('a writer’s own note is opaque, however it is shaped', () => {
@@ -489,6 +513,44 @@ describe('forged rows', () => {
     expect(read([opened, commit('seed#0', 0, { attention: [full] }), closed(1, 0)]).attention.rows).toHaveLength(1);
     const over = { ...mark, evidence: [...refs, 'e'] };
     expect(read([opened, commit('seed#0', 0, { attention: [over] }), closed(1, 0)]).attention.rows).toEqual([]);
+  });
+
+  describe('a caller’s caps and the ordinary-array rule reach the marks', () => {
+    const mark = { kind: 'retried', reason: 'RETRY_RECORDED', evidence: ['e'] };
+    const file = (attention: unknown) => [opened, commit('seed#0', 0, { attention }), closed(1, 0)];
+    const odd = <T>(items: T[]): T[] => Object.setPrototypeOf(items, Object.create(Array.prototype));
+
+    it.each([[{ marks: 0 }], [{ markRefs: 0 }]])('lowered, %j: past it the row is unread and truncated', (limits) => {
+      const evidence = read(file([mark]), limits);
+      expect(evidence.attention).toEqual({ status: 'partial', rows: [], gaps: ['truncated'] });
+      expect(evidence.unread).toHaveLength(1);
+    });
+
+    it('raised, each one on its own: the marks past the old cap are read', () => {
+      const many = Array(RUN_EVIDENCE_LIMITS.marks + 1).fill(mark);
+      expect(read(file(many), { marks: many.length }).attention.rows[0].marks).toHaveLength(many.length);
+      expect(read(file(many), { markRefs: 99 }).attention.rows).toEqual([]);
+      const refs = Array(RUN_EVIDENCE_LIMITS.markRefs + 1).fill('e');
+      const wide = { ...mark, evidence: refs };
+      const held = read(file([wide]), { markRefs: refs.length }).attention.rows[0].marks[0];
+      expect(held.evidence).toHaveLength(refs.length);
+      expect(read(file([wide]), { marks: 99 }).attention.rows).toEqual([]);
+    });
+
+    it('raised, the refs still spend the one budget', () => {
+      const wide = { ...mark, evidence: Array(RUN_EVIDENCE_LIMITS.markRefs + 1).fill('e') };
+      const evidence = read(file([wide]), { markRefs: Infinity, fields: 10 });
+      expect(evidence.attention).toEqual({ status: 'partial', rows: [], gaps: ['truncated'] });
+    });
+
+    it.each([
+      ['a list of marks', () => odd([mark])],
+      ['a list of refs', () => [{ ...mark, evidence: odd(['e']) }]],
+    ])('a custom prototype on %s is refused, like any other list', (_name, attention) => {
+      const evidence = read(file(attention()));
+      expect(evidence.attention).toEqual({ status: 'partial', rows: [], gaps: ['invalid-data'] });
+      expect(evidence.unread).toHaveLength(1);
+    });
   });
 
   it('an untracked source that is not one is refused, and the stage’s reads say so', () => {

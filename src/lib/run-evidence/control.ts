@@ -11,8 +11,8 @@
  *
  * WHAT THE ANSWER PROMISES. No decider with `collected` means a whole chain to the true root with no decision on it.
  * Everything else that cannot finish says so: a parentless execution that is not the root (`resumed-leg`), a parent no log
- * given holds (`log-not-given`: the fold never reaches past what it was given), a stage whose `about` is missing
- * (`no-about`). Following a `resumes` edge reads `conservative`, because stages after a re-entry may be over-attributed to
+ * given holds (`log-not-given`: the fold never reaches past what it was given), a stage whose `about` is missing, or a
+ * child that only such a stage could tell apart from a branch entry (`no-about`). Following a `resumes` edge reads `conservative`, because stages after a re-entry may be over-attributed to
  * the branch it continued.
  */
 
@@ -73,22 +73,49 @@ export function decisionLabel(evidence: StoredDecisionEvidence | undefined): str
   return (rules.find((rule) => rule.matched && rule.branch === chosen) ?? rules.find((rule) => rule.matched))?.label;
 }
 
-/** Each decision's branch entries: its first N children by execution index. `edges` are in that order. */
+/** How many of the ascending `sorted` are below `value`. */
+function countBelow(sorted: readonly number[], value: number): number {
+  let low = 0;
+  let high = sorted.length;
+  while (low < high) {
+    const middle = (low + high) >>> 1;
+    if (sorted[middle] < value) low = middle + 1;
+    else high = middle;
+  }
+  return low;
+}
+
+/**
+ * Each decision's branch entries: its first N children by execution index. `edges` are in that order.
+ *
+ * An execution with a commit and no edge names no parent, so it may be one of those children. A child with N known
+ * children before it is no entry, and one still within N if every such execution were a child is an entry. Any other is
+ * `unsure`: missing metadata never promotes a continuation into a branch entry.
+ */
 function entriesOf(
   edges: readonly ControlEdge[],
   decisions: ReadonlyMap<string, ControlDecision>,
-): ReadonlyMap<string, ControlDecision> {
+  committed: ReadonlySet<string>,
+): { readonly entries: ReadonlyMap<string, ControlDecision>; readonly unsure: ReadonlySet<string> } {
+  const named = new Set(edges.map((edge) => edge.id));
+  const silent = [...committed]
+    .filter((id) => !named.has(id))
+    .map((id) => executionIndexOf(id))
+    .sort((x, y) => x - y);
   const taken = new Map<string, number>();
   const entries = new Map<string, ControlDecision>();
+  const unsure = new Set<string>();
   for (const { id, parent } of edges) {
     const decision = parent === undefined ? undefined : decisions.get(parent);
     if (decision === undefined) continue;
     const used = taken.get(decision.id) ?? 0;
     if (used >= decision.entries) continue;
     taken.set(decision.id, used + 1);
-    entries.set(id, decision);
+    const between = countBelow(silent, executionIndexOf(id)) - countBelow(silent, executionIndexOf(decision.id) + 1);
+    if (used + between < decision.entries) entries.set(id, decision);
+    else unsure.add(id);
   }
-  return entries;
+  return { entries, unsure };
 }
 
 /** One execution's answer. Everything earlier is already in `answers`. */
@@ -118,14 +145,13 @@ export function foldControl(
   decisions: ReadonlyMap<string, ControlDecision>,
   committed: ReadonlySet<string>,
 ): ReadonlyMap<string, RunControl> {
-  const entries = entriesOf(edges, decisions);
+  const { entries, unsure } = entriesOf(edges, decisions, committed);
   const answers = new Map<string, RunControl>();
   for (const edge of edges) {
     const entry = entries.get(edge.id);
-    answers.set(
-      edge.id,
-      entry === undefined ? step(edge, answers, committed) : answer(edge.gaps, entry.id, entry.label),
-    );
+    if (unsure.has(edge.id)) answers.set(edge.id, answer(union(edge.gaps, LOST), undefined, undefined, 'no-about'));
+    else if (entry !== undefined) answers.set(edge.id, answer(edge.gaps, entry.id, entry.label));
+    else answers.set(edge.id, step(edge, answers, committed));
   }
   return answers;
 }

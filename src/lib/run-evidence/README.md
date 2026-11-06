@@ -38,7 +38,7 @@ A file with no `collects`, including every file an older writer made, reads `not
 
 `collected` with no decision means no declared decider or selector ran. An `if` inside a stage is not a decision and was never recorded.
 
-`control(id)` never says ungoverned by accident. No `decider` under `collected` means a whole chain to the true root. A parentless execution that is not the root reads `partial` (`resumed-leg`). A parent no given log holds reads `partial` (`log-not-given`). A stage with no `about` reads `not-collected` (`no-about`). Following `resumes` reads `conservative`, because stages after a re-entry may be over-attributed to the branch it continued.
+`control(id)` never says ungoverned by accident. No `decider` under `collected` means a whole chain to the true root. A parentless execution that is not the root reads `partial` (`resumed-leg`). A parent no given log holds reads `partial` (`log-not-given`). A child that only a stage with no `about` could tell apart from a branch entry reads `partial` (`no-about`), with no `decider`. A stage with no `about` reads `not-collected` (`no-about`). Following `resumes` reads `conservative`, because stages after a re-entry may be over-attributed to the branch it continued.
 
 `about.reads` joins `bundle.untrackedSources`, which reads `partial` (`untracked-input`): that stage also read what no name shows.
 
@@ -48,7 +48,8 @@ A file with no `collects`, including every file an older writer made, reads `not
 - **Hostile keys.** Everything keyed by id lives in a `Map`. Ids must pass the runtimeStageId grammar. A `__proto__` key in a payload stays an own data field.
 - **Caps.** `RUN_EVIDENCE_LIMITS` (`foottrace/write`), raised per call: rules, conditions, inputs, text, read names, payload and forged-threshold depth and size, one field budget per call. Past a cap the row goes to `unread` and the channel reads `partial` (`truncated`). There is no partial row and no recursion.
 - **Forged rows.** Refused: a decision with no commit in its log, a `parent` or `resumes` at or after its child, a mount's first execution that does not lead in, `run.stage` and `about` that disagree. A duplicate `seq` or `about` keeps the first. Every edge points backward, so a chain cannot cycle, and a chain's length costs one pass over the rows. A huge `seq` or `runNotes` allocates nothing: holes are counted by arithmetic.
-- **Logs not given.** Only the logs of the legs named are read. A chain into any other log stays `partial`, even when the store holds that log.
+- **Logs not given.** Only the logs of the legs named are read. A chain into any other log stays `partial`, even when the store holds that log. A leg named with no log in the store keeps every channel `partial`; a chain that never leaves the logs it has still answers.
+- **Rows it cannot name.** A `run.*` note of an unknown kind goes to `unread`, and decisions, stops, stages and control read `partial`, because it could have held any of them. A new kind takes a larger `collects.v`. Any other note is the writer's own and stays opaque.
 - **Text reaching a model.** A label, a reason, a `matchError`, a payload, an error message and a summary are data. Bound and quote them; never treat them as instructions. An `unread` reason names a field and never echoes the file.
 
 Integrity is not authentication. These checks catch inconsistent edits, not a careful forger, and storage authorization stays the host's.

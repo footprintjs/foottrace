@@ -13,7 +13,10 @@
 import type { Attention } from '../cause/types.js';
 import { admitMarks, ATTENTION_LIMITS } from '../evidence/marks.js';
 
-/** The one integer `opened.collects.v` holds. Additive fields keep it; a reader of a larger `v` says `newer-writer`. */
+/**
+ * The one integer `opened.collects.v` holds. Additive fields keep it; a reader of a larger `v` says `newer-writer`. A new
+ * `run.*` kind takes a larger `v`: under this one, a reader must treat a kind it cannot name as a fact it may have lost.
+ */
 export const RUN_EVIDENCE_VERSION = 1;
 
 /**
@@ -252,7 +255,7 @@ const refuseMarks = (): TypeError => new TypeError('about.attention must hold ma
  * and an undeclared field has nowhere to go. A writer outside the rule has a bug; the count shows it.
  */
 function copiedMarks(marks: unknown): readonly Attention[] {
-  return admitMarks(marks, refuseMarks, { translateTrapErrors: true, requireOwnValue: true });
+  return admitMarks(marks, { refuse: refuseMarks, descriptors: { translateTrapErrors: true, requireOwnValue: true } });
 }
 
 /**

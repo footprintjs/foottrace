@@ -386,6 +386,22 @@ describe('what was running when a run ended', () => {
 });
 
 describe('legs', () => {
+  it('a named leg with no log keeps every channel uncertain; a chain that never leaves its logs still answers', () => {
+    const s = evidenceStore();
+    s.commit(['present'], 'seed#0', {});
+    s.commit(['present'], 'next#1', { parent: 'seed#0' });
+    s.close(['present']);
+    const entries = s.entries();
+    const mixed = evidenceOf(entries, ['present', 'absent']);
+    for (const name of CHANNELS) expect(mixed[name]).toMatchObject({ status: 'partial', gaps: ['not-collected'] });
+    expect(mixed.stages.rows).toHaveLength(2);
+    expect(mixed.control('next#1')).toEqual({ status: 'collected', gaps: [] });
+    expect(mixed.control('gone#5').status).toBe('not-collected');
+
+    expect(evidenceOf(entries, ['present', 'present']).decisions.status).toBe('collected');
+    expect(evidenceOf(entries, 'absent').decisions).toEqual({ status: 'not-collected', rows: [], why: 'no-log' });
+  });
+
   it('a list of legs reads both; a lone string reads one', () => {
     const scenario = engineScenario('resume-fresh');
     const stored: StoredRecord = readStoredRecord(writeScenario(scenario));

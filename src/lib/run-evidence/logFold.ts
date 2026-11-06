@@ -35,6 +35,8 @@ class Refusal extends EvidenceRefusal {
 export type Channel = 'decisions' | 'stops' | 'reads' | 'attention' | 'stages' | 'control';
 const ABOUT_CHANNELS: readonly Channel[] = ['reads', 'attention', 'stages', 'control'];
 const EVERY_CHANNEL: readonly Channel[] = ['decisions', 'stops', 'reads', 'attention', 'stages', 'control'];
+/** What any `run.*` row could have held: so a closed count, or a row of a kind this reader cannot name. */
+const ANY_NOTE_CHANNELS: readonly Channel[] = ['decisions', 'stops', 'stages', 'control'];
 const NOTE_CHANNELS: Record<RunNoteKind, readonly Channel[]> = {
   'run.decision': ['decisions', 'control'],
   'run.stop': ['stops'],
@@ -187,7 +189,7 @@ function readNote(fold: LogFold, entry: unknown, index: number, a: Admission): v
     fold.maxSeq = Math.max(fold.maxSeq, seq);
     spend(a, 1);
     if (!known) {
-      refused(fold, [], index, 'a run note of an unknown kind: not read', 'invalid-data');
+      refused(fold, ANY_NOTE_CHANNELS, index, 'a run note of an unknown kind: not read', 'invalid-data');
     } else if (kind === 'run.decision') {
       fold.decisions.push({ row: Object.freeze({ seq, ...admitDecision(data, a), address: fold.address }), index });
     } else if (kind === 'run.stop') {
@@ -197,7 +199,7 @@ function readNote(fold: LogFold, entry: unknown, index: number, a: Admission): v
     }
   } catch (error) {
     const label = known ? `${kind}: refused` : 'a run note of an unknown kind: refused';
-    refusedRow(fold, known ? NOTE_CHANNELS[kind] : [], index, label, error);
+    refusedRow(fold, known ? NOTE_CHANNELS[kind] : ANY_NOTE_CHANNELS, index, label, error);
   }
 }
 
@@ -209,7 +211,7 @@ function readClosed(fold: LogFold, entry: unknown, index: number): void {
     fold.runNotes = Math.max(fold.runNotes, runNotes);
     fold.sawCount = true;
   } catch (error) {
-    refusedRow(fold, ['decisions', 'stops', 'stages', 'control'], index, 'closed: refused', error);
+    refusedRow(fold, ANY_NOTE_CHANNELS, index, 'closed: refused', error);
   }
 }
 

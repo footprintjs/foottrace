@@ -4,7 +4,8 @@
  * It reads what `readStoredRecord` already read, one flat pass per log (`logFold.ts`). `collects` says whether a log holds
  * evidence at all, and every channel says `collected`, `partial` or `not-collected` (`channels.ts`), so a file with no
  * evidence is never read as nothing having happened. Only the logs of the legs named are read: a `parent` or `resumes`
- * into any other log stays a boundary, even when the store holds that log (`control.ts`).
+ * into any other log stays a boundary, even when the store holds that log (`control.ts`). A leg named with no log in the
+ * store keeps every channel `partial`: what it held is not known to be nothing.
  */
 
 import type { GapCode } from '../evidence/codes.js';
@@ -61,6 +62,8 @@ export function foldRunEvidence(
   const folds: LogFold[] = [];
   for (const log of stored.logs.values()) if (names.has(log.address.logRunId)) folds.push(newFold(log));
   const held = folds.filter((fold) => fold.why === undefined);
+  const present = new Set(folds.map((fold) => fold.address.logRunId));
+  const absent: readonly GapCode[] = [...names].some((name) => !present.has(name)) ? ['not-collected'] : [];
   for (const fold of held) walk(fold, a, unreadStore);
   const merged = mergeEdges(held);
 
@@ -120,12 +123,12 @@ export function foldRunEvidence(
   };
 
   return Object.freeze({
-    decisions: channelOf(decisionRows, 'decisions', folds),
-    stops: channelOf(stopRows, 'stops', folds),
-    reads: readsChannel(folds),
-    attention: attentionChannel(folds),
-    stages: channelOf(stageRows, 'stages', folds),
-    running: runningChannel(folds, a),
+    decisions: channelOf(decisionRows, 'decisions', folds, absent),
+    stops: channelOf(stopRows, 'stops', folds, absent),
+    reads: readsChannel(folds, absent),
+    attention: attentionChannel(folds, absent),
+    stages: channelOf(stageRows, 'stages', folds, absent),
+    running: runningChannel(folds, a, absent),
     control,
     unread: Object.freeze(held.flatMap((fold) => fold.unread)),
   });
@@ -143,7 +146,7 @@ export function foldRunEvidence(
  *
  * @param stored What `readStoredRecord` read.
  * @param legs The leg or legs to read, by `logRunId`, as `timeTravel([paused, resumed])` takes both. A log of any other leg is
- *   never read, so a chain into one reads `partial`.
+ *   never read, so a chain into one reads `partial`. A leg named with no log keeps every channel `partial`.
  * @param limits Raise a bound for this read.
  * @throws TypeError when `legs` is not a string or a short list of them; RangeError when a limit is not a count. Never for
  *   anything in the file.

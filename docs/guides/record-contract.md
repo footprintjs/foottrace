@@ -289,6 +289,8 @@ fields or notes, so a reader that knows none of them reads the same record.
 | `note` `run.stage` | `{ seq, id, parent? }`, for every mount at entry and any execution with no commit of its own. |
 | `closed.runNotes` | How many `run.*` notes the log wrote. A lost tail shows here, a lost note as a hole in `seq`. |
 
+The `run.` prefix is reserved. A reader treats a `run.*` kind it cannot name as a fact it may have lost, so a new kind takes a larger `collects.v`.
+
 The writer serves every value before it reaches the log; the log masks nothing.
 An adapter that copies named fields must copy `collects`, `about` and `runNotes`;
 one that does not stays a good adapter, and the reader says `not-collected`.

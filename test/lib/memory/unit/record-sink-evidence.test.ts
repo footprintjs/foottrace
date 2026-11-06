@@ -212,6 +212,14 @@ describe('commit.about', () => {
     ['a kind that is not a name', { attention: [mark({ kind: 'private value' })] }],
     ['a mark with no evidence', { attention: [mark({ evidence: [] })] }],
     [
+      'a list of marks with a custom prototype',
+      { attention: Object.setPrototypeOf([mark()], Object.create(Array.prototype)) },
+    ],
+    [
+      'refs with a custom prototype',
+      { attention: [mark({ evidence: Object.setPrototypeOf(['e'], Object.create(Array.prototype)) })] },
+    ],
+    [
       'a mark that is not a plain object',
       {
         attention: [

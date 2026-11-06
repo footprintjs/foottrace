@@ -42,9 +42,9 @@ export function channelOf<T>(
     : Object.freeze({ status: 'partial', rows: frozen, gaps: Object.freeze([...gaps]) });
 }
 
-export function readsChannel(folds: readonly LogFold[]): EvidenceChannel<StoredReads> {
+export function readsChannel(folds: readonly LogFold[], given: readonly GapCode[] = []): EvidenceChannel<StoredReads> {
   const rows: StoredReads[] = [];
-  const extra = new Set<GapCode>();
+  const extra = new Set<GapCode>(given);
   for (const fold of folds) {
     if (fold.collects?.reads !== 'keys') continue;
     for (const [id, { about }] of fold.abouts) {
@@ -65,7 +65,10 @@ export function readsChannel(folds: readonly LogFold[]): EvidenceChannel<StoredR
   return channelOf(rows, 'reads', folds, [...extra]);
 }
 
-export function attentionChannel(folds: readonly LogFold[]): EvidenceChannel<StoredMarks> {
+export function attentionChannel(
+  folds: readonly LogFold[],
+  extra: readonly GapCode[] = [],
+): EvidenceChannel<StoredMarks> {
   const rows: StoredMarks[] = [];
   for (const fold of folds) {
     for (const [id, { about }] of fold.abouts) {
@@ -74,11 +77,15 @@ export function attentionChannel(folds: readonly LogFold[]): EvidenceChannel<Sto
       }
     }
   }
-  return channelOf(rows, 'attention', folds);
+  return channelOf(rows, 'attention', folds, extra);
 }
 
 /** The mount logs still open at the end of the file, and of those the innermost. */
-export function runningChannel(folds: readonly LogFold[], a: Admission): EvidenceChannel<StoredRunningSubflow> {
+export function runningChannel(
+  folds: readonly LogFold[],
+  a: Admission,
+  extra: readonly GapCode[] = [],
+): EvidenceChannel<StoredRunningSubflow> {
   const held = folds.filter((fold) => fold.why === undefined);
   const open = held.filter((fold) => !fold.log.complete && fold.address.drillPath.length > 0);
   const keyOf = ({ logRunId, drillPath }: LogAddress): string => JSON.stringify([logRunId, ...drillPath]);
@@ -94,5 +101,5 @@ export function runningChannel(folds: readonly LogFold[], a: Admission): Evidenc
     const id = mountOf(address)!;
     if (!outer.has(keyOf(address)) && isExecutionId(id, a)) rows.push(Object.freeze({ id, address }));
   }
-  return channelOf(rows, 'running', folds);
+  return channelOf(rows, 'running', folds, extra);
 }

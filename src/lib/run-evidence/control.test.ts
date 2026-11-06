@@ -228,6 +228,52 @@ describe('never ungoverned by accident', () => {
     expect(evidence.control('after#2')).toEqual({ status: 'partial', gaps: ['not-collected'], why: 'no-about' });
   });
 
+  it('a lost about never promotes a continuation into a decider’s branch entry', () => {
+    const s = evidenceStore();
+    const root = ['r'];
+    s.commit(root, 'd#0', {});
+    s.note(root, 'run.decision', { id: 'd#0', by: 'plain', chosen: 'b' });
+    s.commit(root, 'b#1');
+    s.commit(root, 'next#2', { parent: 'd#0' });
+    s.commit(root, 'after#3', { parent: 'next#2' });
+    s.commit(root, 'later#4', { parent: 'd#0' });
+    s.close(root);
+    const evidence = readRunEvidence(readStoredRecord(s.entries()), 'r');
+    const unsure = { status: 'partial', gaps: ['not-collected'], why: 'no-about' };
+    expect(evidence.control('next#2')).toEqual(unsure);
+    expect(evidence.control('after#3')).toEqual(unsure);
+    // One known child came first, so this one is past the decider's one entry whatever `b#1` was.
+    expect(evidence.control('later#4')).toEqual({ status: 'collected', gaps: [] });
+  });
+
+  it('a lost about under a selector: a child still within N is an entry, the next is unsure', () => {
+    const s = evidenceStore();
+    const root = ['r'];
+    s.commit(root, 'sel#0', {});
+    s.note(root, 'run.decision', { id: 'sel#0', by: 'plain', chosen: ['a', 'b'] });
+    s.commit(root, 'a#1');
+    s.commit(root, 'b#2', { parent: 'sel#0' });
+    s.commit(root, 'next#3', { parent: 'sel#0' });
+    s.close(root);
+    const evidence = readRunEvidence(readStoredRecord(s.entries()), 'r');
+    expect(evidence.control('b#2')).toEqual({ status: 'collected', decider: 'sel#0', gaps: [] });
+    expect(evidence.control('next#3')).toEqual({ status: 'partial', gaps: ['not-collected'], why: 'no-about' });
+  });
+
+  it('a lost about outside the decision and its child casts no doubt on the entry', () => {
+    const s = evidenceStore();
+    const root = ['r'];
+    s.commit(root, 'seed#0', {});
+    s.commit(root, 'before#1');
+    s.commit(root, 'd#2', { parent: 'seed#0' });
+    s.note(root, 'run.decision', { id: 'd#2', by: 'plain', chosen: 'b' });
+    s.commit(root, 'b#3', { parent: 'd#2' });
+    s.commit(root, 'after#4');
+    s.close(root);
+    const evidence = readRunEvidence(readStoredRecord(s.entries()), 'r');
+    expect(evidence.control('b#3')).toEqual({ status: 'collected', decider: 'd#2', gaps: [] });
+  });
+
   it('a parent in a log not given: partial, and the walk stops there', () => {
     const s = evidenceStore();
     const mount = ['r', 'm#2'];

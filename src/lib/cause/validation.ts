@@ -57,7 +57,7 @@ export function graphList<T>(
 export const refs = (value: unknown): readonly string[] =>
   graphList(value, ATTENTION_LIMITS.refs, (item) => graphName(item, ATTENTION_LIMITS.refLength));
 export function attention(value: unknown): readonly Attention[] {
-  return admitMarks(value, refuseGraph, graphDescriptors);
+  return admitMarks(value, { refuse: refuseGraph, descriptors: graphDescriptors });
 }
 export function gaps(value: unknown): readonly Gap[] {
   return graphList(value, 32, (item) => {

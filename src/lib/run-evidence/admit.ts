@@ -160,10 +160,23 @@ export function admitSeq(data: unknown): number {
 export function admitAbout(value: unknown, id: string, a: Admission): CommitAbout {
   plain(value);
   const index = executionIndexOf(id);
-  const { reads, readLength, description } = a.limits;
+  const { reads, readLength, description, marks: markCap, markRefs } = a.limits;
   const attention = ownField(value, 'attention');
-  const marks = attention === undefined ? undefined : admitMarks(attention, refuse, DATA_ONLY);
-  if (marks !== undefined) spend(a, marks.length + 1);
+  const marks =
+    attention === undefined
+      ? undefined
+      : admitMarks(attention, {
+          refuse,
+          descriptors: DATA_ONLY,
+          marks: markCap,
+          refs: markRefs,
+          overflow: 'truncated',
+        });
+  if (marks !== undefined)
+    spend(
+      a,
+      marks.reduce((fields, mark) => fields + mark.evidence.length + 1, 1),
+    );
   return Object.freeze({
     ...field('parent', ownField(value, 'parent'), (v) => earlier(v, index, a)),
     ...field('resumes', ownField(value, 'resumes'), (v) => earlier(v, index, a)),
