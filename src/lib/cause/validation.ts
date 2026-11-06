@@ -2,6 +2,7 @@ import type { Adjacency, Attention, Gap, GapCode, GraphEdge, NodeId } from './ty
 
 import { boundedList, boundedName, EvidenceRefusal, ownData } from '../evidence/admission.js';
 import { isGapCode } from '../evidence/codes.js';
+import { admitMarks, ATTENTION_LIMITS } from '../evidence/marks.js';
 
 /** Graph-port refusals carry their code through Session; loader refusals are handled at the record boundary. */
 export class AdmissionError extends EvidenceRefusal {
@@ -53,34 +54,10 @@ export function graphList<T>(
     descriptors: graphDescriptors,
   });
 }
-const reasons = new Set([
-  'ERROR_RECORDED',
-  'UNKNOWN_EFFECT_RECORDED',
-  'RETRY_STOP_RECORDED',
-  'TIMEOUT_RECORDED',
-  'RETRY_RECORDED',
-  'QUALITY_DROP_RECORDED',
-  'EVIDENCE_NOT_COLLECTED',
-  'OUTLIER_RECORDED',
-  'BUSINESS_RULE_MATCHED',
-]);
-export const refs = (value: unknown): readonly string[] => graphList(value, 16, (item) => graphName(item, 512));
+export const refs = (value: unknown): readonly string[] =>
+  graphList(value, ATTENTION_LIMITS.refs, (item) => graphName(item, ATTENTION_LIMITS.refLength));
 export function attention(value: unknown): readonly Attention[] {
-  return graphList(value, 32, (item) => {
-    plain(item);
-    const kind = graphOwn(item, 'kind'),
-      reason = graphOwn(item, 'reason');
-    if (
-      typeof kind !== 'string' ||
-      !/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(kind) ||
-      typeof reason !== 'string' ||
-      !reasons.has(reason)
-    )
-      throw new AdmissionError();
-    const evidence = refs(graphOwn(item, 'evidence'));
-    if (kind !== 'not-collected' && evidence.length === 0) throw new AdmissionError();
-    return Object.freeze({ kind, reason: reason as Attention['reason'], evidence });
-  });
+  return admitMarks(value, refuseGraph, graphDescriptors);
 }
 export function gaps(value: unknown): readonly Gap[] {
   return graphList(value, 32, (item) => {

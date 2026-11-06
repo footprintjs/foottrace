@@ -118,5 +118,13 @@
   "src/lib/metadata/admission.ts": 1,
   "src/lib/metadata/query.ts": 3,
   "src/lib/evidence/readAttempts.ts": 0,
-  "src/lib/run-evidence/kinds.ts": 0
+  "src/lib/evidence/marks.ts": 0,
+  "src/lib/run-evidence/kinds.ts": 0,
+  "src/lib/run-evidence/rows.ts": 0,
+  "src/lib/run-evidence/fields.ts": 0,
+  "src/lib/run-evidence/admit.ts": 0,
+  "src/lib/run-evidence/control.ts": 0,
+  "src/lib/run-evidence/logFold.ts": 1,
+  "src/lib/run-evidence/channels.ts": 1,
+  "src/lib/run-evidence/read.ts": 3
 }

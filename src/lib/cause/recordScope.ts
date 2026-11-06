@@ -1,5 +1,6 @@
 import { prepareReadSources } from './recordSources.js';
 import type { LogAddress } from '../memory/eventPosition.js';
+import { RUN_EVIDENCE_LIMITS } from '../run-evidence/kinds.js';
 import type { PreparedRecordScope, RecordGraphOptions, RecordScope } from './recordTypes.js';
 import {
   addressKey,
@@ -60,7 +61,7 @@ export function prepareRecordScope(
     recordOwn(value, 'reads'),
     maximumCommits,
     (value) => {
-      const readKeys = names(value, 128, true);
+      const readKeys = names(value, RUN_EVIDENCE_LIMITS.reads, true);
       spend(budget, readKeys.length);
       return readKeys;
     },

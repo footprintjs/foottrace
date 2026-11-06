@@ -293,6 +293,13 @@ The writer serves every value before it reaches the log; the log masks nothing.
 An adapter that copies named fields must copy `collects`, `about` and `runNotes`;
 one that does not stays a good adapter, and the reader says `not-collected`.
 
+`readRunEvidence(readStoredRecord(entries), legs)` reads them back: `decisions`,
+`stops`, `reads`, `attention`, `stages` and `running` channels, and `control(id)`,
+each saying `collected`, `partial` or `not-collected`. A file with no `collects`
+reads `not-collected`, never "nothing happened". See
+[run-evidence](../../src/lib/run-evidence/README.md) for what each status promises
+and for the reader's threat model.
+
 Attempt IDs (`buildAttemptId` / `parseAttemptId`) address one attempt under a
 stage execution — `<runtimeStageId>@<n>`, and `<runtimeStageId>@<n>.<k>@<m>`
 for a call's attempt — parsed from the right, so no stage-ID character is
@@ -388,6 +395,9 @@ writer's `LOG_PLACEHOLDER` is the historical `'REDACTED'` record byte.
 - `test/lib/memory/unit/record-sink-evidence.test.ts` — `collects`, `about`,
   `runNotes` and `noteRun`: copied and bounded, every refusal counted, the
   one-argument log's own fields unchanged, and a named-field adapter's view.
+- `src/lib/run-evidence/*.test.ts` and `test/cause/stored-run-evidence.test.ts` —
+  the fold against a real engine's recorder, the resume fold, every channel's
+  status, the reader's threat model, and the stored graph filling its own maps.
 - `test/lib/time-travel/stored-record.test.ts`,
   `stored-record.property.test.ts` and `stored-record.boundary.test.ts` — the
   stored-record laws above, every unread reason verbatim, and each limit pinned

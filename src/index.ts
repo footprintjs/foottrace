@@ -68,6 +68,20 @@ export {
 } from './lib/time-travel/index.js';
 export type { LogOutcome, Meta } from './lib/memory/sink.js';
 export type {
+  EvidenceChannel,
+  RunControl,
+  RunEvidence,
+  RunEvidenceUnread,
+  StoredDecision,
+  StoredMarks,
+  StoredReads,
+  StoredRunningSubflow,
+  StoredStage,
+  StoredStop,
+} from './lib/run-evidence/rows.js';
+export type { RunEvidenceLimits } from './lib/run-evidence/kinds.js';
+export { readRunEvidence } from './lib/run-evidence/read.js';
+export type {
   CausalChainOptions,
   CausalEdge,
   CausalNode,

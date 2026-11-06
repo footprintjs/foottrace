@@ -23,7 +23,7 @@ source version numbers alone do not establish npm availability.
 
 | Import | Responsibility |
 | --- | --- |
-| `foottrace` | Record types, runtime and attempt IDs, replay, time-travel cursors, causal and variable slices, honesty codes, the stored-record reader |
+| `foottrace` | Record types, runtime and attempt IDs, replay, time-travel cursors, causal and variable slices, honesty codes, the stored-record reader, the run-evidence reader |
 | `foottrace/write` | `SharedMemory`, `EventLog`, `RecordFrame`, encoding and write types, writer-owned freezing, the record sink port and `memorySink`, a run's evidence shapes |
 | `foottrace/paths` | Record-path encoding/decoding, nested access and safe diagnostic writes |
 | `foottrace/cause` | Optional bounded attention, cause and impact queries; in-memory and lazily loaded stored-record adapters |
@@ -133,6 +133,8 @@ timeTravel(run.source()).last(); // the cursor over what landed
 ```
 
 A failing sink never stops the writer: a throw or a rejected promise is counted (`log.sinkFailures`) and reported to `sink.onFailure`. The reader treats what storage gives back as untrusted (`Iterable<unknown>`) and checks each entry: one it does not read into a log is listed in `unread` by name, and a commit sits at its own index, so a commit the store lost is a gap the fold reports by index — never a shifted log. `complete` means the writer closed the log and the reader read it all. Its work is bounded by four documented limits (`StoredRecordLimits`, raised per call). A sink adds nothing to the log's bytes; `meta` and a note's data are opaque, stored and handed back, never read. See [time travel](src/lib/time-travel/README.md#6-a-stored-record-reads-back--even-a-run-that-never-ended-110) and the [record contract](docs/guides/record-contract.md#a-stored-record).
+
+A log that declares what it collects also keeps why a stage ran: which execution led to which, what a decider weighed, why a stage stopped early. `readRunEvidence` reads that back from the file alone, and every answer says `collected`, `partial` or `not-collected`, so a file with no evidence never reads as nothing having happened. See [run-evidence](src/lib/run-evidence/README.md) and the [runnable example](examples/post-execution/time-travel/09-run-evidence.ts).
 
 ## Attempt IDs
 
