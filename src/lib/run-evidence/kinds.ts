@@ -11,9 +11,12 @@
  */
 
 import type { Attention } from '../cause/types.js';
-import { attention as admittedMarks } from '../cause/validation.js';
+import { admitMarks, ATTENTION_LIMITS } from '../evidence/marks.js';
 
-/** The one integer `opened.collects.v` holds. Additive fields keep it; a reader of a larger `v` says `newer-writer`. */
+/**
+ * The one integer `opened.collects.v` holds. Additive fields keep it; a reader of a larger `v` says `newer-writer`. A new
+ * `run.*` kind takes a larger `v`: under this one, a reader must treat a kind it cannot name as a fact it may have lost.
+ */
 export const RUN_EVIDENCE_VERSION = 1;
 
 /**
@@ -29,10 +32,10 @@ export const RUN_EVIDENCE_LIMITS = /* @__PURE__ */ Object.freeze({
   readLength: 256,
   /** Characters in `about.description`. */
   description: 512,
-  /** Marks in `about.attention` (the attention reader's own cap). */
-  marks: 32,
-  /** Evidence refs on one mark (the attention reader's own cap). */
-  markRefs: 16,
+  /** Marks in `about.attention`: the one attention rule's own cap. */
+  marks: ATTENTION_LIMITS.marks,
+  /** Evidence refs on one mark: the one attention rule's own cap. */
+  markRefs: ATTENTION_LIMITS.refs,
   /** Rules in one decision's evidence. */
   rules: 256,
   /** Conditions in one filter rule. */
@@ -51,7 +54,12 @@ export const RUN_EVIDENCE_LIMITS = /* @__PURE__ */ Object.freeze({
   payloadDepth: 32,
   /** Size of a pause payload the reader admits: characters of its text and keys, plus 8 per scalar and 2 per container. */
   payloadSize: 1_048_576,
+  /** Fields one read may admit across every row: one budget per call. */
+  fields: 1_048_576,
 });
+
+/** Raise a bound for one read. Each is a non-negative integer or `Infinity`. */
+export type RunEvidenceLimits = { readonly [Name in keyof typeof RUN_EVIDENCE_LIMITS]?: number };
 
 /** What a log says it collected, on its `opened` entry. Absent: an older writer, evidence off, or a dropped field. */
 export interface LogCollects {
@@ -239,17 +247,15 @@ function boundedReads(reads: unknown): { readonly kept: string[]; readonly left:
   return { kept, left: length - kept.length };
 }
 
+const refuseMarks = (): TypeError => new TypeError('about.attention must hold marks the attention rule admits');
+
 /**
  * The marks a sink keeps, or a `TypeError`. The attention rule reads a mark's three declared fields once, as data (no
  * accessor runs), checks what it read and returns those values in fresh objects: what was checked is what is stored,
  * and an undeclared field has nowhere to go. A writer outside the rule has a bug; the count shows it.
  */
 function copiedMarks(marks: unknown): readonly Attention[] {
-  try {
-    return admittedMarks(marks);
-  } catch {
-    throw new TypeError('about.attention must hold marks the attention rule admits');
-  }
+  return admitMarks(marks, { refuse: refuseMarks, descriptors: { translateTrapErrors: true, requireOwnValue: true } });
 }
 
 /**

@@ -93,6 +93,7 @@ describe('foottrace public ownership', () => {
     const additions = {
       '.': [
         'deepEqual',
+        'readRunEvidence',
         'EXECUTION_DELIMITER',
         'PATH_DELIMITER',
         'isExecutionKey',

@@ -1,0 +1,8 @@
+{"kind":"opened","address":{"logRunId":"1793927690202-0000000002","drillPath":[]},"at":1793927690202,"initialState":{},"meta":{"runId":"1793927690202-0000000002","chart":{"id":"start","name":"Start"}}}
+{"kind":"commit","address":{"logRunId":"1793927690202-0000000002","drillPath":[]},"at":1793927690202,"bundle":{"overwrite":{},"updates":{},"redactedPaths":[],"trace":[],"stage":"Start","stageId":"start","runtimeStageId":"start#0","idx":0}}
+{"kind":"opened","address":{"logRunId":"1793927690202-0000000002","drillPath":["sub#1"]},"at":1793927690202,"initialState":{},"meta":{"subflowId":"sub"}}
+{"kind":"commit","address":{"logRunId":"1793927690202-0000000002","drillPath":["sub#1"]},"at":1793927690202,"bundle":{"overwrite":{},"updates":{},"redactedPaths":[],"trace":[],"stage":"sub/In one","stageId":"sub/in-one","runtimeStageId":"sub/in-one#2","idx":0}}
+{"kind":"commit","address":{"logRunId":"1793927690202-0000000002","drillPath":["sub#1"]},"at":1793927690203,"bundle":{"overwrite":{},"updates":{},"redactedPaths":[],"trace":[],"stage":"sub/In two","stageId":"sub/in-two","runtimeStageId":"sub/in-two#3","idx":1}}
+{"kind":"closed","address":{"logRunId":"1793927690202-0000000002","drillPath":["sub#1"]},"at":1793927690203,"outcome":"failed","commits":2}
+{"kind":"commit","address":{"logRunId":"1793927690202-0000000002","drillPath":[]},"at":1793927690203,"bundle":{"overwrite":{},"updates":{},"redactedPaths":[],"trace":[],"stage":"Sub","stageId":"sub","runtimeStageId":"sub#1","idx":1}}
+{"kind":"closed","address":{"logRunId":"1793927690202-0000000002","drillPath":[]},"at":1793927690203,"outcome":"failed","commits":2,"meta":{"runId":"1793927690202-0000000002","error":{"name":"Error","message":"boom 42","code":"E_X"}}}

@@ -47,6 +47,12 @@ const checks = `
   assert.equal(note.data.seq, 0);
   assert.equal(closed.runNotes, 1);
   assert.equal(typeof writer.RUN_EVIDENCE_LIMITS.payloadSize, 'number');
+  // Read back through the root, from JSON, as a file gives it.
+  const evidence = reader.readRunEvidence(reader.readStoredRecord(JSON.parse(JSON.stringify(evidenceSink.entries))), 'e');
+  assert.deepEqual(evidence.reads.rows.map((row) => row.keys), [['a']]);
+  assert.deepEqual(evidence.stages.rows.map((row) => row.id), ['s#0', 'm#1']);
+  assert.equal(evidence.control('m#1').status, 'collected');
+  assert.equal(reader.readRunEvidence(reader.readStoredRecord([]), 'e').decisions.status, 'not-collected');
 `;
 
 describe('built package public doors share record state', () => {
