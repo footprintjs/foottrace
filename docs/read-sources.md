@@ -71,6 +71,11 @@ that source rather than pretending deletion worked. Exact selection is also not
 semantic derivation: reading A before writing an unrelated constant to B proves
 no dependency from A to B. The existing `reads-prefix` meaning is unchanged.
 
+The [read/write evidence proposal](design/read-write-evidence.md) separates
+version-specific read observations from possible write contributors and records
+the counterexamples a future occurrence-to-write contract must preserve. It is a
+design for review, not an implemented writer API or a stronger dependency claim.
+
 ## Privacy and failure
 
 Pass `'redacted'` when the producer's EXISTING privacy rule says so. This is a
