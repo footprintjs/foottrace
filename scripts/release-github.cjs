@@ -1068,6 +1068,13 @@ async function writeProposal(api, context, payload, pinned, options = {}) {
   requireCurrent(pr);
   const created = (await api('GET', `${base}/pulls/${pr.number}`)).data;
   requireCurrent(created);
+  // The approval read and the ref advance cannot be one step. An Approve that
+  // landed between them now sits on a superseded head: name it rather than
+  // return a clean rebuild. Publication still binds approval to the exact head.
+  if (rebuild) {
+    const reviews = await pages(api, `${base}/pulls/${pr.number}/reviews`);
+    if (reviews.some((r) => r.state === 'APPROVED' && r.commit_id !== commit.sha)) fail('proposal-approved');
+  }
   await assertCurrentMain(api, context);
   const finalRef = (await api('GET', `${base}/git/ref/heads/release/next`)).data;
   if (finalRef.object?.sha !== commit.sha) fail('proposal-existing');

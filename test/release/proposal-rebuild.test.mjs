@@ -116,6 +116,20 @@ for (const [name, code, mutate] of [
   assert.equal(writes(f).length, before);
 });
 
+test('an Approve that lands while the ref advances is named, not returned as a clean rebuild', async () => {
+  const { f, oldHead } = await movedFixture();
+  const api = f.api;
+  f.api = async (method, route, body) => {
+    const reply = await api(method, route, body);
+    if (method === 'PATCH' && route.endsWith('/git/refs/heads/release/next'))
+      openPR(f).reviews = [{ id: 2, state: 'APPROVED', commit_id: oldHead, user: { id: 8, login: 'reviewer', type: 'User' } }];
+    return reply;
+  };
+  const pinned = await runtime.plan(f.api, f.context, f.options);
+  const payload = await runtime.prepareProposal(f.api, f.context, pinned, f.options);
+  await assert.rejects(() => runtime.writeProposal(f.api, f.context, payload, pinned, f.options), { code: 'proposal-approved' });
+});
+
 test('decision: a rebuild needs every piece of evidence and never forces', () => {
   const world = (patch = {}) => ({
     base: sha('1'), currentMain: sha('1'), expectedTree: sha('3'), complete: true,
