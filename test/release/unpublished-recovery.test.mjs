@@ -454,9 +454,11 @@ test('review S1: exact legacy one-parent NEXT proposal is a zero-write no-op', a
   await assert.doesNotReject(async () => { result = await runtime.writeProposal(f.api, x.context, x.payload, x.pinned, f.options); });
   assert.equal(result.action, 'no-op'); assert.equal(result.pr, 9001); noWrites(f);
 });
-for (const damage of ['tree', 'base', 'head', 'bot']) test(`review S1: legacy no-op refuses wrong ${damage} without writes`, async () => {
+// A recorded base outside main history and a foreign author carry their own names.
+for (const [damage, code] of [['tree', 'proposal-existing'], ['base', 'proposal-base-moved'], ['head', 'proposal-existing'], ['bot', 'proposal-author']])
+  test(`review S1: legacy no-op refuses wrong ${damage} without writes`, async () => {
   const f = managedReleaseFixture({ published: true }), x = await legacyOpen(f, damage);
-  await assert.rejects(() => runtime.writeProposal(f.api, x.context, x.payload, x.pinned, f.options), { code: 'proposal-existing' }); noWrites(f);
+  await assert.rejects(() => runtime.writeProposal(f.api, x.context, x.payload, x.pinned, f.options), { code }); noWrites(f);
 });
 for (const [damage, code] of [
   ['response-base', 'proposal-pr'], ['response-closed', 'proposal-pr'], ['returned-new-base', 'proposal-pr'],

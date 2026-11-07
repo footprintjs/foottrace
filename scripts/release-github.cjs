@@ -99,9 +99,13 @@ const LEGACY_CODES = new Set([
   'pr-moved',
   'producer-attempt',
   'producer-job',
+  'proposal-approved',
+  'proposal-author',
   'proposal-base',
+  'proposal-base-moved',
   'proposal-commit',
   'proposal-existing',
+  'proposal-head',
   'proposal-plan',
   'proposal-pr',
   'proposal-substitution',
@@ -505,16 +509,20 @@ async function requireRecoveryMerge(api, context, view, bot, record, lineage) {
   if (pr.base.sha !== d.base.sha) fail('recovery-lineage');
   await requireAncestor(api, context, d.base.sha, lineage.merge);
 }
-async function retainedProposal(api, context, view, bot, version) {
+// `movedBase` admits an open proposal whose recorded base is older than main; the
+// caller must then account for that base and the head before any decision.
+async function retainedProposal(api, context, view, bot, version, { movedBase = false } = {}) {
   const base = prefix(context), ref = await optional(api, `${base}/git/ref/heads/release/next`);
   const pulls = await pages(api, `${base}/pulls?state=open&head=footprintjs:release/next&base=main`);
   if (!ref || ref.object?.type !== 'commit' || !control.validSha(ref.object.sha) || pulls.length > 1) fail('proposal-existing');
   const head = await view.commit(ref.object.sha);
   if (pulls.length) {
     const p = pulls[0];
-    if (p.state !== 'open' || p.head?.sha !== head.sha || p.base?.sha !== context.sha ||
-      p.head.ref !== 'release/next' || p.base.ref !== 'main' || p.user?.id !== bot.id || p.user.type !== 'Bot' ||
-      p.user.login !== bot.login || !control.sameRepo(p.head.repo, context.repository) || !control.sameRepo(p.base.repo, context.repository)) fail('proposal-existing');
+    if (p.state !== 'open' || p.head?.sha !== head.sha || !control.validSha(p.base?.sha) ||
+      (p.base.sha !== context.sha && !movedBase) ||
+      p.head.ref !== 'release/next' || p.base.ref !== 'main' ||
+      !control.sameRepo(p.head.repo, context.repository) || !control.sameRepo(p.base.repo, context.repository)) fail('proposal-existing');
+    if (p.user?.id !== bot.id || p.user.type !== 'Bot' || p.user.login !== bot.login) fail('proposal-author');
     return { head, open: p };
   }
   const closed = await pages(api, `${base}/pulls?state=closed&head=footprintjs:release/next&base=main`);
@@ -524,6 +532,65 @@ async function retainedProposal(api, context, view, bot, version) {
   if (predecessor.head !== head.sha) fail('proposal-existing');
   await requireAncestor(api, context, predecessor.merge, context.sha);
   return { head, predecessor };
+}
+// The tree a NEXT proposal must hold: the source inventory plus the prepared release.
+function proposalTree(inventory, prepared) {
+  const candidate = new Map(inventory);
+  for (const [path, text] of Object.entries(prepared.updates)) {
+    const bytes = Buffer.from(text);
+    candidate.set(path, { bytes, mode: '100644', sha: preparation.gitObject('blob', bytes) });
+  }
+  for (const path of prepared.deletions) candidate.delete(path);
+  return preparation.treeOid(candidate);
+}
+// A base the route built on must still be in current main's history.
+async function accountedBase(api, context, sha) {
+  try {
+    await requireAncestor(api, context, sha, context.sha);
+  } catch (e) {
+    if (ownData(e, 'code') === 'recovery-ancestry') fail('proposal-base-moved');
+    throw e;
+  }
+}
+const MAX_PROPOSAL_GENERATIONS = 8;
+// Walks back from a proposal commit to the App release merge it rolled over. Each
+// generation that is not a merged App head must be exactly what this runner builds
+// at its own first parent, an older main; its second parent is the generation
+// before it. A commit pushed by hand, or any other content, cannot satisfy that.
+async function proposalLineage(api, context, view, bot, version, start) {
+  const closed = await pages(api, `${prefix(context)}/pulls?state=closed&head=footprintjs:release/next&base=main`);
+  let id = start;
+  for (let depth = 0; depth <= MAX_PROPOSAL_GENERATIONS; depth++) {
+    const merged = closed.filter((p) => p.head?.sha === id && p.merged_at);
+    if (merged.length > 1) fail('proposal-existing');
+    if (merged.length === 1) {
+      const predecessor = await mergedLineage(api, context, view, bot, merged[0].number, version);
+      if (predecessor.head !== id) fail('proposal-existing');
+      await requireAncestor(api, context, predecessor.merge, context.sha);
+      return predecessor;
+    }
+    if (depth === MAX_PROPOSAL_GENERATIONS) break;
+    const generation = await view.commit(id), parents = generation.parents.map((p) => p.sha);
+    if (parents.length !== 2 || parents[0] === context.sha) fail('proposal-head');
+    await accountedBase(api, context, parents[0]);
+    const input = await sourceInput(api, { ...context, sha: parents[0] }, view);
+    if (input.pkg.version !== version) fail('proposal-base-moved');
+    let prepared;
+    try {
+      prepared = prepareRelease({ files: input.files, fragments: input.fragments, date: input.date });
+    } catch {
+      fail('proposal-head');
+    }
+    if (proposalTree(input.inventory, prepared) !== generation.tree.sha) fail('proposal-head');
+    id = parents[1];
+  }
+  fail('proposal-base-moved');
+}
+// An approval names one head. Rebuilding under it would leave a reviewed-looking
+// PR on unreviewed bytes, so any approval on the open proposal holds the rebuild.
+async function requireUnapproved(api, context, open) {
+  const reviews = await pages(api, `${prefix(context)}/pulls/${open.number}/reviews`);
+  if (reviews.some((r) => r.state === 'APPROVED')) fail('proposal-approved');
 }
 async function recoveryPreparation(api, context, input, bot) {
   await activeHistory(api, context, input, bot);
@@ -896,56 +963,66 @@ async function proposalPreflight(api, context, payload, pinned, options) {
   const rebuilt = await prepareProposal(api, context, pinned, options);
   exactData(payload, rebuilt, 'proposal-substitution');
   const input = await sourceInput(api, context), bot = await publicBot(api, options.settings);
-  const candidate = new Map(input.inventory);
-  for (const [path, text] of Object.entries(rebuilt.prepared.updates)) {
-    const bytes = Buffer.from(text);
-    candidate.set(path, { bytes, mode: '100644', sha: preparation.gitObject('blob', bytes) });
-  }
-  for (const path of rebuilt.prepared.deletions) candidate.delete(path);
-  const expectedTree = preparation.treeOid(candidate);
-  let retained, predecessor;
+  const expectedTree = proposalTree(input.inventory, rebuilt.prepared);
+  let retained, predecessor, prior, rebuild;
   if (pinned.preparationKind === 'recovery') {
+    // A recovery record binds its own base; a moved base needs the next record.
     const recovery = await recoveryPreparation(api, context, input, bot);
     retained = recovery.retained; predecessor = recovery.predecessor;
     if (expectedTree !== recovery.expectedTree) fail('proposal-tree');
   } else {
-    retained = await retainedProposal(api, context, input.view, bot, input.pkg.version);
+    retained = await retainedProposal(api, context, input.view, bot, input.pkg.version, { movedBase: true });
     predecessor = retained.predecessor;
     if (retained.open) {
-      const parents = retained.head.parents;
-      if (parents.length === 1 && parents[0].sha === context.sha) {
+      await accountedBase(api, context, retained.open.base.sha);
+      const parents = retained.head.parents.map((p) => p.sha);
+      if (parents.length === 1 && parents[0] === context.sha) {
         // Preserve the explicitly supported legacy exact-open NEXT proposal.
         // Its already existing head is data, never a new rollover authority.
         const state = control.decideProposalState({ base: context.sha, currentMain: context.sha, expectedTree,
-          existing: { head: retained.head.sha, tree: retained.head.tree.sha, parent: parents[0].sha },
+          existing: { head: retained.head.sha, tree: retained.head.tree.sha, parent: parents[0] },
           pulls: [retained.open], complete: true });
         if (state.action !== 'no-op') fail('proposal-existing');
         await assertCurrentMain(api, context);
         return { rebuilt, expectedTree, predecessor: null, retained, state, bot };
       }
-      if (parents.length !== 2 || parents[0].sha !== context.sha) fail('proposal-existing');
-      const closed = await pages(api, `${prefix(context)}/pulls?state=closed&head=footprintjs:release/next&base=main`);
-      const previous = closed.filter((p) => p.head?.sha === parents[1].sha && p.merged_at);
-      if (previous.length !== 1) fail('proposal-existing');
-      predecessor = await mergedLineage(api, context, input.view, bot, previous[0].number, input.pkg.version);
-      await requireAncestor(api, context, predecessor.merge, context.sha);
+      if (parents.length !== 2) fail('proposal-head');
+      if (parents[0] === context.sha) {
+        // Built on this main: an exact head is a no-op, whether it rolled over an
+        // App merge directly or rebuilt an earlier generation of this proposal.
+        predecessor = await proposalLineage(api, context, input.view, bot, input.pkg.version, parents[1]);
+        if (parents[1] !== predecessor.head) prior = parents[1];
+      } else {
+        // Main moved under the open proposal: rebuild it on this main, keeping the
+        // old head as second parent so the branch still only fast-forwards.
+        await requireUnapproved(api, context, retained.open);
+        predecessor = await proposalLineage(api, context, input.view, bot, input.pkg.version, retained.head.sha);
+        rebuild = { authored: true, accounted: true, approved: false };
+      }
     }
   }
   if (predecessor.head === context.sha) fail('proposal-existing');
   const state = control.decideProposalState({ base: context.sha, currentMain: context.sha, expectedTree,
     existing: { head: retained.head.sha, tree: retained.head.tree.sha, parents: retained.head.parents.map((p) => p.sha) },
     pulls: retained.open ? [retained.open] : [], complete: true,
-    predecessor: { head: predecessor.head, closedMerged: true } });
-  if (!['rollover', 'no-op'].includes(state.action)) fail('proposal-existing');
+    predecessor: { head: predecessor.head, closedMerged: true },
+    ...(prior ? { prior } : {}), ...(rebuild ? { rebuild } : {}) });
+  if (!['rollover', 'no-op', 'rebuild'].includes(state.action)) fail('proposal-existing');
   await assertCurrentMain(api, context);
   return { rebuilt, expectedTree, predecessor, retained, state, bot };
+}
+function proposalBody(version, notes) {
+  return `Release App proposal for foottrace ${version}.\n\n${notes}\nAfter Claude's independent merge verdict for this exact head is recorded publicly and all current runtime/tested-tree/CodeQL checks pass, reconcile main/head/tested tree. The owner may submit personally or explicitly authorize Codex or Claude to submit the real GitHub APPROVED review on this final head through the owner's existing authorized User account, distinct from the App author, with current API permission write or admin. A delegated review names the submitting agent and the owner's explicit authorization. Standing FootTrace authorization remains sufficient within its stated scope; a changed head still requires fresh independent review, current checks and a fresh approval. An exchange verdict or comment is not that approval. No independent review is waived. No workflow auto-approval is added. This App-authored PR does not publish until normally merged and the Release App route verifies its authority. Owner App installation and npm trusted-publisher setup remain prerequisites; see docs/RELEASING.md.`;
 }
 async function writeProposal(api, context, payload, pinned, options = {}) {
   // The App writer's readable role repeats ALL publication/lineage/closure reads
   // before the FIRST blob/tree mutation. A planning-token 404 grants no write.
   const before = await proposalPreflight(api, context, payload, pinned, options),
-    { rebuilt, expectedTree, predecessor, bot } = before, base = prefix(context);
+    { rebuilt, expectedTree, bot } = before, base = prefix(context);
   if (before.state.action === 'no-op') return { action: 'no-op', pr: before.retained.open.number };
+  // rollover: [main, merged App head] for a new PR; rebuild: [main, open head] for the open PR.
+  const rebuild = before.state.action === 'rebuild', parents = before.state.parents;
+  exactData(parents, [context.sha, rebuild ? before.retained.head.sha : before.predecessor.head], 'proposal-existing');
   const entries = [];
   for (const [path, content] of Object.entries(rebuilt.prepared.updates)) {
     const blob = (await api('POST', `${base}/git/blobs`, { content, encoding: 'utf-8' })).data;
@@ -956,15 +1033,15 @@ async function writeProposal(api, context, payload, pinned, options = {}) {
   const tree = (await api('POST', `${base}/git/trees`, { base_tree: pinned.tree, tree: entries })).data;
   if (tree.sha !== expectedTree) fail('proposal-tree');
   const commit = (await api('POST', `${base}/git/commits`, {
-    message: `chore: release ${pinned.version}`, tree: expectedTree, parents: [context.sha, predecessor.head],
+    message: `chore: release ${pinned.version}`, tree: expectedTree, parents,
   })).data;
   if (!control.validSha(commit.sha)) fail('proposal-commit');
   const actual = (await api('GET', `${base}/git/commits/${commit.sha}`)).data;
   if (actual.sha !== commit.sha || actual.tree?.sha !== expectedTree) fail('proposal-commit');
-  exactData(actual.parents?.map((p) => p.sha), [context.sha, predecessor.head], 'proposal-commit');
+  exactData(actual.parents?.map((p) => p.sha), parents, 'proposal-commit');
   const fresh = await proposalPreflight(api, context, payload, pinned, options);
-  if (fresh.state.action !== 'rollover' || fresh.retained.head.sha !== before.retained.head.sha ||
-    fresh.expectedTree !== expectedTree) fail('proposal-existing');
+  if (fresh.state.action !== before.state.action || fresh.retained.head.sha !== before.retained.head.sha ||
+    fresh.retained.open?.number !== before.retained.open?.number || fresh.expectedTree !== expectedTree) fail('proposal-existing');
   // Provider-enforced FF preserves ancestry. It is deliberately not a CAS or
   // exclusivity claim; any partial effect/error is retained, never rolled back.
   const updated = (await api('PATCH', `${base}/git/refs/heads/release/next`, { sha: commit.sha, force: false })).data;
@@ -972,27 +1049,37 @@ async function writeProposal(api, context, payload, pinned, options = {}) {
   await assertCurrentMain(api, context);
   const current = (await api('GET', `${base}/git/ref/heads/release/next`)).data;
   if (current.object?.sha !== commit.sha) fail('proposal-existing');
-  const pr = (await api('POST', `${base}/pulls`, {
-      title: `Release ${pinned.version}`, head: 'release/next', base: 'main',
-      body: `Release App proposal for foottrace ${pinned.version}.\n\n${rebuilt.prepared.notes}\nAfter Claude's independent merge verdict for this exact head is recorded publicly and all current runtime/tested-tree/CodeQL checks pass, reconcile main/head/tested tree. The owner may submit personally or explicitly authorize Codex or Claude to submit the real GitHub APPROVED review on this final head through the owner's existing authorized User account, distinct from the App author, with current API permission write or admin. A delegated review names the submitting agent and the owner's explicit authorization. Standing FootTrace authorization remains sufficient within its stated scope; a changed head still requires fresh independent review, current checks and a fresh approval. An exchange verdict or comment is not that approval. No independent review is waived. No workflow auto-approval is added. This App-authored PR does not publish until normally merged and the Release App route verifies its authority. Owner App installation and npm trusted-publisher setup remain prerequisites; see docs/RELEASING.md.`,
-    })).data;
-  const requireCreated = (value) => {
+  const content = { title: `Release ${pinned.version}`, body: proposalBody(pinned.version, rebuilt.prepared.notes) };
+  const pr = rebuild
+    ? (await api('PATCH', `${base}/pulls/${before.retained.open.number}`, content)).data
+    : (await api('POST', `${base}/pulls`, { ...content, head: 'release/next', base: 'main' })).data;
+  const requireCurrent = (value) => {
+    // A rebuilt PR keeps its number; GitHub may report its base as of an earlier
+    // sync, and later runs account for that base before any decision.
     if (!Number.isSafeInteger(value.number) || value.number <= 0 || value.number !== pr.number || value.state !== 'open' ||
-      value.head?.sha !== commit.sha || value.base?.sha !== context.sha ||
+      (rebuild && value.number !== before.retained.open.number) ||
+      value.head?.sha !== commit.sha || (!rebuild && value.base?.sha !== context.sha) ||
       value.user?.id !== bot.id || value.user.type !== 'Bot' || value.user.login !== bot.login ||
       !control.sameRepo(value.head?.repo, context.repository) || !control.sameRepo(value.base?.repo, context.repository) ||
       value.head.ref !== 'release/next' || value.base.ref !== 'main') fail('proposal-pr');
   };
   // A returned inconsistency is permanent evidence for this attempt. Never
   // erase it because a subsequent read happens to look healthy again.
-  requireCreated(pr);
+  requireCurrent(pr);
   const created = (await api('GET', `${base}/pulls/${pr.number}`)).data;
-  requireCreated(created);
+  requireCurrent(created);
+  // The approval read and the ref advance cannot be one step. An Approve that
+  // landed between them now sits on a superseded head: name it rather than
+  // return a clean rebuild. Publication still binds approval to the exact head.
+  if (rebuild) {
+    const reviews = await pages(api, `${base}/pulls/${pr.number}/reviews`);
+    if (reviews.some((r) => r.state === 'APPROVED' && r.commit_id !== commit.sha)) fail('proposal-approved');
+  }
   await assertCurrentMain(api, context);
   const finalRef = (await api('GET', `${base}/git/ref/heads/release/next`)).data;
   if (finalRef.object?.sha !== commit.sha) fail('proposal-existing');
   await assertCurrentMain(api, context);
-  return { action: 'created', pr: pr.number, head: commit.sha, tree: expectedTree };
+  return { action: rebuild ? 'rebuilt' : 'created', pr: pr.number, head: commit.sha, tree: expectedTree };
 }
 async function producerIdentity(api, context, name, completed = false) {
   const run = (await api('GET', `${prefix(context)}/actions/runs/${context.runId}`)).data;

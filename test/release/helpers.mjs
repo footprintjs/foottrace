@@ -277,6 +277,7 @@ export function managedReleaseFixture({ version = '1.10.0', published = false, m
           commits: ordered.slice((page - 1) * 100, page * 100) } };
       }
       if (/\/commits\/[a-f0-9]{40}\/pulls$/.test(path)) return { data: pulls.filter((p) => p.merge_commit_sha === path.split('/').at(-2)) };
+      if (/\/pulls\/\d+\/reviews$/.test(path)) return { data: (pulls.find((p) => p.number === Number(path.split('/').at(-2))) ?? assert.fail('Unknown PR')).reviews ?? [] };
       if (/\/pulls\/\d+$/.test(path)) return { data: pulls.find((p) => p.number === Number(path.split('/').at(-1))) ?? assert.fail('Unknown PR') };
       if (path.endsWith('/pulls')) return { data: pulls.filter((p) => p.state === url.searchParams.get('state')) };
       if (/\/releases\/\d+\/assets$/.test(path)) return { data: [...releases.values()].find((r) => r.id === Number(path.split('/').at(-2)))?.assets ?? [] };
@@ -294,7 +295,14 @@ export function managedReleaseFixture({ version = '1.10.0', published = false, m
     }
     if (method === 'PATCH' && path.endsWith('/git/refs/heads/release/next')) {
       assert.equal(body.force, false); assert(ancestors(body.sha).has(tip), 'Provider FF contract'); tip = body.sha;
+      // An open PR follows its branch; its reported base is left as of creation.
+      for (const p of pulls) if (p.state === 'open' && p.head.ref === 'release/next') p.head = { ...p.head, sha: tip };
       return { data: { object: { type: 'commit', sha: tip } } };
+    }
+    if (method === 'PATCH' && /\/pulls\/\d+$/.test(path)) {
+      const p = pulls.find((p) => p.number === Number(path.split('/').at(-1))) ?? assert.fail('Unknown PR');
+      assert.deepEqual(Object.keys(body).sort(), ['body', 'title']); Object.assign(p, body);
+      return { data: p };
     }
     assert.fail(`Unexpected synthetic ${method} ${route}`);
   };
@@ -311,9 +319,11 @@ export function managedReleaseFixture({ version = '1.10.0', published = false, m
     const inventory = trees.get(commits.get(source).tree.sha), pkg = JSON.parse(inventory.get('package.json').bytes), v = pkg.version;
     const bytes = syntheticPackageArchive(v), info = require('../../scripts/release-archive.cjs').inspectArchive(bytes, { package: 'foottrace', version: v });
     const raw = Buffer.from(JSON.stringify({ version: v, runId: 10, runAttempt: 1, sha: source, integrity: info.integrity }));
-    const changelog = inventory.get('CHANGELOG.md').bytes.toString(), notes = changelog.split('\n').slice(4).join('\n').trim() + '\n';
-    tags.set(`v${v}`, source); releases.set(`v${v}`, { id: 20, tag_name: `v${v}`, target_commitish: source, body: notes, draft: false, prerelease: false,
-      assets: [{ id: 21, name: `publish-attempt-${v}.json`, size: raw.length, state: 'uploaded', raw }] });
+    const changelog = inventory.get('CHANGELOG.md').bytes.toString(),
+      notes = changelog.split('\n').slice(4).join('\n').split('\n## ')[0].trim() + '\n'; // top section only
+    const ids = 20 + 2 * releases.size; // distinct per synthetic release
+    tags.set(`v${v}`, source); releases.set(`v${v}`, { id: ids, tag_name: `v${v}`, target_commitish: source, body: notes, draft: false, prerelease: false,
+      assets: [{ id: ids + 1, name: `publish-attempt-${v}.json`, size: raw.length, state: 'uploaded', raw }] });
     if (!pending) { registry.set(v, { bytes, metadata: { name: 'foottrace', version: v, dist: { integrity: info.integrity, shasum: info.shasum, tarball: `https://registry.npmjs.org/foottrace/-/foottrace-${v}.tgz` } } }); latest = v; }
   };
   if (published) publish(originalMerge);
