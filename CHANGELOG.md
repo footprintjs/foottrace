@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.12.0 — 2026-11-07
+
+### Added
+
+- `readRunEvidence(stored, legs, limits?)` reads a run's evidence back from its stored logs: `decisions`, `stops`, `reads`, `attention`, `stages` and `running` channels and `control(id)`, each saying `collected`, `partial` or `not-collected`, so a file with no evidence, including every file an older writer made, reads `not-collected` and never "nothing happened". A chain that cannot finish reads `partial`, never ungoverned: a parentless execution that is not the root is `resumed-leg`, and a `parent` or `resumes` is never followed into a log the caller did not name. A record file is untrusted input: own data only, every list, text and payload capped by `RUN_EVIDENCE_LIMITS` (raised per call), forged rows and anything past a cap listed in `unread` and read as `partial`. Integrity here is not authentication.
+- `createStoredRecordGraph` fills `reads`, `controlDeps` and `attention` from a file that holds its own evidence, where the host omits them; a host's own map wins. Its entry cap now counts commits rather than every entry, and every row spends one field, so a log with many notes no longer reads as too large. A stage-level reads map may hold up to 256 names, up from 128.
+- `foottrace/write` can keep a run's evidence beside its log: `new EventLog(base, { sink, address, collects })` writes `opened.collects`, `record(bundle, about)` and `CommitStamp.about` write `commit.about`, `noteRun` writes `run.decision`, `run.stop` and `run.stage` notes with a `seq` the log stamps, and `close` writes `closed.runNotes`. `keepsEvidence` is what a writer's seam asks first. These are optional fields and notes: readers of earlier versions read the same record, a bundle's bytes never move, and a log with no `collects` has the same entries and own fields as before. A third-party adapter that copies named fields must copy `collects`, `about` and `runNotes`; one that does not stays valid and its record reads as not collected.
+
 ## 1.11.1 — 2026-11-05
 
 ### Fixed
