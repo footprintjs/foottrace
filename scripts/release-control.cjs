@@ -244,15 +244,27 @@ function decideProposalState(w) {
     if (!validSha(w.expectedTree) || !validSha(w.predecessor.head) || w.predecessor.closedMerged !== true)
       return no;
     if (w.pulls.length === 0)
-      return w.existing.head === w.predecessor.head
+      return w.existing.head === w.predecessor.head && w.prior === undefined && w.rebuild === undefined
         ? { action: 'rollover', force: false, parents: [w.base, w.predecessor.head] }
         : no;
-    if (!Array.isArray(w.existing.parents) || w.existing.parents.length !== 2 ||
-      w.existing.parents[0] !== w.base || w.existing.parents[1] !== w.predecessor.head ||
-      w.existing.tree !== w.expectedTree || !validSha(w.existing.head)) return no;
-    return w.pulls.length === 1 && w.pulls[0].head?.sha === w.existing.head &&
-      w.pulls[0].base?.ref === 'main' && w.pulls[0].state === 'open'
-      ? { action: 'no-op', force: false } : no;
+    const open = w.pulls[0];
+    if (open.head?.sha !== w.existing.head || open.base?.ref !== 'main' || open.state !== 'open' ||
+      !validSha(w.existing.head) || !Array.isArray(w.existing.parents) || w.existing.parents.length !== 2) return no;
+    // Main moved under the open App proposal. The caller has shown the head is the
+    // runner's own build on an older main, that older main is in current main's
+    // history, and no approval exists; the new head descends from the old one.
+    if (w.rebuild !== undefined) {
+      const r = w.rebuild;
+      return w.prior === undefined && w.existing.parents[0] !== w.base &&
+        r?.authored === true && r.accounted === true && r.approved === false
+        ? { action: 'rebuild', force: false, parents: [w.base, w.existing.head] } : no;
+    }
+    // `prior` is an earlier generation of this proposal the caller verified.
+    if (w.prior !== undefined && (!validSha(w.prior) || w.prior === w.predecessor.head)) return no;
+    const second = w.prior ?? w.predecessor.head;
+    if (w.existing.parents[0] !== w.base || w.existing.parents[1] !== second || w.existing.tree !== w.expectedTree)
+      return no;
+    return { action: 'no-op', force: false };
   }
   if (w.existing.parent !== w.base || w.existing.tree !== w.expectedTree || !validSha(w.existing.head)) return no;
   if (
