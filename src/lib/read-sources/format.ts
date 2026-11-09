@@ -8,3 +8,12 @@ export const READ_SOURCE_V1_CEILINGS: ReadSourceLimits = Object.freeze({
   maxOrigins: 65536,
   maxStaging: 16384,
 });
+
+/** Wire-v2 is frozen independently: changing one format's ceiling must not silently change another. */
+export const READ_SOURCE_V2_CEILINGS: ReadSourceLimits = Object.freeze({
+  maxOccurrences: 65536,
+  maxPerExecution: 16384,
+  maxBytes: 16 * 1024 * 1024,
+  maxOrigins: 65536,
+  maxStaging: 16384,
+});

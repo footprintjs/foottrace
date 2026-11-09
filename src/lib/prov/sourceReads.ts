@@ -1,9 +1,11 @@
 import { reference } from './translation.js';
 import type { ProvMapping } from './mapping.js';
+import { mapWriteReadPrefixes } from './writeReadPrefixes.js';
 
 /** Usage is a recorded read of a proven entity. Output derivation remains a separate, unavailable fact. */
 export function mapSourceReads(mapping: ProvMapping): void {
   const { record, budget, ids, output } = mapping;
+  const emitted = new Map<number, string>();
   for (const read of record.readSources?.observations ?? []) {
     if (output.full || !budget.spend('reads') || !budget.spend('work')) return;
     const { occurrence } = read,
@@ -54,6 +56,8 @@ export function mapSourceReads(mapping: ProvMapping): void {
       })
     )
       return;
+    emitted.set(occurrence.ordinal, readId);
     if (!output.add({ '@id': ids.activity(runtimeStageId), 'prov:used': reference(entity) })) return;
   }
+  mapWriteReadPrefixes(mapping, emitted);
 }

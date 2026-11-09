@@ -103,7 +103,8 @@ export function childrenForRecordNode(
   if (scope.readSources) {
     const data = sourceDataChildren(scope, node, maximumEdges);
     edges.push(...data.edges);
-    complete = data.complete && sourceChildrenCollected(node) && complete;
+    // Possible downstream output influence limits impact, never an exact backward cause.
+    complete = data.complete && !data.possible && sourceChildrenCollected(node) && complete;
   } else {
     if (!allStageReadsCollected(scope)) complete = false;
     complete = appendDataChildren(scope, identity, commitIndex, maximumEdges, edges) && complete;

@@ -1,4 +1,5 @@
-import { READ_SOURCE_V1_CEILINGS } from './format.js';
+import { READ_SOURCE_V1_CEILINGS, READ_SOURCE_V2_CEILINGS } from './format.js';
+import { decodeWriteReadPrefixes } from './write-prefixes/codec.js';
 import type { ReadSource, ReadSourceOccurrence, ReadSourceSnapshot } from './types.js';
 import { READ_SOURCE_GAPS } from './types.js';
 import {
@@ -32,8 +33,10 @@ function sourceOf(value: unknown): ReadSource {
 /** Structural admission only; a consumer must separately validate scope and referenced native rows. */
 export function decodeReadSourceSnapshot(value: unknown): ReadSourceSnapshot | undefined {
   try {
-    if (sourceOwn(value, 'version') !== 1) return undefined;
-    const limits = sourceLimits(sourceOwn(value, 'limits'), READ_SOURCE_V1_CEILINGS);
+    const version = sourceOwn(value, 'version');
+    if (version !== 1 && version !== 2) return undefined;
+    const ceiling = version === 1 ? READ_SOURCE_V1_CEILINGS : READ_SOURCE_V2_CEILINGS;
+    const limits = sourceLimits(sourceOwn(value, 'limits'), ceiling, ceiling);
     let remaining = limits.maxBytes;
     const spend = (bytes: number) => {
       remaining -= bytes;
@@ -49,8 +52,7 @@ export function decodeReadSourceSnapshot(value: unknown): ReadSourceSnapshot | u
     });
     const segment = sourceInteger(sourceOwn(value, 'segment'), 1);
     spend(
-      sourceBytes({ version: 1, limits, address, segment, status: 'captured', occurrences: [], gaps: [] }) -
-        headerStrings,
+      sourceBytes({ version, limits, address, segment, status: 'captured', occurrences: [], gaps: [] }) - headerStrings,
     );
     const status = sourceOwn(value, 'status');
     if (status !== 'captured' && status !== 'partial' && status !== 'failed' && status !== 'retired') return undefined;
@@ -61,6 +63,7 @@ export function decodeReadSourceSnapshot(value: unknown): ReadSourceSnapshot | u
       limits.maxOccurrences,
       (input): ReadSourceOccurrence => {
         const ordinal = sourceInteger(sourceOwn(input, 'ordinal'), 1);
+        const completed = version === 2 ? sourceInteger(sourceOwn(input, 'completed'), 1) : undefined;
         if (ordinal <= previous) throw new TypeError('read sources: invalid order');
         previous = ordinal;
         const owner = sourceOwner(input),
@@ -88,6 +91,7 @@ export function decodeReadSourceSnapshot(value: unknown): ReadSourceSnapshot | u
         });
         const row = Object.freeze({
           ordinal,
+          ...(completed === undefined ? {} : { completed }),
           ...owner,
           attemptStatus: owner.attemptId === undefined ? ('unavailable' as const) : ('known' as const),
           ...(frame === undefined ? {} : { frame }),
@@ -120,14 +124,19 @@ export function decodeReadSourceSnapshot(value: unknown): ReadSourceSnapshot | u
     if (gaps.length) remaining++;
     if (status === 'captured' && (gaps.length || occurrences.some((row) => row.source.kind === 'unavailable')))
       return undefined;
+    const writeReadPrefixes =
+      version === 2
+        ? decodeWriteReadPrefixes(sourceOwn(value, 'writeReadPrefixes'), occurrences, limits, spend)
+        : undefined;
     const result: ReadSourceSnapshot = Object.freeze({
-      version: 1,
+      version,
       address,
       segment,
       status,
       occurrences,
       gaps,
       limits,
+      ...(writeReadPrefixes ? { writeReadPrefixes } : {}),
     });
     return sourceBytes(result) <= limits.maxBytes ? result : undefined;
   } catch {

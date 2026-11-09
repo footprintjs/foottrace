@@ -51,7 +51,11 @@ export const READ_SOURCE_DEFAULTS: ReadSourceLimits = Object.freeze({
   maxOrigins: 4096,
   maxStaging: 2048,
 });
-export function sourceLimits(value?: unknown, defaults: ReadSourceLimits = READ_SOURCE_DEFAULTS): ReadSourceLimits {
+export function sourceLimits(
+  value?: unknown,
+  defaults: ReadSourceLimits = READ_SOURCE_DEFAULTS,
+  ceilings: ReadSourceLimits = READ_SOURCE_V1_CEILINGS,
+): ReadSourceLimits {
   const result = { ...defaults };
   for (const key of Object.keys(result) as (keyof ReadSourceLimits)[]) {
     const limit = value === undefined ? undefined : sourceOwn(value, key);
@@ -60,7 +64,7 @@ export function sourceLimits(value?: unknown, defaults: ReadSourceLimits = READ_
       typeof limit !== 'number' ||
       !Number.isSafeInteger(limit) ||
       limit < 1 ||
-      limit > READ_SOURCE_V1_CEILINGS[key] ||
+      limit > ceilings[key] ||
       (key === 'maxBytes' && limit < 2048)
     )
       throw new TypeError('read sources: invalid limits');

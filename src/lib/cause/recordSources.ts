@@ -8,6 +8,7 @@ import type { CommitBundle } from '../memory/types.js';
 import { nativeExecution } from '../ids/nativeExecution.js';
 import { decodeReadSourceSnapshot } from '../read-sources/codec.js';
 import type { ReadSourceGap, ReadSourceOccurrence, ReadSourceSnapshot } from '../read-sources/types.js';
+import { prepareWriteReadPrefixes, type PreparedWriteReadPrefixes } from '../read-sources/write-prefixes/admit.js';
 import {
   addressKey,
   dataCopy,
@@ -44,6 +45,7 @@ export interface PreparedReadSources {
   readonly byOwner: ReadonlyMap<string, readonly ExactRecordRead[]>;
   readonly byCommit: ReadonlyMap<number, readonly ExactRecordRead[]>;
   readonly gaps: readonly GapCode[];
+  readonly writePrefixes?: PreparedWriteReadPrefixes<ExactRecordRead>;
 }
 const sourceGapCodes: Readonly<Record<ReadSourceGap, GapCode>> = {
   'composite-unsupported': 'unsupported',
@@ -77,6 +79,13 @@ export function prepareReadSources(
     // The native snapshot may share frozen descriptors. Its codec owns inert copying; generic cycle refusal would reject valid sharing.
     const occurrences = recordList(recordOwn(rawRecord, 'occurrences'), Math.min(65536, Math.floor(budget.left / 12)));
     spend(budget, occurrences.length * 12 + 1);
+    if (recordOwn(rawRecord, 'version') === 2) {
+      const prefixes = recordOwn(rawRecord, 'writeReadPrefixes');
+      const writes = recordList(recordOwn(prefixes, 'writes'), Math.min(65536, Math.floor(budget.left / 12)));
+      spend(budget, writes.length * 12 + 1);
+      const frames = recordList(recordOwn(prefixes, 'frames'), Math.min(65536, Math.floor(budget.left / 8)));
+      spend(budget, frames.length * 8 + 1);
+    }
     const record = decodeReadSourceSnapshot(rawRecord);
     if (!record || addressKey(record.address) !== addressKey(address)) throw new RecordRefusal();
     if (address.drillPath.length) throw new RecordRefusal('scope-boundary');
@@ -197,7 +206,8 @@ export function prepareReadSources(
     }
     // An optional binding without a known authorized attempt cannot establish empty execution coverage.
     const owners = new Set([...bindings].filter(([, binding]) => binding.attempts.size > 0).map(([id]) => id));
-    return { observations, owners, byOwner, byCommit, gaps };
+    const writePrefixes = prepareWriteReadPrefixes(record, log, observations, bindings, (work) => spend(budget, work));
+    return { observations, owners, byOwner, byCommit, gaps, ...(writePrefixes ? { writePrefixes } : {}) };
   } catch (error) {
     return {
       observations: [],

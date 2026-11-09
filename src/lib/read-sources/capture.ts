@@ -4,6 +4,8 @@ import type { TraceEntry } from '../memory/types.js';
 import { sourceBytes, sourceKey, sourceList, sourceOwner } from './admission.js';
 import { createOriginIndex, type OriginIndex } from './originIndex.js';
 import { SourceStaging } from './staging.js';
+import { WritePrefixBook, type PrefixFrame } from './write-prefixes/book.js';
+import type { CommitBundle } from '../memory/types.js';
 import { confirmOrigins, invalidateOrigins } from './commitFacts.js';
 import type {
   ReadSource,
@@ -20,6 +22,7 @@ export interface SourceFrame {
   readonly clock: number;
   readonly staging: SourceStaging;
   disposition: ReadSourceDisposition;
+  readonly prefix?: PrefixFrame;
 }
 
 /** One opted-in native log lifetime. Hosts cannot supply an observer that selects a read's value. */
@@ -44,10 +47,36 @@ export class ReadSourceCapture {
   private failed = false;
   private discardedAttemptsIncomplete = false;
   private stopped = false;
-  constructor(readonly address: LogAddress, readonly segment: number, readonly limits: ReadSourceLimits) {
+  private readonly prefixes?: WritePrefixBook;
+  constructor(
+    readonly address: LogAddress,
+    readonly segment: number,
+    readonly limits: ReadSourceLimits,
+    writeReadPrefixes = false,
+  ) {
     this.index = createOriginIndex(limits.maxOrigins, segment, limits.maxBytes);
-    this.bytes = sourceBytes({ version: 1, address, segment, status: 'captured', occurrences: [], gaps: [], limits });
+    this.bytes = sourceBytes({
+      version: writeReadPrefixes ? 2 : 1,
+      address,
+      segment,
+      status: 'captured',
+      occurrences: [],
+      gaps: [],
+      limits,
+      ...(writeReadPrefixes
+        ? { writeReadPrefixes: { version: 1, status: 'captured', frames: [], writes: [], omitted: 0 } }
+        : {}),
+    });
     if (this.bytes + 1024 > limits.maxBytes) throw new TypeError('read sources: invalid limits');
+    if (writeReadPrefixes)
+      this.prefixes = new WritePrefixBook(limits.maxOccurrences, limits.maxOrigins, (bytes) => {
+        if (this.bytes + bytes > limits.maxBytes - 1024) {
+          // Write-prefix retention is independently partial; it does not erase exact read coverage.
+          return false;
+        }
+        this.bytes += bytes;
+        return true;
+      });
   }
   get retired(): boolean {
     return this.stopped;
@@ -73,6 +102,7 @@ export class ReadSourceCapture {
       return undefined;
     }
     const id = ++this.frames;
+    const prefix = this.prefixes?.frame(id, address);
     const staging = new SourceStaging(
       id,
       (bytes, previousBytes) => {
@@ -93,9 +123,22 @@ export class ReadSourceCapture {
         this.staged -= count;
         this.stagedBytes -= bytes;
       },
+      prefix ? (path, verb, redacted) => this.prefixes!.stage(prefix, path, verb, redacted) : undefined,
+      prefix
+        ? () => {
+            prefix.invalid = true;
+            this.gap('capture-failed');
+          }
+        : undefined,
     );
     this.active.set(id, this.clock);
-    return { id, clock: this.clock, staging, disposition: 'active' };
+    return { id, clock: this.clock, staging, disposition: 'active', ...(prefix ? { prefix } : {}) };
+  }
+  bindOwner(frame: SourceFrame | undefined, owner: ReadSourceOwner): void {
+    if (frame?.prefix) this.prefixes?.bind(frame.prefix, owner);
+  }
+  confirmPrefixes(frame: SourceFrame | undefined, bundle: CommitBundle): void {
+    if (frame?.prefix && frame.disposition !== 'discarded') this.prefixes?.commit(frame.prefix, bundle);
   }
   end(frame: SourceFrame | undefined, disposition: ReadSourceDisposition): void {
     if (!frame) return;
@@ -103,6 +146,7 @@ export class ReadSourceCapture {
     if (this.retainedFrames.has(frame.id)) this.dispositions.set(frame.id, frame.disposition);
     this.active.delete(frame.id);
     frame.staging.dispose();
+    frame.prefix?.writes.clear();
     this.prune();
     if (frame && disposition === 'discarded') {
       for (const row of this.occurrences)
@@ -228,8 +272,14 @@ export class ReadSourceCapture {
       if (abandoned) source = { kind: 'unavailable', reason: 'scope-retired' };
       else if (owner.attemptId !== undefined && this.discardedAttemptsIncomplete)
         source = { kind: 'unavailable', reason: this.failed ? 'capture-failed' : 'budget-exhausted' };
+      const completed = frame.prefix ? this.prefixes?.nextCompletion : undefined;
+      if (frame.prefix && completed === undefined) {
+        this.gap('budget-exhausted');
+        return undefined;
+      }
       const occurrence: ReadSourceOccurrence = Object.freeze({
         ordinal,
+        ...(completed === undefined ? {} : { completed }),
         ...owner,
         attemptStatus: owner.attemptId === undefined ? 'unavailable' : 'known',
         ...(frame ? { frame: frame.id } : {}),
@@ -244,12 +294,14 @@ export class ReadSourceCapture {
         this.gap('budget-exhausted');
         return undefined;
       }
+      // Charge the retained occurrence before completing its manifest: rejected metadata is not a completed retained read.
+      this.bytes += bytes;
+      if (frame.prefix) this.prefixes?.completed(frame.prefix, owner);
       if (discardedHere && owner.attemptId) this.abandoned.add(owner.attemptId);
       if (frame) {
         this.retainedFrames.add(frame.id);
         if (frame.disposition !== 'active') this.dispositions.set(frame.id, frame.disposition);
       }
-      this.bytes += bytes;
       this.executions.set(owner.runtimeStageId, count + 1);
       // Only callback reentrancy needs insertion; the usual monotonic path appends.
       let position = this.occurrences.length;
@@ -289,13 +341,14 @@ export class ReadSourceCapture {
       else gaps[index] = pending;
     }
     return Object.freeze({
-      version: 1,
+      version: this.prefixes ? 2 : 1,
       address: this.address,
       segment: this.segment,
       status: this.stopped ? 'retired' : this.failed ? 'failed' : gaps.length ? 'partial' : 'captured',
       occurrences: Object.freeze(occurrences),
       gaps: Object.freeze(gaps),
       limits: this.limits,
+      ...(this.prefixes ? { writeReadPrefixes: this.prefixes.snapshot() } : {}),
     });
   }
 }

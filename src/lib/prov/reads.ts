@@ -3,6 +3,7 @@ import { pathSegments } from '../record-paths/codec.js';
 import { reference } from './translation.js';
 import type { ProvMapping } from './mapping.js';
 import type { AdmittedRow } from './types.js';
+import { writePrefixKey } from '../read-sources/write-prefixes/admit.js';
 
 function lastRow(rows: readonly AdmittedRow[], key: string): AdmittedRow | undefined {
   for (let index = rows.length - 1; index >= 0; index--) if (rows[index].path === key) return rows[index];
@@ -63,6 +64,11 @@ export function mapReads(mapping: ProvMapping): void {
     }
     for (const commit of commits)
       for (const row of commit.rows) {
+        if (
+          record.readSources?.writePrefixes?.writes.get(writePrefixKey(row.commitIdx, row.rowIdx))?.status ===
+          'observed'
+        )
+          continue;
         const target = ids.write(row.commitIdx, row.rowIdx, mapping.hidden(row.path) ? undefined : row.path);
         if (!mapping.entities.has(target)) continue;
         const candidates = row.readKeys ?? keys;

@@ -17,12 +17,15 @@ export class SourceStaging {
   /** A native partial/abandoned mutation cannot be reconstructed from its later final stage stamp. */
   fail(): void {
     this.lost = 'capture-failed';
+    this.prefixFailure?.();
   }
   constructor(
     readonly frame: number,
     private readonly generation: (bytes: number, previousBytes?: number) => number | undefined,
     private readonly address: readonly string[] = [],
     private readonly release: (count: number, bytes: number) => void = () => {},
+    private readonly prefix?: (path: readonly (string | number)[], verb: string, redacted: boolean) => void,
+    private readonly prefixFailure?: () => void,
   ) {}
   private rootPath(path: readonly (string | number)[]): readonly (string | number)[] {
     const under = this.address.every((part, index) => path[index] === part);
@@ -30,6 +33,7 @@ export class SourceStaging {
   }
   write(path: readonly (string | number)[], verb: string, redacted: boolean): void {
     if (this.closed) return;
+    this.prefix?.(path, verb, redacted);
     if (
       path.length > 64 ||
       path.some((part) => (typeof part !== 'string' && typeof part !== 'number') || String(part).length > 1024)

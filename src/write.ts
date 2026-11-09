@@ -98,3 +98,4 @@ export type {
   ReadSourceOwner,
   ReadSourceSnapshot,
 } from './lib/read-sources/types.js';
+export type { WriteReadPrefix, WriteReadFrame, WriteReadPrefixes } from './lib/read-sources/write-prefixes/types.js';

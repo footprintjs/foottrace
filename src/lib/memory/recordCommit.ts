@@ -1,4 +1,5 @@
 import { captureFor } from '../read-sources/bindings.js';
+import type { SourceFrame } from '../read-sources/capture.js';
 /**
  * recordCommit — one stage's commit onto the record (C1, L3). The one owner of a bundle's bytes and
  * of where a commit lands: live state, the redacted mirror, the log.
@@ -51,6 +52,7 @@ export interface CommitTargets {
   state: SharedMemory;
   mirror?: SharedMemory;
   log?: EventLog;
+  sourceFrame?: SourceFrame;
 }
 
 type Names = Pick<CommitBundle, 'stage' | 'stageId' | 'runtimeStageId' | 'untrackedSources' | 'tags' | 'phase'>;
@@ -73,6 +75,11 @@ export function recordCommit(payload: CommitPayload | undefined, stamp: CommitSt
   if (!into.log) return;
   const bundle = bundleOf(overwrite, updates, [...redactedPaths], trace, names);
   into.log.record(bundle, about);
+  try {
+    capture?.confirmPrefixes(into.sourceFrame, bundle);
+  } catch {
+    capture?.poison();
+  }
   if (capture && capture === captureFor(into.log) && sourceClock !== undefined && bundle.idx !== undefined) {
     capture.confirm(sourceClock, bundle.idx, trace, redactedPaths);
   }

@@ -1,4 +1,5 @@
 import type { LogAddress } from '../memory/eventPosition.js';
+import type { WriteReadPrefixes } from './write-prefixes/types.js';
 
 /** Version 1 records root-key selections, never values or semantic derivation. */
 export const READ_SOURCE_GAPS = [
@@ -23,6 +24,8 @@ export interface ReadSourceOwner {
 export type ReadSourceDisposition = 'active' | 'released' | 'discarded';
 export interface ReadSourceOccurrence extends ReadSourceOwner {
   readonly ordinal: number;
+  /** Source format 2: completion sequence, distinct from pre-read reservation order. */
+  readonly completed?: number;
   readonly attemptStatus: 'known' | 'unavailable';
   readonly frame?: number;
   readonly key: string;
@@ -38,11 +41,13 @@ export interface ReadSourceLimits {
   readonly maxStaging: number;
 }
 export interface ReadSourceSnapshot {
-  readonly version: 1;
+  readonly version: 1 | 2;
   readonly address: LogAddress;
   readonly segment: number;
   readonly status: 'captured' | 'partial' | 'failed' | 'retired';
   readonly occurrences: readonly ReadSourceOccurrence[];
   readonly gaps: readonly { readonly reason: ReadSourceGap; readonly count: number; readonly exact: boolean }[];
   readonly limits: ReadSourceLimits;
+  /** Present only in source format 2, enabled explicitly by the native writer. */
+  readonly writeReadPrefixes?: WriteReadPrefixes;
 }

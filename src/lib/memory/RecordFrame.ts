@@ -107,6 +107,7 @@ export class RecordFrame {
   private readAttempts?: Set<string>;
   private readAttemptsOmitted?: number;
   #sourceFrame?: SourceFrame;
+  #sourceOwner?: ReadSourceOwner;
 
   constructor(state: SharedMemory, log?: EventLog, address: readonly string[] = []) {
     this.state = state;
@@ -131,6 +132,31 @@ export class RecordFrame {
   /** The two dials the frame encodes under from its next buffer and its next read on (law 4, 5). */
   useEncoding(encoding: RecordEncoding): void {
     this.encoding = encoding;
+  }
+  /** Bind actual native execution/attempt ownership for this frame incarnation, including empty read prefixes. */
+  useReadSourceOwner(owner?: ReadSourceOwner): void {
+    const capture = captureFor(this.state);
+    if (!capture || capture !== captureFor(this.log)) return;
+    if (owner === undefined) {
+      this.#sourceOwner = undefined;
+      if (this.#sourceFrame) capture.poison(); // A new owner cannot borrow an already touched incarnation.
+      return;
+    }
+    try {
+      const next = sourceOwner(owner);
+      if (
+        this.#sourceOwner &&
+        (this.#sourceOwner.runtimeStageId !== next.runtimeStageId || this.#sourceOwner.attemptId !== next.attemptId)
+      ) {
+        capture.poison();
+        return;
+      }
+      this.#sourceOwner = Object.freeze(next);
+      // Ownership is pending data: binding must not move the native first-touch read boundary.
+      capture.bindOwner(this.#sourceFrame, next);
+    } catch {
+      capture.poison();
+    }
   }
 
   /** The redacted mirror, if the run keeps one. */
@@ -202,6 +228,7 @@ export class RecordFrame {
         }
         try {
           this.#sourceFrame = capture.frame(this._address);
+          if (this.#sourceOwner) capture.bindOwner(this.#sourceFrame, this.#sourceOwner);
         } catch {
           capture.poison();
         }
@@ -343,6 +370,7 @@ export class RecordFrame {
       try {
         this.firstTouch();
         frame = this.#sourceFrame;
+        if (capture && admittedOwner) capture.bindOwner(frame, admittedOwner);
         value = this.readValue(path, key, capture ? observation : undefined);
       } catch (error) {
         capture?.poison();
@@ -463,7 +491,12 @@ export class RecordFrame {
    */
   commit(stampOf: () => CommitStamp): void {
     const payload = this.buffer?.commit();
-    recordCommit(payload, stampOf(), { state: this.state, mirror: this._mirror, log: this.log });
+    recordCommit(payload, stampOf(), {
+      state: this.state,
+      mirror: this._mirror,
+      log: this.log,
+      sourceFrame: this.#sourceFrame,
+    });
   }
 
   /**
@@ -486,6 +519,7 @@ export class RecordFrame {
     }
     this.buffer = undefined;
     this.base = undefined;
+    this.#sourceOwner = undefined;
   }
 
   /**
