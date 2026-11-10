@@ -99,13 +99,20 @@ export function deepEqual(a: any, b: any, opaque: OpaqueRule = 'identity'): bool
 export type OpaqueRule = 'identity' | 'copies';
 
 /**
- * Object pairs met so far, keyed `a → the b's it has been paired with`. Created
- * lazily by the first object pair, so primitive compares allocate nothing.
- * Never pruned: every `false` returns straight up to the caller (each recursive
- * call short-circuits on it), so nothing is looked up after a mismatch — a
- * stored pair is either still under comparison or already known equal.
+ * Object pairs met so far. Created lazily by the first object pair, so primitive
+ * compares allocate nothing. A stored pair is either still under comparison or
+ * already known equal: every `false` returns straight up to the caller (each
+ * recursive call short-circuits on it), so nothing is looked up after a mismatch.
+ * The one place a `false` does NOT end the comparison is a set, which tries a
+ * member against candidates that do not match — see {@link tryPair}, which
+ * forgets what a failed try met.
  */
-type SeenPairs = WeakMap<object, WeakSet<object>>;
+interface SeenPairs {
+  /** `a → the b's it has been paired with`. */
+  readonly pairs: WeakMap<object, WeakSet<object>>;
+  /** The pairs stored since the innermost try began; absent outside a try. */
+  trail?: Array<[object, object]>;
+}
 
 function equalPairs(a: any, b: any, seen: SeenPairs | undefined, opaque: OpaqueRule): boolean {
   if (a === b) return true; // same reference or identical primitive
@@ -143,11 +150,12 @@ function equalPairs(a: any, b: any, seen: SeenPairs | undefined, opaque: OpaqueR
 /** The kinds whose content is other values: compared part by part, under the cycle guard. */
 function equalContainers(a: any, b: any, kind: ValueKind, seen: SeenPairs | undefined, opaque: OpaqueRule): boolean {
   // Cycle guard — a pair we are already inside is equal by assumption.
-  seen ??= new WeakMap();
-  let partners = seen.get(a);
+  seen ??= { pairs: new WeakMap() };
+  let partners = seen.pairs.get(a);
   if (partners?.has(b)) return true;
-  if (!partners) seen.set(a, (partners = new WeakSet()));
+  if (!partners) seen.pairs.set(a, (partners = new WeakSet()));
   partners.add(b);
+  seen.trail?.push([a, b]);
 
   if (kind === 'map') return equalMaps(a, b, seen, opaque);
   if (kind === 'set') return equalSets(a, b, seen, opaque);
@@ -259,15 +267,41 @@ function equalMaps(a: Map<unknown, unknown>, b: Map<unknown, unknown>, seen: See
  */
 function equalSets(a: Set<unknown>, b: Set<unknown>, seen: SeenPairs, opaque: OpaqueRule): boolean {
   if (a.size !== b.size) return false;
-  const unmatched = [...b];
+  // The members of `b` that no member of `a` IS — the only ones a member of `a` can pair with by
+  // content. Listed once, and only when a member needs it.
+  let unmatched: unknown[] | undefined;
   for (const member of a) {
-    // SameValueZero first — primitives and shared references, one `has`.
+    // SameValueZero first — primitives and shared references pair with themselves, one `has`.
+    if (b.has(member)) continue;
+    // A primitive `b` does not hold has no equal there.
+    if (member === null || typeof member !== 'object') return false;
+    unmatched ??= [...b].filter((candidate) => !a.has(candidate));
     // Each match retires its slot so two structurally-equal members of `a`
     // cannot both claim the same member of `b`.
-    const at = unmatched.indexOf(member);
-    const found = at >= 0 ? at : unmatched.findIndex((candidate) => equalPairs(member, candidate, seen, opaque));
+    const found = unmatched.findIndex((candidate) => tryPair(member, candidate, seen, opaque));
     if (found < 0) return false;
     unmatched.splice(found, 1);
   }
   return true;
+}
+
+/**
+ * Compare one set member with one candidate, where a `false` only means "try the next candidate".
+ * A try that fails forgets every pair it stored: left behind, they would read as "already known
+ * equal" to a later comparison of the same two objects. A try that succeeds keeps its pairs, and
+ * hands them to the try it ran inside, which may still fail.
+ */
+function tryPair(member: unknown, candidate: unknown, seen: SeenPairs, opaque: OpaqueRule): boolean {
+  const enclosing = seen.trail;
+  const stored: Array<[object, object]> = [];
+  seen.trail = stored;
+  let equal = false;
+  try {
+    equal = equalPairs(member, candidate, seen, opaque);
+  } finally {
+    seen.trail = enclosing;
+  }
+  if (!equal) for (const [x, y] of stored) seen.pairs.get(x)?.delete(y);
+  else if (enclosing) for (const pair of stored) enclosing.push(pair);
+  return equal;
 }

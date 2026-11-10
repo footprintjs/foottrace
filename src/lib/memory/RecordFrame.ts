@@ -107,6 +107,8 @@ export class RecordFrame {
   private readAttempts?: Set<string>;
   private readAttemptsOmitted?: number;
   #sourceFrame?: SourceFrame;
+  /** A commit ended the round of staging: the next write starts a new one ({@link getTransactionBuffer}). */
+  #committed = false;
 
   constructor(state: SharedMemory, log?: EventLog, address: readonly string[] = []) {
     this.state = state;
@@ -224,6 +226,12 @@ export class RecordFrame {
    * Private since C4: every write goes through {@link write}, so the scrub travels with the op.
    */
   private getTransactionBuffer(): TransactionBuffer {
+    // A write after a commit starts a new round. The round the commit ended is released first, so
+    // the new buffer is built on committed state as it stands now. Kept, the emptied buffer would
+    // diff against the base from BEFORE that commit: a write that restored the old value compared
+    // equal to it and was dropped. (The engine releases after every commit; this is for a writer
+    // that did not.)
+    if (this.#committed) this.release();
     if (!this.buffer) {
       // Per-write provenance (#P1): hand the buffer a live view of this frame's read prefix —
       // evaluated AT EACH WRITE, so each staged op captures exactly the reads that preceded it.
@@ -464,6 +472,7 @@ export class RecordFrame {
   commit(stampOf: () => CommitStamp): void {
     const payload = this.buffer?.commit();
     recordCommit(payload, stampOf(), { state: this.state, mirror: this._mirror, log: this.log });
+    this.#committed = true;
   }
 
   /**
@@ -471,9 +480,11 @@ export class RecordFrame {
    * copies its reads took) and the first-touch base (a reference that pins one committed-state
    * GENERATION). Both re-create lazily: a later read re-anchors on the CURRENT committed state, and a
    * later write builds a fresh buffer on it — so a second commit diffs against the state after the
-   * first. Without the release, the execution tree — which retains every frame for the lifetime of
-   * the run — retains one state generation per executed stage (measured O(N²) before copy-on-write;
-   * a 500-iteration agent OOMed a default Node heap, backlog #18).
+   * first. (A write after a commit releases first if the caller did not, so that holds either way;
+   * what the caller's own release adds is WHEN the hold ends.) Without the release, the execution
+   * tree — which retains every frame for the lifetime of the run — retains one state generation per
+   * executed stage (measured O(N²) before copy-on-write; a 500-iteration agent OOMed a default Node
+   * heap, backlog #18).
    */
   release(): void {
     if (this.#sourceFrame) {
@@ -486,6 +497,7 @@ export class RecordFrame {
     }
     this.buffer = undefined;
     this.base = undefined;
+    this.#committed = false;
   }
 
   /**
