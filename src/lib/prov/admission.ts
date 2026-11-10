@@ -50,6 +50,17 @@ function mergeMap<T>(
   return left;
 }
 
+/** One mark carried by both the attention map and the tree is one mark, as reads from the two sources are. */
+function uniqueMarks(left: readonly Attention[], right: readonly Attention[]): readonly Attention[] {
+  const seen = new Set<string>();
+  return [...left, ...right].filter((mark) => {
+    const key = JSON.stringify([mark.kind, mark.reason, mark.evidence]);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 /** No caller-owned evidence crosses an asynchronous boundary: admission finishes synchronously. */
 export function admitProvRecord(
   source: unknown,
@@ -84,7 +95,7 @@ export function admitProvRecord(
   } catch (error) {
     budget.addGap({ code: refusalCode(error), reason: 'execution tree evidence unavailable' });
   }
-  const attention = mergeMap<readonly Attention[]>(maps.attention, tree.attention, (a, b) => [...a, ...b]);
+  const attention = mergeMap<readonly Attention[]>(maps.attention, tree.attention, uniqueMarks);
   // Accumulate each retained read once; cloning the prefix for every row would be quadratic.
   let allReads: Map<string, string[]> | undefined;
   const readSets = new Map<string, Set<string>>();

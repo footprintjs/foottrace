@@ -216,6 +216,23 @@ describe('PROV ordinary record admission', () => {
     ]);
   });
 
+  it('keeps one attention mark when the attention map and the execution tree both carry it', () => {
+    const mark = { kind: 'error', reason: 'ERROR_RECORDED', evidence: ['commit:0'] };
+    const other = { kind: 'error', reason: 'ERROR_RECORDED', evidence: ['commit:1'] };
+    const result = admitProvRecord(
+      {
+        commitLog: [],
+        attention: { 'write#0': [mark] },
+        executionTree: { runtimeStageId: 'write#0', attention: [{ ...mark }, other] },
+      },
+      limits(),
+    );
+    expect(result.attention?.get('write#0')?.map((attention) => attention.evidence)).toEqual([
+      ['commit:0'],
+      ['commit:1'],
+    ]);
+  });
+
   it.each(['subflowResults', 'subflowId'])('discloses the P1 boundary for %s without walking child data', (field) => {
     let called = 0;
     const child = Object.defineProperty({}, 'secret', {
