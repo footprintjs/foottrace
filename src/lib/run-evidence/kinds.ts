@@ -48,7 +48,10 @@ export const RUN_EVIDENCE_LIMITS = /* @__PURE__ */ Object.freeze({
   chosen: 256,
   /** Characters in any one text field of a note: label, reason, summary, error message, id. */
   text: 4096,
-  /** Items in a threshold the writer stores as written; past it, or non-scalar, it stores a summary. */
+  /**
+   * Items in a threshold the writer stores as written; past it, or non-scalar, it stores a summary. A writer-side
+   * constant: no reader reads it, so raising it for a read changes nothing.
+   */
   thresholdItems: 16,
   /** Size of a threshold the reader admits (a forged object, say), counted as {@link RUN_EVIDENCE_LIMITS.payloadSize}. */
   thresholdSize: 4096,
