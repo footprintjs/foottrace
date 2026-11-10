@@ -33,11 +33,14 @@ export function mapReads(mapping: ProvMapping): void {
     for (let ordinal = 0; ordinal < keys.length; ordinal++) {
       if (output.full) break;
       const key = keys[ordinal];
-      // Charge a conservative upper bound before invoking readers whose internal work is not metered.
-      if (!budget.spend('work', indexCost + key.length + 1)) return;
+      // The index was charged once above; a lookup walks the key's trie path, then binary-searches its writes.
+      if (!budget.spend('work', key.length + 1)) return;
       const readId = ids.read(runtimeStageId, ordinal),
         hidden = mapping.hidden(key);
-      const previous = lastIndexBefore(index.writesOf(key), commits[0].commitIdx);
+      const writes = index.writesOf(key);
+      if (!budget.spend('work', writes.length + Math.ceil(Math.log2(writes.length + 1)))) return;
+      const previous = lastIndexBefore(writes, commits[0].commitIdx);
+      if (previous !== undefined && !budget.spend('work', record.log[previous].trace.length)) return;
       const entry = previous === undefined ? undefined : writeEntry(record.log[previous], key);
       const source =
         previous === undefined || !entry || entry.path !== key
