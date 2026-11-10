@@ -21,6 +21,9 @@
       ],
       "foottrace/prov": [
         "../src/prov.ts"
+      ],
+      "foottrace/metadata": [
+        "../src/metadata.ts"
       ]
     }
   },
