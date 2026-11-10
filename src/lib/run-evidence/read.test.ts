@@ -322,6 +322,45 @@ describe('attention', () => {
     expect(attention.rows).toEqual([]);
     expect(attention).toMatchObject({ status: 'partial', gaps: ['not-collected'] });
   });
+
+  it('a read name the reader would refuse is left out and counted: the rest of that about reads back whole', () => {
+    const s = evidenceStore();
+    s.commit(ROOT, 'seed#0', {});
+    s.commit(ROOT, 's#1', { parent: 'seed#0', reads: ['a', 'line\nbreak', 'b', 'x\u0085y', 'p\u001fq'] });
+    s.close(ROOT);
+    const commit = s.entries().filter((entry) => entry.kind === 'commit')[1] as Extract<
+      RecordEntry,
+      { kind: 'commit' }
+    >;
+    expect(commit.about).toEqual({ parent: 'seed#0', reads: ['a', 'b', 'p\u001fq'], readsOmitted: 2 });
+    const evidence = evidenceOf(s.entries());
+    expect(evidence.unread).toEqual([]);
+    expect(evidence.reads).toMatchObject({ status: 'partial', gaps: ['truncated'] });
+    expect(evidence.reads.rows.find((row) => row.id === 's#1')).toMatchObject({
+      keys: ['a', 'b', 'p\u001fq'],
+      omitted: 2,
+    });
+    expect(evidence.control('s#1')).toEqual({ status: 'collected', gaps: [] });
+  });
+
+  it.each([
+    ['a parent with no execution index', { parent: 'seed' }],
+    ['a parent with a control character', { parent: 'se\ned#0' }],
+    ['resumes with two indexes', { resumes: 'seed#0#1' }],
+  ])('%s never reaches the file: that stage reads as not collected, not as invalid', (_name, about) => {
+    const s = evidenceStore();
+    s.commit(ROOT, 'seed#0', {});
+    s.commit(ROOT, 's#1', { ...about, reads: ['k'] });
+    s.close(ROOT);
+    const commits = s.entries().filter((entry) => entry.kind === 'commit') as Extract<
+      RecordEntry,
+      { kind: 'commit' }
+    >[];
+    expect(commits[1]).not.toHaveProperty('about');
+    const evidence = evidenceOf(s.entries());
+    expect(evidence.unread).toEqual([]);
+    expect(evidence.control('s#1')).toEqual({ status: 'not-collected', gaps: [], why: 'no-about' });
+  });
 });
 
 describe('what was running when a run ended', () => {

@@ -188,6 +188,14 @@ describe('commit.about', () => {
     expect(about!.readsOmitted).toBe(1);
   });
 
+  it('a name the reader would refuse is left out and counted, never rewritten: a control character, an empty name', () => {
+    const { sink, log } = evidenceLog();
+    log.record(bundle('s#1'), { reads: ['a', 'line\nbreak', '', 'b', 'tab\there'] });
+    const { about } = only(sink.entries, 'commit')[0];
+    expect(about!.reads).toEqual(['a', 'b']);
+    expect(about!.readsOmitted).toBe(3);
+  });
+
   it('cuts a description at its bound', () => {
     const { sink, log } = evidenceLog();
     log.record(bundle('s#1'), { description: 'd'.repeat(RUN_EVIDENCE_LIMITS.description + 7) });
@@ -199,6 +207,8 @@ describe('commit.about', () => {
     ['an array', ['s#0']],
     ['a parent that is not a string', { parent: 7 }],
     ['resumes that is not a string', { resumes: {} }],
+    ['a parent the reader would refuse as a runtimeStageId', { parent: 'p' }],
+    ['resumes the reader would refuse as a runtimeStageId', { resumes: 'p#0\n' }],
     ['reads that is not an array', { reads: 'a' }],
     ['a read name that is not a string', { reads: [1] }],
     ['an omitted count that is not a count', { readsOmitted: -1 }],

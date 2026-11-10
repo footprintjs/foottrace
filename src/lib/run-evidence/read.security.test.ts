@@ -662,6 +662,14 @@ describe('caps', () => {
     truncated(fileWith(note('run.decision', decision({ rationale: long }))), 'decisions');
   });
 
+  it('an id past the text cap, like any other text: truncated, so raising `text` would help', () => {
+    const id = `${text(RUN_EVIDENCE_LIMITS.text)}#0`;
+    truncated(fileWith(note('run.stop', { seq: 0, id, by: 'break' })), 'stops');
+    truncated(fileWith(note('run.stop', { seq: 0, id: 'seed#0', by: 'break', propagatedFrom: id })), 'stops');
+    truncated(fileWith(note('run.decision', decision({ id }))), 'decisions');
+    expect(gaps(read(fileWith(note('run.stop', { seq: 0, id: 'seed', by: 'break' }))).stops)).toEqual(['invalid-data']);
+  });
+
   it('read names, their length, and a description', () => {
     truncated([opened, commit('s#0', 0, { reads: past(RUN_EVIDENCE_LIMITS.reads) }), closed(1, 0)], 'reads');
     truncated([opened, commit('s#0', 0, { reads: [text(RUN_EVIDENCE_LIMITS.readLength + 1)] }), closed(1, 0)], 'reads');
