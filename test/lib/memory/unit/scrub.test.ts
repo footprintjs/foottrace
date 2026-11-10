@@ -40,7 +40,6 @@ describe('scrubPatch on a cloned patch — the cases of the removed copy-and-scr
     const redacted = scrubPatch(structuredClone(patch), new Set([`a${DELIM}b${DELIM}c`]));
     expect(redacted.a.b.c).toBe('REDACTED');
   });
-
 });
 
 describe('scrubPatch — the engine’s clone-free scrub (9.33.0): the patch is the buffer’s commit-time copy already', () => {
