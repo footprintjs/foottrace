@@ -290,14 +290,17 @@ function reverseIndexLookup(commitLog: CommitBundle[]): WriterLookup {
 
 /**
  * The trace entries of `commit` that make it a writer of `linkKey` — the entries whose read
- * prefix (`TraceEntry.readKeys`) a per-write edge expands through. The FIRST entry on the exact
- * path when there is one (the #P1 behaviour, unchanged); otherwise every entry inside or around
- * the key (9.33.0: the commit wrote the key through a nested row — a subflow seed, an
- * outputMapper merge-back — and all of those rows wrote it).
+ * prefix (`TraceEntry.readKeys`) a per-write edge expands through. EVERY entry on the exact path
+ * when there is one: a stage that wrote the key twice committed its LAST write, and the reads
+ * between the two writes are causes of it. ('delta' encoding keeps one row per path with the last
+ * prefix; 'full' keeps a row per write, so taking the first row alone dropped those reads.) The
+ * caller unions the rows' prefixes, which is the last prefix when prefixes only grow. Otherwise
+ * every entry inside or around the key (9.33.0: the commit wrote the key through a nested row — a
+ * subflow seed, an outputMapper merge-back — and all of those rows wrote it).
  */
 function linkingEntries(commit: CommitBundle, linkKey: string): TraceEntry[] {
-  const exact = commit.trace.find((t) => t.path === linkKey);
-  if (exact !== undefined) return [exact];
+  const exact = commit.trace.filter((t) => t.path === linkKey);
+  if (exact.length > 0) return exact;
   return commit.trace.filter((t) => relation(t.path, linkKey) !== undefined);
 }
 
@@ -660,9 +663,9 @@ export function flattenCausalDAG(root: CausalNode): CausalNode[] {
  * (human or LLM) debugging from the slice is TOLD when it is incomplete.
  *
  * RFC-003 D3: control edges render as `← [control: <rule label>]`
- * (label omitted when the decision carried none). Data rendering is
- * byte-identical to the pre-D3 output — `← via <key>` from the node's
- * discovery-time `linkedBy`.
+ * (label omitted when the decision carried none). A data edge renders as
+ * `← via <key>`: the key of the edge from the child the node is shown under
+ * (the first one, when that child read several keys from this node).
  *
  * RFC-003 D4: edge weights from the `weigh` hook render as a suffix —
  * `← via systemPrompt (0.18)` — only when ≠ 1.0, so unweighted output is
@@ -683,11 +686,12 @@ export function formatCausalChain(root: CausalNode): string {
     }
     visited.add(node.runtimeStageId);
 
+    // The key is the DISPLAYED child's own edge to this node. `node.linkedBy` is the key of whichever
+    // child discovered the node first (breadth-first), and this walk is depth-first: under another
+    // child it named a key that child never read.
     const linkParts: string[] = [];
-    if (node.linkedBy) {
-      const dataEdge = edgesFromChild?.find((e) => e.kind === 'data');
-      linkParts.push(`via ${node.linkedBy}${weightSuffix(dataEdge)}`);
-    }
+    const dataEdge = edgesFromChild?.find((e) => e.kind === 'data');
+    if (dataEdge?.key) linkParts.push(`via ${dataEdge.key}${weightSuffix(dataEdge)}`);
     const controlEdge = edgesFromChild?.find((e) => e.kind === 'control');
     if (controlEdge) {
       linkParts.push(`[control${controlEdge.key ? `: ${controlEdge.key}` : ''}]${weightSuffix(controlEdge)}`);

@@ -428,6 +428,28 @@ describe('formatCausalChain', () => {
     const text = formatCausalChain(root);
     expect(text).toContain('see above');
   });
+
+  it('names the key the SHOWN child read, not the key another child found the node by', () => {
+    // M wrote m and n. Wb reads m from M and finds M first (breadth-first, one hop from the root's
+    // parents). Q reads n from M, and the text shows M under Q (depth-first). The line must say n.
+    const log = [
+      commit('M', 'm#0', ['m', 'n'], 0),
+      commit('Q', 'q#1', ['q'], 1),
+      commit('Wa', 'wa#2', ['a'], 2),
+      commit('Wb', 'wb#3', ['b'], 3),
+      commit('R', 'r#4', ['r'], 4),
+    ];
+    const reads = readsFrom({ 'r#4': ['a', 'b'], 'wa#2': ['q'], 'wb#3': ['m'], 'q#1': ['n'] });
+
+    expect(formatCausalChain(causalChain(log, 'r#4', reads)!).split('\n')).toEqual([
+      'R (r#4) [wrote: r]',
+      '  Wa (wa#2) ← via a [wrote: a]',
+      '    Q (q#1) ← via q [wrote: q]',
+      '      M (m#0) ← via n [wrote: m, n]',
+      '  Wb (wb#3) ← via b [wrote: b]',
+      '    ↳ m#0 (see above)',
+    ]);
+  });
 });
 
 // ════════════════════════════════════════════════════════════════════════
