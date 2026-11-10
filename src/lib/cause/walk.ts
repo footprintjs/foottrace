@@ -1,4 +1,4 @@
-import type { Attention, Gap, MarkedNode, NodeId, TraversedEdge } from './types.js';
+import type { Gap, MarkedNode, NodeId, TraversedEdge } from './types.js';
 import { Session } from './session.js';
 import type { BudgetView } from './queryBudget.js';
 import { adjacency, attention, gap, gaps, uniqueGaps } from './validation.js';

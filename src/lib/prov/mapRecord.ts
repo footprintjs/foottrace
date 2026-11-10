@@ -2,7 +2,6 @@ import { collectReadCoverage, collectScopeCoverage } from '../cause/recordCovera
 import type { GapCode } from '../evidence/codes.js';
 import type { ProvMapping } from './mapping.js';
 import { translateCommit } from './translateCommit.js';
-import { reference } from './translation.js';
 import type { ProvCommitContext } from './translation.js';
 import type { AdmittedCommit } from './types.js';
 
