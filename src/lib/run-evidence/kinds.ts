@@ -237,6 +237,11 @@ export function checkedExecutionId(value: unknown, maximum: number, refuse: Refu
   return id;
 }
 
+/** Does `kind` take the `run.` prefix only `EventLog · noteRun` may write? A writer's own `note` is refused one. */
+export function isReservedNoteKind(kind: unknown): boolean {
+  return typeof kind === 'string' && kind.startsWith('run.');
+}
+
 /** Is `value` a count: a non-negative safe integer? */
 export function isCount(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;

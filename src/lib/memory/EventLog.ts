@@ -47,6 +47,7 @@ import { freezeRecord, serveRecord } from '../capture/freeze.js';
 import {
   boundedAbout,
   type CommitAbout,
+  isReservedNoteKind,
   isRunNoteKind,
   type LogCollects,
   RUN_EVIDENCE_VERSION,
@@ -339,13 +340,19 @@ export class EventLog {
    * writer's: opaque to the record. Notes never enter the log's bundles, so the log's bytes are the
    * same with or without them. Without a sink, nothing happens.
    *
-   * Never throws: a `kind` that is not a string, `data` that is not a plain object surviving
-   * `structuredClone`, or a sink that fails is counted in {@link sinkFailures} and reported to
-   * `sink.onFailure`. The sink keeps its own copy of `data`.
+   * Never throws: a `kind` that is not a string, a `kind` that takes the reserved `run.` prefix (only
+   * {@link noteRun} writes those), `data` that is not a plain object surviving `structuredClone`, or a
+   * sink that fails is counted in {@link sinkFailures} and reported to `sink.onFailure`. The sink keeps
+   * its own copy of `data`.
    */
   note(kind: string, data: Meta): void {
     if (this.sink === undefined) return;
-    this.send({ kind: 'note', address: this.sourceAddress!, at: Date.now(), note: kind, data });
+    const entry = { kind: 'note', address: this.sourceAddress!, at: Date.now(), note: kind } as const;
+    if (isReservedNoteKind(kind)) {
+      this.lost(this.sink, { ...entry, data: {} }, new TypeError('EventLog.note: the run. prefix is reserved'));
+      return;
+    }
+    this.send({ ...entry, data });
   }
 
   /**

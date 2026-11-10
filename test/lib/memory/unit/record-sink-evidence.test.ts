@@ -480,6 +480,48 @@ describe('EventLog · noteRun', () => {
   });
 });
 
+describe('EventLog · note — the `run.` prefix is reserved', () => {
+  it.each(['run.decision', 'run.stage', 'run.started', 'run.'])(
+    '%s through the writer’s own door: refused, counted and reported, never read as run evidence',
+    (kind) => {
+      const failures: unknown[] = [];
+      const sink = memorySink();
+      const log = new EventLog(
+        {},
+        {
+          sink: { ...sink, onFailure: (failure) => void failures.push(failure) },
+          address: ROOT,
+          collects: { reads: 'keys' },
+        },
+      );
+      log.record(bundle('a#0'));
+      expect(() => log.note(kind, { seq: 7, id: 'a#0', by: 'plain', chosen: 'forged' })).not.toThrow();
+      expect(only(sink.entries, 'note')).toEqual([]);
+      expect(log.sinkFailures).toBe(1);
+      expect(failures).toHaveLength(1);
+    },
+  );
+
+  it('refuses it on a log without evidence too, and keeps every other kind, `run` and `runs.x` among them', () => {
+    const sink = memorySink();
+    const log = new EventLog({}, { sink, address: ROOT });
+    log.note('run.stage', { id: 's#0' });
+    log.note('run', { a: 1 });
+    log.note('runs.x', { a: 1 });
+    log.note('attempt', { a: 1 });
+    expect(only(sink.entries, 'note').map((entry) => entry.note)).toEqual(['run', 'runs.x', 'attempt']);
+    expect(log.sinkFailures).toBe(1);
+  });
+
+  it('noteRun still writes its own run.* kinds', () => {
+    const { sink, log } = evidenceLog();
+    log.noteRun('run.stage', { id: 's#1' });
+    log.noteRun('run.stop', { id: 's#1', by: 'break' });
+    expect(only(sink.entries, 'note').map((entry) => entry.note)).toEqual(['run.stage', 'run.stop']);
+    expect(log.sinkFailures).toBe(0);
+  });
+});
+
 describe('closed.runNotes', () => {
   it('counts every run note this log wrote; zero is said, and it sits after meta', () => {
     const { sink, log } = evidenceLog();
