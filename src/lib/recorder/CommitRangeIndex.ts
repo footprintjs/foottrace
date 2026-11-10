@@ -8,14 +8,13 @@
  * (returns ranges intersecting a slice).
  *
  * This is a generic interval data structure for
- * commit-range queries. footprintjs owns ZERO knowledge of what
+ * commit-range queries. foottrace owns ZERO knowledge of what
  * labels mean — consumers (agentfootprint, lens, OTel exporters)
  * pick their own `TLabel` type. Open ranges (mid-run, no end yet)
  * are first-class — query results carry `endIdx: undefined` for them.
  *
- * Pattern: incremental builder + interval query. Same "collect during
- *          traversal, never post-process" rule footprintjs's CLAUDE.md
- *          requires of every observer.
+ * Pattern: incremental builder + interval query, filled while the run
+ *          records ("collect during traversal, never post-process").
  * Role:    structural primitive for time-travel UIs and per-boundary
  *          aggregation.
  * Channel: consumer-driven (no engine subscription).
@@ -25,9 +24,9 @@
  * import { CommitRangeIndex } from 'foottrace';
  *
  * const idx = new CommitRangeIndex<string>();
- * const t = idx.open('LLMCall', executor.getCommitCount());
- * // ... LLM call runs, scope writes happen ...
- * idx.close(t, executor.getCommitCount());
+ * const t = idx.open('LLMCall', log.length); // `log` is the run's EventLog
+ * // ... LLM call runs, its stages commit ...
+ * idx.close(t, log.length);
  *
  * idx.enclosing(50);  // → ranges containing commit 50, outer→inner
  * idx.overlapping(40, 60);  // → ranges sharing the slice [40,60]
@@ -38,11 +37,9 @@
  * query results — the index does NOT redact `TLabel` content. If a
  * consumer attaches a label containing PII (user email, scope reads
  * with sensitive keys, etc.) and then serializes the index for
- * logging or telemetry, that data leaves the trust boundary. Use
- * `RedactionPolicy` (or your own scrubbing) on the consumer side
- * BEFORE attaching labels. The index follows the same contract as
- * other footprintjs storage primitives (SequenceStore, KeyedStore):
- * storage is verbatim; redaction is the caller's responsibility.
+ * logging or telemetry, that data leaves the trust boundary. Scrub
+ * labels on the consumer side BEFORE attaching them: storage is
+ * verbatim; redaction is the caller's responsibility.
  */
 
 /** Opaque token identifying an open range. Hold onto it; pass to `close()`.
@@ -74,8 +71,8 @@ export interface RangeEntry<TLabel> {
 
 /**
  * Internal storage shape. Mutable while the range is open; once
- * closed, `endIdx` is set and never changes. Tokens reference these
- * by their position in the `entries` array (the `_id`).
+ * closed, `endIdx` is set and never changes. A token finds its entry
+ * by `_id` through the `byId` map.
  */
 interface InternalEntry<TLabel> {
   label: TLabel;
