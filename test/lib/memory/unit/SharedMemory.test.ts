@@ -39,11 +39,15 @@ describe('SharedMemory', () => {
     expect(mem.getValue(['runs', 'p1'], [], 'tags')).toEqual(['a', 'b']);
   });
 
-  it('deep-merges objects with updateValue', () => {
+  it('shallow-merges objects with updateValue', () => {
     const mem = new SharedMemory();
     mem.setValue(['runs', 'p1'], [], 'config', { a: 1 });
     mem.updateValue(['runs', 'p1'], [], 'config', { b: 2 });
     expect(mem.getValue(['runs', 'p1'], [], 'config')).toEqual({ a: 1, b: 2 });
+    // Shallow: a nested object in the update replaces the old one, it is not merged into it.
+    mem.setValue(['runs', 'p1'], [], 'nested', { a: { x: 1 } });
+    mem.updateValue(['runs', 'p1'], [], 'nested', { a: { y: 2 } });
+    expect(mem.getValue(['runs', 'p1'], [], 'nested')).toEqual({ a: { y: 2 } });
   });
 
   it('applies patches from commit bundles', () => {
