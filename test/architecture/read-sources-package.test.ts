@@ -13,13 +13,14 @@ const proof = `const state = new SharedMemory(undefined, { count: 1 });
   const proof = { value: result.value, source: saved.occurrences[0].source.kind, status: saved.status };
   record.retire();`;
 const names = 'SharedMemory, RecordFrame, createReadSourceRecord, decodeReadSourceSnapshot';
+// A cold TypeScript program can exceed the unit-test default (5 s) under coverage, as in layering.test.ts.
 it('compiles strict real CJS and ESM consumers outside coverage instrumentation', () => {
   execFileSync(
     process.execPath,
     ['node_modules/typescript/bin/tsc', '-p', 'test/consumer/read-sources/tsconfig.json'],
-    { cwd: root, env, timeout: 5000, stdio: 'pipe' },
+    { cwd: root, env, timeout: 30_000, stdio: 'pipe' },
   );
-});
+}, 30_000);
 it.each(['CJS', 'ESM'])('runs the built %s writer port', (format) => {
   const imports =
     format === 'ESM'
