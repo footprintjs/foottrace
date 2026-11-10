@@ -459,17 +459,17 @@ export interface KeyFold {
    */
   readonly everyRow?: boolean;
   /**
+   * The value the top-level key holds BEFORE the first row — default: absent. Never edited: the fold copies
+   * it before writing through it. `commitValueAt` on a memoised log starts from a kept generation.
+   */
+  readonly start?: unknown;
+  /**
    * Keep GENERATIONS at chosen commits: `at` is asked before a commit's first row (with the fold's state as
    * it stands); for a commit it accepts, `keep` is handed the value at the key before the commit and after
    * it — copy-on-write around that commit (the fold drops ownership of every container before and after it),
    * so no later row edits either value. The writer rule's memoised root fold (`commitLogUtils · LogModel`)
    * keeps the commits a key's verdict needs, once per top-level key.
    */
-  /**
-   * The value the top-level key holds BEFORE the first row — default: absent. Never edited: the fold copies
-   * it before writing through it. `commitValueAt` on a memoised log starts from a kept generation.
-   */
-  readonly start?: unknown;
   readonly generations?: {
     at(commitIdx: number, state: Readonly<Record<string, unknown>>): boolean;
     keep(commitIdx: number, before: unknown, after: unknown): void;
