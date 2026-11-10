@@ -34,7 +34,7 @@
  *
  * This module is the ONE place the grammar is spelled. Every reader asks it —
  * `isExecutionKey`, `stageIdOf`, `subflowPathOf`, `subflowSegmentsOf`,
- * `lastSegmentOf`, `isWithinSubflow` — and every composer joins through
+ * `isWithinSubflow` — and every composer joins through
  * `joinPath` / `buildRuntimeStageId`; no other file splits on `#` or `/`.
  * It builds, parses and reads ids, and imports nothing: it is the record's
  * (C6). The delimiters are RESERVED (RFC 3986 §2.2 style): the engine's id
@@ -207,11 +207,6 @@ export function subflowSegmentsOf(runtimeStageId: string): string[] {
 /** The non-empty segments of a subflow path or prefixed id (`'a//b/'` → `['a', 'b']`). */
 export function pathSegments(path: string): string[] {
   return path.split(PATH_DELIMITER).filter((s) => s.length > 0);
-}
-
-/** The last segment of a path or prefixed id (`'sf-a/sf-b'` → `'sf-b'`); the whole string when it has none. */
-export function lastSegmentOf(path: string): string {
-  return path.slice(path.lastIndexOf(PATH_DELIMITER) + 1);
 }
 
 /** Join path segments with the grammar's delimiter (`joinPath('sf', 'stage')` → `'sf/stage'`). */

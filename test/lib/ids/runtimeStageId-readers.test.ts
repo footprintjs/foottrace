@@ -12,7 +12,6 @@ import {
   isExecutionKey,
   isWithinSubflow,
   joinPath,
-  lastSegmentOf,
   parseRuntimeStageId,
   pathSegments,
   splitStageId,
@@ -39,10 +38,8 @@ describe('the readers', () => {
     expect(Number.isNaN(executionIndexOf('sf-a/sf-b'))).toBe(true);
   });
 
-  it('path helpers: segments drop empties, last segment, join, within', () => {
+  it('path helpers: segments drop empties, join, within', () => {
     expect(pathSegments('/a//b/')).toEqual(['a', 'b']);
-    expect(lastSegmentOf('a/b/c')).toBe('c');
-    expect(lastSegmentOf('solo')).toBe('solo');
     expect(joinPath('a', 'b', 'c')).toBe('a/b/c');
     expect(isWithinSubflow('sf/a/b', 'sf')).toBe(true);
     expect(isWithinSubflow('sf-x/a', 'sf')).toBe(false);
