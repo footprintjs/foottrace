@@ -8,11 +8,13 @@
  * keys), not an enumerable collection. So "who read k" cannot be looked up —
  * it has to be inverted.
  *
- * THE INVERSION (and the law it rests on): the engine commits exactly ONE
- * bundle per executed stage, so the commit log IS the list of execution
- * steps. Calling the reads lookup once per bundle turns the strategy into a
- * key → [commit indices that read it] index — and gives every read moment a
- * commit position, the join key the whole library is addressed by.
+ * THE INVERSION (and the law it rests on): every executed stage commits, and
+ * the FIRST bundle that carries a runtimeStageId is that execution's own (a
+ * later one with the same id is a continuation: a fork child's settle, a
+ * mount's exit). So the first bundles ARE the list of execution steps. Calling
+ * the reads lookup once per execution, at its first bundle, turns the strategy
+ * into a key → [commit indices that read it] index — and gives every read
+ * moment a commit position, the join key the whole library is addressed by.
  *
  * Consequence worth stating (documented, not silently absorbed): a reads
  * provider naming a step that has no commit in THIS log contributes nothing.
@@ -20,7 +22,7 @@
  * runs in an isolated runtime, so its log and its tree must come from the
  * same scope (see README.md § Subflow boundaries).
  *
- * Cost: one lookup call per bundle, once per query — O(N + total read keys).
+ * Cost: one lookup call per execution, once per query — O(N + total read keys).
  * Both forward queries then run off sorted index arrays.
  *
  * DAG position: internal to slice/ (not exported from the barrel).
@@ -36,7 +38,7 @@ import {
   writesOnlyInside,
 } from '../memory/keyPaths.js';
 import { logModel } from '../memory/logModel.js';
-import { pathSegments } from '../record-paths/codec.js';
+import { shownPath } from '../record-paths/codec.js';
 import type { CommitBundle, TraceEntry } from '../memory/types.js';
 import type { HonestyNote } from './types.js';
 
@@ -91,9 +93,14 @@ export function buildKeyIndex(commitLog: CommitBundle[], lookup: KeysReadLookup)
   const writers = model.index;
   const readsByKey = new Map<string, number[]>();
   const readKeysByRoot = new Map<string, string[]>();
+  const executions = new Set<string>();
   for (let i = 0; i < commitLog.length; i++) {
     const bundle = commitLog[i];
-    // Reads: one lookup per execution step (see THE INVERSION above).
+    // Reads: one lookup per EXECUTION, at its first bundle (see THE INVERSION above). A later bundle
+    // of the same runtimeStageId is a continuation; the stage read before its own commit, and the
+    // backward walk dates it there too (`commitLogUtils · buildCommitIndex`).
+    if (executions.has(bundle.runtimeStageId)) continue;
+    executions.add(bundle.runtimeStageId);
     // A provider that throws is a consumer bug, not a reason to lose the
     // query — the same error-isolation posture recorder callbacks get.
     let keys: string[] = [];
@@ -155,13 +162,13 @@ export function buildKeyIndex(commitLog: CommitBundle[], lookup: KeysReadLookup)
  */
 export function unknownKeyNote(index: Pick<KeyIndex, 'knownKeys'>, key: string): HonestyNote {
   const all = [...index.knownKeys].sort();
-  const shown = all.slice(0, KNOWN_KEYS_LISTED);
+  const shown = all.slice(0, KNOWN_KEYS_LISTED).map(shownPath);
   const more = all.length - shown.length;
   const known = shown.length > 0 ? `${shown.join(', ')}${more > 0 ? ` (+${more} more)` : ''}` : '(none)';
   return {
     code: 'unknown-key',
     detail:
-      `unknown key '${key}' — this commit log has no write and no recorded read of it. ` +
+      `unknown key '${shownPath(key)}' — this commit log has no write and no recorded read of it. ` +
       `Known keys: ${known}. ` +
       'If the key is real, check that the commit log and the reads provider come from the SAME scope ' +
       '(a subflow has its own).',
@@ -255,11 +262,6 @@ export function nestedOnlyWrites(commitLog: readonly CommitBundle[], key: string
 /** How many commit positions a `'nested-rows'` note lists before it says "+N more". */
 export const NESTED_WRITES_LISTED = 5;
 
-/** A key as a person reads it: its segments, not the engine's delimiter. */
-function shownKey(key: string): string {
-  return pathSegments(key).join(' › ');
-}
-
 /** A write the answer rests on reached the key only through paths inside it. */
 export function nestedRowsNote(key: string, commits: readonly number[]): HonestyNote {
   const shown = commits.slice(0, NESTED_WRITES_LISTED);
@@ -268,7 +270,7 @@ export function nestedRowsNote(key: string, commits: readonly number[]): Honesty
   return {
     code: 'nested-rows',
     detail:
-      `'${shownKey(key)}' was written only through paths inside it at ${at} — such a write changed part of ` +
+      `'${shownPath(key)}' was written only through paths inside it at ${at} — such a write changed part of ` +
       'its value, not the whole: earlier writes may account for the rest, and a reader of the key may ' +
       'not have read the part it changed.',
   };
@@ -279,7 +281,7 @@ export function redactedValueNote(key: string): HonestyNote {
   return {
     code: 'redacted',
     detail:
-      `'${shownKey(key)}' was redacted when it was written — where its value shows the log's placeholder (or ` +
+      `'${shownPath(key)}' was redacted when it was written — where its value shows the log's placeholder (or ` +
       'the key is missing under a placeholder that replaced its container), the real value was never recorded.',
   };
 }
@@ -289,7 +291,7 @@ export function fromInitialStateNote(key: string): HonestyNote {
   return {
     code: 'from-initial-state',
     detail:
-      `'${shownKey(key)}' has no write of its whole value in range — its value rests on what it held before the ` +
+      `'${shownPath(key)}' has no write of its whole value in range — its value rests on what it held before the ` +
       'run, which the commit log cannot see, so the writes here may be only part of it.',
   };
 }
@@ -315,7 +317,7 @@ export function preRunOriginNote(key: string): HonestyNote {
   return {
     code: 'pre-run-origin',
     detail:
-      `'${key}' has no write before this point — the value came from initial state, frozen run input ` +
+      `'${shownPath(key)}' has no write before this point — the value came from initial state, frozen run input ` +
       '(args), or a closure. The reads listed did see it; who put it there is outside the commit log.',
   };
 }
@@ -326,7 +328,7 @@ export function conservativeEdgesNote(key: string): HonestyNote {
     code: 'conservative-fed-edges',
     detail:
       "some 'fed' edges are CONSERVATIVE (stage-level): those writes carry no per-write read provenance, " +
-      `so a stage that read '${key}' and wrote another key may not actually have used it. Run with ` +
+      `so a stage that read '${shownPath(key)}' and wrote another key may not actually have used it. Run with ` +
       "writeProvenance: 'reads-prefix' to get exact edges.",
   };
 }

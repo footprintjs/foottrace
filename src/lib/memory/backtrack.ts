@@ -23,24 +23,23 @@
  *
  * ## Staged Optimization
  *
- * Two writer-lookup strategies, chosen automatically by commit log size:
+ * Two writer-lookup strategies, chosen automatically by commit log size. Both
+ * give the answer `findLastWriter` gives, so the choice never changes a slice:
  *
- * | Strategy | When | Complexity per lookup |
- * |----------|------|----------------------|
- * | Linear scan | N ≤ 256 | O(N) — simple backward scan |
- * | Reverse index | N > 256 | O(K log N) — prebuilt key→[indices], binary search |
+ * | Strategy | When | Cost per lookup |
+ * |----------|------|-----------------|
+ * | Scan | N ≤ 256 | `findLastWriter`: a backward scan of the log. A frozen log (an engine snapshot's) is answered from its memoised read model instead. |
+ * | Read model | N > 256 | one build of the log's read model for the call (`logModel.ts`: a path trie over the rows), then a binary search |
  *
- * The threshold (256) is chosen so the O(N) build cost of the reverse index
- * is amortized over the BFS traversal. Below 256, linear scan wins because
- * there's no index build overhead. The consumer never sees this — `causalChain()`
- * picks the right strategy internally (like a query optimizer choosing between
- * sequential scan vs index scan based on table size).
+ * The threshold (256) is where building the read model for one call pays for
+ * itself. The consumer never sees this — `causalChain()` picks the strategy
+ * internally (like a query optimizer choosing between a sequential scan and
+ * an index scan by table size).
  *
  * ## Complexity
  *
- * - **Small logs (N ≤ 256):** O(V × K × N) total. V=visited, K=avg keys/node.
- * - **Large logs (N > 256):** O(N × U) index build + O(V × K × log N) lookups.
- *   U = unique keys. Amortized over all BFS hops.
+ * - **Small logs (N ≤ 256):** O(V × K × N) total at worst. V=visited, K=avg keys/node.
+ * - **Large logs (N > 256):** O(rows) model build + O(V × K × (depth + log N)) lookups.
  *
  * ## References
  *
@@ -61,6 +60,7 @@ import { buildCommitIndex, findLastWriter } from './commitLogUtils.js';
 import type { RegisteredCode } from './honesty.js';
 import { queryWork, relation, writesOnlyInside } from './keyPaths.js';
 import { logModel } from './logModel.js';
+import { shownPath } from '../record-paths/codec.js';
 import type { CommitBundle, TraceEntry, UntrackedSource } from './types.js';
 
 // ── Types ──────────────────────────────────────────────────────────────
@@ -309,13 +309,13 @@ function linkingEntries(commit: CommitBundle, linkKey: string): TraceEntry[] {
  *
  * Like a database query optimizer choosing between sequential scan and index scan:
  *
- * - **Small log (≤ 256):** Linear scan wins. Zero setup cost, good cache locality.
- *   The overhead of building a reverse index isn't worth it for short logs.
+ * - **Small log (≤ 256):** the scan (`findLastWriter`). No model is built for the call unless
+ *   a lookup needs one; a frozen log is answered from its memoised read model.
  *
- * - **Large log (> 256):** Reverse index wins. O(N×U) upfront build cost is amortized
- *   across all BFS hops. Each lookup becomes O(log N) via binary search instead of O(N).
- *   For an agent loop with 500 iterations and 5 keys per hop, this is 500×5×log(500)≈22K ops
- *   vs 500×5×500=1.25M ops with linear scan.
+ * - **Large log (> 256):** the read model. One O(rows) build is amortized across all BFS
+ *   hops, and each lookup is a binary search instead of a scan. For an agent loop with 500
+ *   iterations and 5 keys per hop, this is 500×5×log(500)≈22K ops vs 500×5×500=1.25M ops
+ *   with a scan.
  *
  * The caller never sees this — `causalChain()` picks automatically.
  */
@@ -691,14 +691,14 @@ export function formatCausalChain(root: CausalNode): string {
     // child it named a key that child never read.
     const linkParts: string[] = [];
     const dataEdge = edgesFromChild?.find((e) => e.kind === 'data');
-    if (dataEdge?.key) linkParts.push(`via ${dataEdge.key}${weightSuffix(dataEdge)}`);
+    if (dataEdge?.key) linkParts.push(`via ${shownPath(dataEdge.key)}${weightSuffix(dataEdge)}`);
     const controlEdge = edgesFromChild?.find((e) => e.kind === 'control');
     if (controlEdge) {
       linkParts.push(`[control${controlEdge.key ? `: ${controlEdge.key}` : ''}]${weightSuffix(controlEdge)}`);
     }
     const link = linkParts.length > 0 ? ` ← ${linkParts.join(' ← ')}` : '';
 
-    const writes = node.keysWritten.length > 0 ? ` [wrote: ${node.keysWritten.join(', ')}]` : '';
+    const writes = node.keysWritten.length > 0 ? ` [wrote: ${node.keysWritten.map(shownPath).join(', ')}]` : '';
     lines.push(`${'  '.repeat(indent)}${node.stageName} (${node.runtimeStageId})${link}${writes}`);
 
     if (node.incompleteSources && node.incompleteSources.length > 0) {

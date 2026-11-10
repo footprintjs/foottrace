@@ -135,9 +135,10 @@ export interface VariableSlice {
    * Under the writer rule (9.33.0) it may have written only a path INSIDE the
    * key (a subflow seed, an outputMapper merge-back): it then made part of the
    * value, and earlier writers may account for the rest. An outputMapper's
-   * merge-back bundle carries the runtimeStageId of the stage BEFORE the mount
-   * (or of the branching decider), not the mount's — a known gap in the record
-   * (`SubflowExecutor · executeSubflow`), named in slice/README.md.
+   * merge-back bundle is the MOUNT's commit and carries the mount's
+   * runtimeStageId. Only a recording made through 9.33.0 names the stage
+   * before the mount (or the branching decider) there; a reader answers with
+   * the names the recording holds (slice/README.md, "Who a merge-back names").
    */
   writer?: CommitBundle;
   /**
