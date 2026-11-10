@@ -78,7 +78,10 @@ export function isDeniedWritePath(
 /**
  * The container at `address` + `path` inside `obj`, each missing one created
  * on the way: the one AT the address from `defaultValues` when given, every
- * other one empty. The one walk both nested writers share.
+ * other one empty. A value on the way that is not a container (a primitive,
+ * null) is replaced the same way: the rule `pathOps · nativeSet` writes by, so
+ * a direct write and a replayed bundle make the same state. The one walk both
+ * nested writers share.
  */
 function containerAt(
   obj: NestedObject,
@@ -90,10 +93,13 @@ function containerAt(
   let current = obj;
   for (let i = 0; i < segments.length; i++) {
     const key = segments[i];
-    if (!Object.prototype.hasOwnProperty.call(current, key)) {
+    // Read an own value once; an inherited one does not take part.
+    let next: unknown = Object.prototype.hasOwnProperty.call(current, key) ? current[key] : undefined;
+    if (next === null || typeof next !== 'object') {
       setOwnValue(current, key, i === address.length - 1 && defaultValues ? defaultValues : {});
+      next = current[key];
     }
-    current = current[key];
+    current = next as NestedObject;
   }
   return current;
 }

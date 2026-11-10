@@ -156,7 +156,14 @@ function isStrictArrayPrefix(before: unknown, after: unknown): before is unknown
 /** True when an array's own enumerable keys are exactly its indices — no
  *  extra named properties and no holes, i.e. the array survives a spread
  *  intact. One `Object.keys` pass, same order as the prefix compare above
- *  and paid only after it succeeds. */
+ *  and paid only after it succeeds.
+ *
+ *  The count alone is not enough: a hole and a named key cancel out. Index
+ *  keys are listed first, ascending, and named keys after them, so with the
+ *  count equal the keys are exactly the indices when the LAST key is the last
+ *  index — a named key would stand there instead. */
 function isIndexOnly(arr: unknown[]): boolean {
-  return Object.keys(arr).length === arr.length;
+  const keys = Object.keys(arr);
+  if (keys.length !== arr.length) return false;
+  return keys.length === 0 || keys[keys.length - 1] === String(arr.length - 1);
 }
