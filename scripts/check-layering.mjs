@@ -1,4 +1,4 @@
-/** Standalone record fence: a closed L0–L3 graph, no engine or platform dependencies. */
+/** Standalone record fence: a closed ranked graph (ranks in layers.json), no engine or platform dependencies, no runtime cycles. */
 import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
