@@ -44,6 +44,9 @@ export class ProvIds {
   read(runtimeStageId: string, ordinal: number): string {
     return this.prefix + 'read/' + iriPart(runtimeStageId) + '/' + ordinal;
   }
+  observedRead(ordinal: number): string {
+    return this.prefix + 'observed-read/' + ordinal;
+  }
   candidate(commitIdx: number, rowIdx: number, ordinal: number): string {
     return this.prefix + 'candidate/' + commitIdx + '/' + rowIdx + '/' + ordinal;
   }

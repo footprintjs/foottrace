@@ -39,7 +39,7 @@ export function mapSourceReads(mapping: ProvMapping): void {
         continue;
       }
     }
-    const readId = ids.prefix + 'observed-read/' + occurrence.ordinal;
+    const readId = ids.observedRead(occurrence.ordinal);
     if (
       !output.add({
         '@id': readId,
