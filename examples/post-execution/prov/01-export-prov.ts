@@ -1,7 +1,6 @@
 /**
  * Export a hand-built record without an executor, model, network call or values.
  *
- * Prepared for the optional foottrace/prov entry; not in published 1.5.0.
  * A later commit by one execution remains one activity. Each write remains a
  * distinct occurrence. Reads are candidate evidence, not proven derivations.
  */
