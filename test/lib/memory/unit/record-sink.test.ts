@@ -207,7 +207,7 @@ describe('EventLog with a sink — what the sink may keep', () => {
 });
 
 describe('the one-argument log — unchanged', () => {
-  it('keeps 1.0.3’s own fields: no sink field, no counter — the same keys, the same JSON', () => {
+  it('keeps its own fields (base, steps, sourceAddress, sourceAddressRetired): no sink field, no counter — the same keys, the same JSON', () => {
     const log = new EventLog({ a: 1 });
     expect(Object.keys(log)).toEqual(['base', 'steps', 'sourceAddress', 'sourceAddressRetired']);
     expect(JSON.stringify(log)).toBe('{"base":{"a":1},"steps":[],"sourceAddressRetired":false}');

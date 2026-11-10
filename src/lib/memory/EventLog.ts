@@ -34,7 +34,7 @@
  * object that survives `structuredClone`) is counted (`sinkFailures`) and reported to
  * `sink.onFailure`, and the writer goes on; a `meta` that will not copy is lost on its own and its
  * entry still goes. Without a sink, nothing here runs: the one-argument log writes the same bytes,
- * and has the same own fields, it always did.
+ * and its own fields are `base`, `steps`, `sourceAddress` and `sourceAddressRetired`, with no sink field.
  *
  * RUN EVIDENCE (optional). A log that also declares `collects` keeps what an offline reader needs to say why a
  * stage ran (`run-evidence/kinds.ts`): `record(bundle, about)` carries `about` beside the bundle, `noteRun` stamps
@@ -176,7 +176,7 @@ export class EventLog {
   private sourceAddress?: LogAddress;
   private sourceAddressRetired = false;
   // The sink's two fields are DECLARED, not initialised, and set only with a sink: the one-argument
-  // log keeps 1.0.3's own fields exactly (its `Object.keys`, its JSON).
+  // log's own fields stay `base`, `steps`, `sourceAddress` and `sourceAddressRetired` (its `Object.keys`, its JSON).
   /** Where entries go as they land; absent for the one-argument log. */
   private declare readonly sink?: RecordSink;
   /** Entries the sink did not take; set with the sink. */
