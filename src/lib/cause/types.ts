@@ -13,16 +13,19 @@ export type AttentionKind =
   | 'not-collected'
   | 'outlier'
   | (string & {});
-export type AttentionReason =
-  | 'ERROR_RECORDED'
-  | 'UNKNOWN_EFFECT_RECORDED'
-  | 'RETRY_STOP_RECORDED'
-  | 'TIMEOUT_RECORDED'
-  | 'RETRY_RECORDED'
-  | 'QUALITY_DROP_RECORDED'
-  | 'EVIDENCE_NOT_COLLECTED'
-  | 'OUTLIER_RECORDED'
-  | 'BUSINESS_RULE_MATCHED';
+/** The fixed attention reasons: the one list the type and the mark rule (`evidence/marks.ts`) both read. */
+export const ATTENTION_REASONS = /* @__PURE__ */ Object.freeze([
+  'ERROR_RECORDED',
+  'UNKNOWN_EFFECT_RECORDED',
+  'RETRY_STOP_RECORDED',
+  'TIMEOUT_RECORDED',
+  'RETRY_RECORDED',
+  'QUALITY_DROP_RECORDED',
+  'EVIDENCE_NOT_COLLECTED',
+  'OUTLIER_RECORDED',
+  'BUSINESS_RULE_MATCHED',
+] as const);
+export type AttentionReason = (typeof ATTENTION_REASONS)[number];
 export interface Attention {
   readonly kind: AttentionKind;
   readonly reason: AttentionReason;
