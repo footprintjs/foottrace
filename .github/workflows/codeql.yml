@@ -2,12 +2,10 @@ name: CodeQL
 
 on:
   push:
-    branches: [main, extract/foottrace]
+    branches: [main]
   pull_request:
-    # This filter names the PR's base; the extraction PR targets main.
     branches: [main]
   schedule:
-    # Scheduled scans start only after this file reaches the default branch.
     - cron: '27 5 * * 1'
   workflow_dispatch:
 
