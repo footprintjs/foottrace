@@ -2,7 +2,7 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import type { AttentionReason } from '../../src/cause.js';
-import { ATTENTION_REASONS } from '../../src/lib/cause/types.js';
+import { ATTENTION_REASONS } from '../../src/lib/evidence/codes.js';
 import { EvidenceRefusal } from '../../src/lib/evidence/admission.js';
 import { admitMarks } from '../../src/lib/evidence/marks.js';
 

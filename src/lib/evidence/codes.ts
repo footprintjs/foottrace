@@ -31,3 +31,17 @@ export type RequirementReason = { [Code in GapCode]: (typeof GAP_CODES)[Code] ex
 export const isGapCode = (value: unknown): value is GapCode =>
   typeof value === 'string' && Object.hasOwn(GAP_CODES, value);
 export const isRequirementReason = (value: unknown): value is RequirementReason => isGapCode(value) && GAP_CODES[value];
+
+/** The fixed attention reasons: the one list the type and the mark rule (`marks.ts`) both read. */
+export const ATTENTION_REASONS = /* @__PURE__ */ Object.freeze([
+  'ERROR_RECORDED',
+  'UNKNOWN_EFFECT_RECORDED',
+  'RETRY_STOP_RECORDED',
+  'TIMEOUT_RECORDED',
+  'RETRY_RECORDED',
+  'QUALITY_DROP_RECORDED',
+  'EVIDENCE_NOT_COLLECTED',
+  'OUTLIER_RECORDED',
+  'BUSINESS_RULE_MATCHED',
+] as const);
+export type AttentionReason = (typeof ATTENTION_REASONS)[number];

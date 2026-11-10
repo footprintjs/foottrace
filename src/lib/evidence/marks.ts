@@ -3,9 +3,9 @@
  * and the run-evidence reader read marks through this rule, and the writer's `about` stores them through it, each with its
  * own refusal: what a writer stores, its reader admits.
  */
-import { type Attention, ATTENTION_REASONS, type AttentionReason } from '../cause/types.js';
+import type { Attention } from '../cause/types.js';
 import { boundedList, boundedName, type RefuseEvidence, ownData } from './admission.js';
-import type { GapCode } from './codes.js';
+import { ATTENTION_REASONS, type AttentionReason, type GapCode } from './codes.js';
 
 /** How much one stage may carry: the writer is bound by these too. */
 export const ATTENTION_LIMITS = /* @__PURE__ */ Object.freeze({ marks: 32, refs: 16, refLength: 512 });
