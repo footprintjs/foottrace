@@ -36,9 +36,11 @@ Every channel says one of three things, and so does `control(id)`.
 
 A file with no `collects`, including every file an older writer made, reads `not-collected` and never "nothing happened".
 
+`why` takes one of nine reasons, the one union `rows.ts · RunEvidenceWhy`, on channels and `control(id)` alike: `no-collects`, `newer-writer`, `invalid-collects`, `reads-off`, `no-log`, `resumed-leg`, `log-not-given`, `no-about`, `unknown-execution`.
+
 `collected` with no decision means no declared decider or selector ran. An `if` inside a stage is not a decision and was never recorded.
 
-`control(id)` never says ungoverned by accident. No `decider` under `collected` means a whole chain to the true root. A parentless execution that is not the root reads `partial` (`resumed-leg`). A parent no given log holds reads `partial` (`log-not-given`). A child that only a stage with no `about` could tell apart from a branch entry reads `partial` (`no-about`), with no `decider`. A stage with no `about` reads `not-collected` (`no-about`). Following `resumes` reads `conservative`, because stages after a re-entry may be over-attributed to the branch it continued.
+`control(id)` never says ungoverned by accident. No `decider` under `collected` means a whole chain to the true root. A parentless execution that is not the root reads `partial` (`resumed-leg`). A parent no given log holds reads `partial` (`log-not-given`). A child that only a stage with no `about` could tell apart from a branch entry reads `partial` (`no-about`), with no `decider`. A stage with no `about` reads `not-collected` (`no-about`). An id no given log committed reads `not-collected` (`unknown-execution`). Following `resumes` reads `conservative`, because stages after a re-entry may be over-attributed to the branch it continued.
 
 `about.reads` joins `bundle.untrackedSources`, which reads `partial` (`untracked-input`): that stage also read what no name shows.
 

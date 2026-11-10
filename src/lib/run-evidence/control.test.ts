@@ -10,6 +10,7 @@ import { describe, expect, it } from 'vitest';
 import { engineScenario, evidenceStore, writeScenario } from '../../../test/helpers/evidenceFixture';
 import { readStoredRecord } from '../time-travel/storedRecord';
 import { readRunEvidence } from './read';
+import type { EvidenceChannel, RunControl, RunEvidenceWhy } from './rows';
 
 const read = (name: string, legs?: string[]) => {
   const scenario = engineScenario(name);
@@ -314,5 +315,21 @@ describe('never ungoverned by accident', () => {
     const evidence = readRunEvidence(readStoredRecord(s.entries()), 'r');
     expect(evidence.control('never#9')).toEqual({ status: 'not-collected', gaps: [], why: 'unknown-execution' });
     expect(evidence.control(7 as unknown as string).status).toBe('not-collected');
+  });
+
+  it('`why` is one declared vocabulary, on control answers and channels alike', () => {
+    const s = evidenceStore();
+    s.commit(['r'], 'seed#0', {});
+    s.close(['r']);
+    const evidence = readRunEvidence(readStoredRecord(s.entries()), 'r');
+    const control: RunEvidenceWhy | undefined = evidence.control('never#9').why;
+    const none = readRunEvidence(readStoredRecord(s.entries()), 'other').decisions;
+    const channel: RunEvidenceWhy | undefined = none.status === 'not-collected' ? none.why : undefined;
+    expect([control, channel]).toEqual(['unknown-execution', 'no-log']);
+    // @ts-expect-error a reason outside the vocabulary does not type
+    const made: RunControl['why'] = 'some-other-reason';
+    // @ts-expect-error nor on a channel
+    const madeChannel: Extract<EvidenceChannel<never>, { status: 'not-collected' }>['why'] = 'some-other-reason';
+    expect([made, madeChannel]).toHaveLength(2);
   });
 });

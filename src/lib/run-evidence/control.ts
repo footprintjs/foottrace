@@ -19,7 +19,7 @@
 import type { GapCode } from '../evidence/codes.js';
 import { executionIndexOf } from '../ids/runtimeStageId.js';
 import type { StoredDecisionEvidence } from './kinds.js';
-import type { RunControl } from './rows.js';
+import type { RunControl, RunEvidenceWhy } from './rows.js';
 
 /** One execution's way up, and what its log says about how far to trust it. */
 export interface ControlEdge {
@@ -48,7 +48,7 @@ function union(a: readonly GapCode[], b: readonly GapCode[]): readonly GapCode[]
   return merged.length === a.length ? a : Object.freeze(merged);
 }
 
-function answer(gaps: readonly GapCode[], decider?: string, label?: string, why?: string): RunControl {
+function answer(gaps: readonly GapCode[], decider?: string, label?: string, why?: RunEvidenceWhy): RunControl {
   return Object.freeze({
     status: gaps.length === 0 ? 'collected' : 'partial',
     ...(decider === undefined ? {} : { decider }),
@@ -59,7 +59,7 @@ function answer(gaps: readonly GapCode[], decider?: string, label?: string, why?
 }
 
 /** The answer one step up, carried down: its decider and reason, with these gaps added. */
-function inherited(up: RunControl, gaps: readonly GapCode[], why?: string): RunControl {
+function inherited(up: RunControl, gaps: readonly GapCode[], why?: RunEvidenceWhy): RunControl {
   return answer(union(up.gaps, gaps), up.decider, up.label, up.why ?? why);
 }
 

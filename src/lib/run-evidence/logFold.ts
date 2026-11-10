@@ -23,7 +23,7 @@ import {
   RUN_EVIDENCE_VERSION,
   type RunNoteKind,
 } from './kinds.js';
-import type { RunEvidenceUnread, StoredDecision, StoredStop } from './rows.js';
+import type { RunEvidenceUnread, RunEvidenceWhy, StoredDecision, StoredStop } from './rows.js';
 
 /** A refusal with a fixed reason of its own. Any other refusal is named by its row. */
 class Refusal extends EvidenceRefusal {
@@ -58,7 +58,7 @@ export interface LogFold {
   readonly log: StoredLog;
   readonly address: LogAddress;
   /** Why this log holds no evidence; absent when it does. */
-  readonly why?: string;
+  readonly why?: RunEvidenceWhy;
   readonly collects?: LogCollects;
   readonly gaps: Set<GapCode>;
   readonly taint: Map<Channel, Set<GapCode>>;
@@ -91,7 +91,7 @@ function refused(fold: LogFold, channels: readonly Channel[], index: number, rea
 }
 
 /** Does this log hold evidence? Absent, malformed and newer all answer no, each with its own name. */
-function collectsOf(log: StoredLog): { collects?: LogCollects; why?: string } {
+function collectsOf(log: StoredLog): { collects?: LogCollects; why?: RunEvidenceWhy } {
   try {
     const opened = log.entries.find((entry) => ownField(entry, 'kind') === 'opened');
     const raw = opened === undefined ? undefined : ownField(opened, 'collects');

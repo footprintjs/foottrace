@@ -16,7 +16,7 @@ import { type ControlDecision, type ControlEdge, decisionLabel, foldControl } fr
 import type { Admission } from './fields.js';
 import { RUN_EVIDENCE_LIMITS, type RunEvidenceLimits } from './kinds.js';
 import { type LogFold, mergeEdges, newFold, walk } from './logFold.js';
-import type { RunControl, RunEvidence, StoredDecision, StoredStage, StoredStop } from './rows.js';
+import type { RunControl, RunEvidence, RunEvidenceWhy, StoredDecision, StoredStage, StoredStop } from './rows.js';
 
 export type { RunEvidence } from './rows.js';
 
@@ -110,7 +110,8 @@ export function foldRunEvidence(
   }));
   const answers = foldControl(edges, decisionMap, commits);
 
-  const nothing = folds.length === 0 ? 'no-log' : held.length === 0 ? folds[0].why! : undefined;
+  const nothing: RunEvidenceWhy | undefined =
+    folds.length === 0 ? 'no-log' : held.length === 0 ? folds[0].why! : undefined;
   const control = (id: string): RunControl => {
     if (nothing !== undefined) return Object.freeze({ status: 'not-collected', gaps: NO_GAPS, why: nothing });
     const known = typeof id === 'string' ? answers.get(id) : undefined;
