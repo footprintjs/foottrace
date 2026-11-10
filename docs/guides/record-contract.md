@@ -33,6 +33,8 @@ One bundle is one stage's commit: what it wrote, as the log spells it.
 | `updates` | object | no | Values for `merge` rows, keyed by path. Plain object. |
 | `redactedPaths` | array of strings | no | Paths a redaction policy cleared; the fold reports them. |
 | `tags` | array of strings | no | Names declared for the stage at build time. Never a value. |
+| `untrackedSources` | array of `'args'`, `'env'`, `'silent'` | no | Read paths the stage consumed without read tracking. Absent when the stage used none. The causal readers report the slice as possibly incomplete at such a stage. |
+| `phase` | `'exit'` or `'repeat'` | no | Which continuation of a stage's execution this bundle is. The first bundle of a `runtimeStageId` is the stage's own and has no `phase`. `'exit'` is a subflow mount's exit after its merge-back bundle; `'repeat'` is a fork child's fan-out settle. Readers group bundles by `runtimeStageId` and read this field. |
 | `idx`, `stage`, `stageId` | | no | Advisory. The reader derives the commit index from position. |
 
 A trace row's `verb` is one of exactly four: `set`, `merge`, `append`,
@@ -126,7 +128,7 @@ use, remote commitment or complete external ancestry.
 - The served receipt, injections and the story trace are agentfootprint's
   own keys in the state; the fold carries them like any key.
 - A record version field. The contract is versioned by the foottrace
-  version that reads it, named at the top of this page.
+  version that reads it.
 
 ## Bring your own record
 
