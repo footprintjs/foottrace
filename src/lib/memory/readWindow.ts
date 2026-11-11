@@ -165,7 +165,14 @@ export function readSourcesOf(key: string, window: ReadWindow, lastWriterBefore:
   return { before: at, during: during.reverse() };
 }
 
-/** How sure the source at `at` is, among the `sources` of one read: `undefined` when it is the certain one. */
+/**
+ * How sure the source at `at` is, among the `sources` of one read: `undefined` when it is the certain one.
+ *
+ * `at` must be one of those sources: `sources.before`, or a member of `sources.during`. The function
+ * does not look `at` up, so for any other position the answer says nothing. WHY NO CHECK: every caller
+ * asks once per source it has just taken from `sources`, and a search of `during` on each call would
+ * make a wide window cost its width squared.
+ */
 export function overlapOf(sources: ReadSources, at: number): ReadOverlap | undefined {
   if (sources.during.length === 0) return undefined;
   return at === sources.before ? 'replaced-while-running' : 'written-while-running';
