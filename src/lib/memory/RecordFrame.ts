@@ -107,6 +107,14 @@ export class RecordFrame {
   private readAttempts?: Set<string>;
   private readAttemptsOmitted?: number;
   #sourceFrame?: SourceFrame;
+  /**
+   * What this round of the frame has seen of the log (law 2): its length at the frame's FIRST look at
+   * committed state, and at its LATEST. Every look passes {@link observe}. `commit` hands both to
+   * `recordCommit`, which puts them on the bundle when they say something a reader needs
+   * (`CommitBundle.beganAt` / `sawUntil`).
+   */
+  #beganAt?: number;
+  #sawUntil?: number;
   /** A commit ended the round of staging: the next write starts a new one ({@link getTransactionBuffer}). */
   #committed = false;
 
@@ -195,6 +203,7 @@ export class RecordFrame {
   private firstTouch(): Record<string, unknown> {
     if (!this.base) {
       this.base = this.state.getState();
+      this.observe();
       const capture = captureFor(this.state);
       if (capture && capture === captureFor(this.log)) {
         try {
@@ -404,6 +413,7 @@ export class RecordFrame {
       : nativeGet(this.firstTouch(), at, undefined, observation);
     if (typeof fromSnapshot !== 'undefined' || this.buffer?.hasHardWrite(at)) return fromSnapshot;
     if (observation) observation.live = true;
+    this.observe();
     const live = this.state.getValue(this._address, path, key, observation);
     // Tier 2 after the first write: keep the diff base exact (see above).
     if (this.buffer && live !== null && typeof live === 'object') this.buffer.detachBase(at);
@@ -436,12 +446,33 @@ export class RecordFrame {
    * view. Typed as `SharedMemory · getValue` types it, which `StageContext · getRoot` hands on.
    */
   readLive(key: string) {
+    this.observe();
     return this.state.getValue(this._address, [], key);
   }
 
   /** Live committed state at `key` at the root — typed as `SharedMemory · getValue` (`StageContext · getGlobal`). */
   readGlobal(key: string) {
+    this.observe();
     return this.state.getValue([], [], key);
+  }
+
+  /**
+   * Note one look at committed state: the log's length now.
+   *
+   * WHY ONE DOOR: a reader dates this step's reads from these two numbers alone (`readWindow.ts`).
+   * The first-touch view shows state as it stood at the first look; a read answered from live state
+   * shows it as it stands at that look. A look that did not pass here could be of a commit the
+   * record says the step never saw, and the walk back would leave out the step that really wrote
+   * what was read. So the four places this frame reads `state` are the four callers, and
+   * `test/lib/memory/read-window-writer.test.ts` pins that there is no fifth.
+   *
+   * The log only grows, so the latest look holds the largest length.
+   */
+  private observe(): void {
+    const length = this.log?.length;
+    if (length === undefined) return;
+    this.#beganAt ??= length;
+    this.#sawUntil = length;
   }
 
   /** Did a staged op touch `path` — on it, above it or below it? (A report's question; never the hot path.) */
@@ -471,7 +502,8 @@ export class RecordFrame {
    */
   commit(stampOf: () => CommitStamp): void {
     const payload = this.buffer?.commit();
-    recordCommit(payload, stampOf(), { state: this.state, mirror: this._mirror, log: this.log });
+    const into = { state: this.state, mirror: this._mirror, log: this.log };
+    recordCommit(payload, stampOf(), into, this.#beganAt, this.#sawUntil);
     this.#committed = true;
   }
 
@@ -497,6 +529,8 @@ export class RecordFrame {
     }
     this.buffer = undefined;
     this.base = undefined;
+    this.#beganAt = undefined;
+    this.#sawUntil = undefined;
     this.#committed = false;
   }
 

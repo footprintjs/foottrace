@@ -16,6 +16,8 @@ import { captureFor } from '../read-sources/bindings.js';
  *      `stage`, `stageId`, `runtimeStageId`, then `untrackedSources`, `tags` and `phase`, each only
  *      when it has something to say (absent, never empty). `EventLog · record` appends `idx`. The
  *      names are names: no redaction reads them, and no encoding (`commitValues`) changes them.
+ *      Last come `beganAt` and `sawUntil`, what the frame saw of the log ({@link seenOf}), each only
+ *      when it says something: the frame knows them, the engine does not supply them.
  *   4. `about` goes to the log BESIDE the bundle, read with the names; it is never in the bundle, so
  *      it moves no byte of the log, the mirror or live state.
  *
@@ -55,12 +57,22 @@ export interface CommitTargets {
 
 type Names = Pick<CommitBundle, 'stage' | 'stageId' | 'runtimeStageId' | 'untrackedSources' | 'tags' | 'phase'>;
 
-/** Record one commit (the module law). `payload` absent = the empty commit. */
-export function recordCommit(payload: CommitPayload | undefined, stamp: CommitStamp, into: CommitTargets): void {
+/**
+ * Record one commit (the module law). `payload` absent = the empty commit. `beganAt` and `sawUntil`
+ * are the log's length at the committing frame's first look at state and at its latest, when it looked.
+ */
+export function recordCommit(
+  payload: CommitPayload | undefined,
+  stamp: CommitStamp,
+  into: CommitTargets,
+  beganAt?: number,
+  sawUntil?: number,
+): void {
   const names = namesOf(stamp);
   const about = stamp.about;
+  const seen = seenOf(into.log?.length, beganAt, sawUntil);
   if (payload === undefined) {
-    into.log?.record(bundleOf({}, {}, [], [], names), about);
+    into.log?.record(bundleOf({}, {}, [], [], names, seen), about);
     return;
   }
   const { redactedPaths, trace } = payload;
@@ -71,11 +83,34 @@ export function recordCommit(payload: CommitPayload | undefined, stamp: CommitSt
   const updates = scrubPatch(payload.updates, redactedPaths);
   into.mirror?.applyPatch(overwrite, updates, trace);
   if (!into.log) return;
-  const bundle = bundleOf(overwrite, updates, [...redactedPaths], trace, names);
+  const bundle = bundleOf(overwrite, updates, [...redactedPaths], trace, names, seen);
   into.log.record(bundle, about);
   if (capture && capture === captureFor(into.log) && sourceClock !== undefined && bundle.idx !== undefined) {
     capture.confirm(sourceClock, bundle.idx, trace, redactedPaths);
   }
+}
+
+/** What a bundle says about when its frame looked at state (`CommitBundle.beganAt` / `sawUntil`). */
+type Seen = Required<Pick<CommitBundle, 'beganAt'>> & Pick<CommitBundle, 'sawUntil'>;
+
+/**
+ * What the bundle about to take index `length` says of its frame's looks at state, or nothing.
+ *
+ * WHY EACH IS KEPT ONLY SOMETIMES. A reader dates a step's reads at its own commit unless the bundle
+ * says otherwise, and that is right whenever nothing was committed since the frame's first look: a
+ * run whose steps go one after another says nothing here and keeps its bytes. `beganAt` is kept when
+ * a commit did land since that first look: the step's reads are then dated there. `sawUntil` is kept
+ * when the frame also looked at live state after such a commit: the commits from `beganAt` up to it
+ * are the ones a read may have seen. A frame that only read what it saw when it began says
+ * `beganAt` alone, and its reads stay exact however many siblings committed first.
+ */
+function seenOf(
+  length: number | undefined,
+  beganAt: number | undefined,
+  sawUntil: number | undefined,
+): Seen | undefined {
+  if (length === undefined || beganAt === undefined || beganAt >= length) return undefined;
+  return sawUntil !== undefined && sawUntil > beganAt ? { beganAt, sawUntil } : { beganAt };
 }
 
 /** THE bundle (law 3): the payload's four keys, the three names, then each optional name that has something to say. */
@@ -85,12 +120,17 @@ function bundleOf(
   redactedPaths: string[],
   trace: TraceEntry[],
   names: Names,
+  seen: Seen | undefined,
 ): CommitBundle {
   const { stage, stageId, runtimeStageId, untrackedSources, tags, phase } = names;
   const bundle: CommitBundle = { overwrite, updates, redactedPaths, trace, stage, stageId, runtimeStageId };
   if (untrackedSources) bundle.untrackedSources = untrackedSources;
   if (tags) bundle.tags = tags;
   if (phase) bundle.phase = phase;
+  if (seen) {
+    bundle.beganAt = seen.beganAt;
+    if (seen.sawUntil !== undefined) bundle.sawUntil = seen.sawUntil;
+  }
   return bundle;
 }
 
