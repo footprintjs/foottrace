@@ -279,7 +279,7 @@ export function managedReleaseFixture({ version = '1.10.0', published = false, m
       if (/\/commits\/[a-f0-9]{40}\/pulls$/.test(path)) return { data: pulls.filter((p) => p.merge_commit_sha === path.split('/').at(-2)) };
       if (/\/pulls\/\d+\/reviews$/.test(path)) return { data: (pulls.find((p) => p.number === Number(path.split('/').at(-2))) ?? assert.fail('Unknown PR')).reviews ?? [] };
       if (/\/pulls\/\d+$/.test(path)) return { data: pulls.find((p) => p.number === Number(path.split('/').at(-1))) ?? assert.fail('Unknown PR') };
-      if (path.endsWith('/pulls')) return { data: pulls.filter((p) => p.state === url.searchParams.get('state')) };
+      if (path.endsWith('/pulls')) { const state = url.searchParams.get('state'); return { data: pulls.filter((p) => state === 'all' || p.state === state) }; }
       if (/\/releases\/\d+\/assets$/.test(path)) return { data: [...releases.values()].find((r) => r.id === Number(path.split('/').at(-2)))?.assets ?? [] };
       if (/\/releases\/assets\/\d+$/.test(path)) return { data: [...releases.values()].flatMap((r) => r.assets).find((a) => a.id === Number(path.split('/').at(-1))).raw };
     }
