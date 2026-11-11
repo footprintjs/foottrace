@@ -35,7 +35,9 @@ One bundle is one stage's commit: what it wrote, as the log spells it.
 | `tags` | array of strings | no | Names declared for the stage at build time. Never a value. |
 | `untrackedSources` | array of `'args'`, `'env'`, `'silent'` | no | Read paths the stage consumed without read tracking. Absent when the stage used none. The causal readers report the slice as possibly incomplete at such a stage. |
 | `phase` | `'exit'` or `'repeat'` | no | Which continuation of a stage's execution this bundle is. The first bundle of a `runtimeStageId` is the stage's own and has no `phase`. `'exit'` is a subflow mount's exit after its merge-back bundle; `'repeat'` is a fork child's fan-out settle. Readers group bundles by `runtimeStageId` and read this field. |
-| `idx`, `stage`, `stageId` | | no | Advisory. The reader derives the commit index from position. |
+| `beganAt` | whole number | no | How many commits the log held when the stage first looked at state. Written only when another stage committed between that look and this commit. It dates the stage's reads: they saw state as it stood at `beganAt`, not at this commit. |
+| `sawUntil` | whole number | no | How many commits the log held when the stage last read live state. Written only with `beganAt` and only when greater. Commits `beganAt` to `sawUntil - 1` are the stage's read window: a read may have seen any of them. |
+| `idx`, `stage`, `stageId` | | no | Advisory. The reader derives the commit index from position. When `beganAt` is present, `idx` says how far before the bundle it lies; without `idx` the position is used. |
 
 A trace row's `verb` is one of exactly four: `set`, `merge`, `append`,
 `delete`. `path` must be a string: a top-level key or a nested path; a nested path uses
@@ -86,6 +88,15 @@ use, remote commitment or complete external ancestry.
    pause and resume.
 6. **Tags are names, declared up front.** A tag is a string on a bundle,
    decided when the run was built, not a value computed while it ran.
+7. **A bundle says when its stage looked at state, if that is not "just
+   before its commit".** A log is ordered by commit, and stages that run side
+   by side do not read in that order. A producer whose stages run one after
+   another writes neither `beganAt` nor `sawUntil`. A producer that runs
+   stages side by side writes `beganAt` on a stage that another stage
+   committed under, and `sawUntil` when that stage read live state again after
+   such a commit. `RecordFrame` does both for a writer that uses it. A producer
+   that leaves them out gets every read dated at its stage's commit: a read
+   made before a sibling's commit is then attributed to that sibling.
 
 ## What the reader promises
 
@@ -109,6 +120,16 @@ use, remote commitment or complete external ancestry.
   - only in a stored log read back by `readStoredRecord` (1.1.0), where the
     store holds no readable commit for the index: `no readable commit entry for
     this index`
+- **Reads are dated by the stamps.** Every reader that follows a read to its
+  writer (`causalChain`, `sliceForKey`, `forwardSliceForKey`, `keyTimeline`,
+  the cause graph, the PROV export) asks one rule: a read saw the last write
+  before the stage began, or a write inside its read window. With no write of
+  the key in the window the source is certain. With one, every source of that
+  read is marked `overlap: 'replaced-while-running' | 'written-while-running'`
+  and the answer carries a `'concurrent-write'` note: possible sources, the
+  real one among them. The fold does not read the stamps. A door that takes
+  records from outside (the cause graph, the PROV export) refuses a bundle
+  whose stamps cannot be stamps; it never drops them.
 - **One saved-row boundary.** `isCommitBundle(row)` applies the same checks as
   replay. Causal readers still accept typed `CommitBundle[]`, not unknown input.
   A consumer preparing a causal query from stored rows must validate every row

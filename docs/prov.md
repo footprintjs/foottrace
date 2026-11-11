@@ -53,6 +53,7 @@ Use a distinct namespace for each export scope whose identities must differ.
 | A delete | A binding-deletion entity marked `ft:deleted`; no claim that a historical snapshot was destroyed |
 | A read prefix | Extension-only `ft:Read`/candidate evidence and `ft:possibleDerivation` with `reads-prefix` attribution |
 | Stage-level reads | Conservative candidate evidence, with a `conservative` gap |
+| A read by a step that ran beside others | The candidate is the last write before the step BEGAN (`beganAt`), not before its commit. When the key was also written inside the step's read window (`sawUntil`), no candidate is named and the export says `read basis is not a single recorded binding` |
 | A supported earlier governing decider | `prov:wasInformedBy` and qualified communication, with `ft:relation: 'control'` |
 | Hidden or absent evidence | A named gap, never an apparently healthy empty fact |
 

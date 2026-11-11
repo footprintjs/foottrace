@@ -41,6 +41,36 @@ log.sinkFailures;                 // 0 — or how many entries the sink did not 
 
 Each entry is stored as a `RecordEntry`: the method's entry plus the method's name as `kind`; a note's own kind is stored as `note`. `readStoredRecord` (`foottrace`) reads them back — see [time travel](../time-travel/README.md).
 
+## When a step read (the read window)
+
+A log is ordered by commit, and a step commits when it ends. For steps that run one after another that is also the order of their reads. For steps side by side it is not: a branch that reads `x` when it starts and commits last sits in the log after a sibling that wrote `x` in between. A reader that dated the read at the branch's commit named the sibling as the source and left out the step whose value was really read.
+
+So the writer says when a step looked at state, and only when that is not "just before its own commit":
+
+| On the step's first bundle | Written when | A reader takes it to mean |
+|---|---|---|
+| nothing | no other step committed between the step's first look and its commit | the step saw every commit before its own |
+| `beganAt` | another step committed in that time | the step's reads are dated at `beganAt`, not at its commit |
+| `beganAt` and `sawUntil` | the step also read LIVE state after such a commit | commits `beganAt` to `sawUntil - 1` are its window: a read may have seen them |
+
+`RecordFrame` has two read tiers: the view pinned at the first look, and live state for a key that view cannot answer. Every place the frame reads state notes the log's length (`RecordFrame · observe`, one door, pinned by a test), and `recordCommit · seenOf` decides what goes on the bundle.
+
+One rule reads it (`readWindow.ts · readSourcesOf`): a read of a key saw the last write before the step began, or a write of that key inside its window.
+
+```ts
+// seed writes x. slow reads x and waits. fast replaces x and commits. slow commits last.
+causalChain(log, 'slow#2', reads); // slow <- seed via x        (exact: slow never looked again)
+// had slow read x a second time after fast committed:
+//   slow <- seed via x   overlap: 'replaced-while-running'
+//   slow <- fast via x   overlap: 'written-while-running'       (both possible, the real one is among them)
+```
+
+WHY two numbers and not one: with `beganAt` alone a reader would have to treat every commit up to the step's own as possibly read, and the common case (children of a fork that each read state once, at their start) would come back as a list of maybes. `sawUntil` is absent in that case, so the answer is one certain source.
+
+WHY the stamps are refused, not dropped, at a door that takes records from outside (`admitStamps`): a dropped stamp reads as "saw everything before its commit", the very dating the stamp corrects.
+
+What it does not cover is listed at the top of `readWindow.ts`. Where the idea comes from, and what is ours: [REFERENCES.md](REFERENCES.md).
+
 ## Run evidence rides the same doors
 
 A log built with `collects: { reads }` also keeps what an offline reader needs to say why a stage ran: `about` beside a commit (`record(bundle, about)`, or `CommitStamp.about` through a frame), three `run.*` notes (`noteRun`, which stamps `seq` as `record` stamps `idx`) and `runNotes` on `closed`. A lost `about` or note is counted like any lost entry, and the commit still goes. `keepsEvidence` is the one question a writer's seam asks first. The bundle never changes; the shapes and their bounds are in [run-evidence](../run-evidence/README.md).
