@@ -18,6 +18,12 @@ import { describe, expect, it } from 'vitest';
 
 import { deepEqual } from '../../../../src/lib/memory/equality.js';
 
+/**
+ * Thousands of generated cases: seconds under coverage on a shared CI machine, where the default
+ * 5 s limit is too close. The limit is on the clock only; the number of cases is fixed.
+ */
+const PROPERTY_TIME_LIMIT_MS = 120_000;
+
 type Kind = 'leaf' | 'array' | 'set' | 'object';
 interface Node {
   readonly kind: Kind;
@@ -133,34 +139,46 @@ const nearCopyArb = planArb.chain((plan) =>
 );
 
 describe('property: deepEqual agrees with an independent judge on values that point back at themselves', () => {
-  it('a value and a near copy of it, asked both ways round', () => {
-    fc.assert(
-      fc.property(nearCopyArb, ([a, b]) => {
-        const equal = judge(a, b);
-        expect(deepEqual(build(a), build(b))).toBe(equal);
-        expect(deepEqual(build(b), build(a))).toBe(equal);
-      }),
-      { numRuns: 20000 },
-    );
-  });
+  it(
+    'a value and a near copy of it, asked both ways round',
+    () => {
+      fc.assert(
+        fc.property(nearCopyArb, ([a, b]) => {
+          const equal = judge(a, b);
+          expect(deepEqual(build(a), build(b))).toBe(equal);
+          expect(deepEqual(build(b), build(a))).toBe(equal);
+        }),
+        { numRuns: 20000 },
+      );
+    },
+    PROPERTY_TIME_LIMIT_MS,
+  );
 
-  it('two independent values', () => {
-    fc.assert(
-      fc.property(planArb, planArb, (a, b) => {
-        expect(deepEqual(build(a), build(b))).toBe(judge(a, b));
-      }),
-      { numRuns: 5000 },
-    );
-  });
+  it(
+    'two independent values',
+    () => {
+      fc.assert(
+        fc.property(planArb, planArb, (a, b) => {
+          expect(deepEqual(build(a), build(b))).toBe(judge(a, b));
+        }),
+        { numRuns: 5000 },
+      );
+    },
+    PROPERTY_TIME_LIMIT_MS,
+  );
 
-  it('a value and a second build of the same plan are equal, and so is the value and itself', () => {
-    fc.assert(
-      fc.property(planArb, (plan) => {
-        const value = build(plan);
-        expect(deepEqual(value, build(plan))).toBe(true);
-        expect(deepEqual(value, value)).toBe(true);
-      }),
-      { numRuns: 2000 },
-    );
-  });
+  it(
+    'a value and a second build of the same plan are equal, and so is the value and itself',
+    () => {
+      fc.assert(
+        fc.property(planArb, (plan) => {
+          const value = build(plan);
+          expect(deepEqual(value, build(plan))).toBe(true);
+          expect(deepEqual(value, value)).toBe(true);
+        }),
+        { numRuns: 2000 },
+      );
+    },
+    PROPERTY_TIME_LIMIT_MS,
+  );
 });

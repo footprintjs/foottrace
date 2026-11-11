@@ -15,6 +15,12 @@ import { describe, expect, it } from 'vitest';
 
 import { deepEqual } from '../../../../src/lib/memory/equality.js';
 
+/**
+ * Thousands of generated cases: seconds under coverage on a shared CI machine, where the default
+ * 5 s limit is too close. The limit is on the clock only; the number of cases is fixed.
+ */
+const PROPERTY_TIME_LIMIT_MS = 120_000;
+
 type Node =
   | { readonly kind: 'leaf'; readonly value: number }
   | { readonly kind: 'array' | 'set' | 'object'; readonly kids: readonly number[] };
@@ -99,31 +105,43 @@ const nearCopyArb = planArb.chain((plan) =>
 );
 
 describe('property: deepEqual agrees with an independent judge on shared values that hold sets', () => {
-  it('two independent values', () => {
-    fc.assert(
-      fc.property(planArb, planArb, (a, b) => {
-        expect(deepEqual(build(a), build(b))).toBe(canon(a) === canon(b));
-      }),
-      { numRuns: 2000 },
-    );
-  });
+  it(
+    'two independent values',
+    () => {
+      fc.assert(
+        fc.property(planArb, planArb, (a, b) => {
+          expect(deepEqual(build(a), build(b))).toBe(canon(a) === canon(b));
+        }),
+        { numRuns: 2000 },
+      );
+    },
+    PROPERTY_TIME_LIMIT_MS,
+  );
 
-  it('a value and a near copy of it (the cases that are almost equal)', () => {
-    fc.assert(
-      fc.property(nearCopyArb, ([a, b]) => {
-        expect(deepEqual(build(a), build(b))).toBe(canon(a) === canon(b));
-        expect(deepEqual(build(b), build(a))).toBe(canon(a) === canon(b));
-      }),
-      { numRuns: 5000 },
-    );
-  });
+  it(
+    'a value and a near copy of it (the cases that are almost equal)',
+    () => {
+      fc.assert(
+        fc.property(nearCopyArb, ([a, b]) => {
+          expect(deepEqual(build(a), build(b))).toBe(canon(a) === canon(b));
+          expect(deepEqual(build(b), build(a))).toBe(canon(a) === canon(b));
+        }),
+        { numRuns: 5000 },
+      );
+    },
+    PROPERTY_TIME_LIMIT_MS,
+  );
 
-  it('a value and a second build of the same plan are equal', () => {
-    fc.assert(
-      fc.property(planArb, (plan) => {
-        expect(deepEqual(build(plan), build(plan))).toBe(true);
-      }),
-      { numRuns: 1000 },
-    );
-  });
+  it(
+    'a value and a second build of the same plan are equal',
+    () => {
+      fc.assert(
+        fc.property(planArb, (plan) => {
+          expect(deepEqual(build(plan), build(plan))).toBe(true);
+        }),
+        { numRuns: 1000 },
+      );
+    },
+    PROPERTY_TIME_LIMIT_MS,
+  );
 });
