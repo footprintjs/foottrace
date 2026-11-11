@@ -77,7 +77,7 @@ import {
   truncatedNote,
   unknownKeyNote,
   viewNotPlacedNote,
-} from '../../../src/lib/slice/keyIndex';
+} from '../../../src/lib/slice/notes';
 import {
   arrayProvenance,
   causalChain,

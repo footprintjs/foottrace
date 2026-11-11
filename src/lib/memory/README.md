@@ -6,11 +6,11 @@ This directory owns the record, not the engine that produces it. It was extracte
 
 - Leaves: record types, encoded paths, safe nested access, value equality and merging.
 - Verb law: one implementation of set/merge/append/delete replay, used by live commits and readers.
-- Staging and commit: the private transaction buffer, admission, encoding, scrub bytes and bundle construction.
+- Staging and commit: the private transaction buffer (`TransactionBuffer.ts`) stages a step's writes and serves its reads. At commit it hands what was staged (`staged.ts`) to one of two row layouts (`fullRows.ts`, `deltaRows.ts`) and admits the result (`admission.ts`); a family of rows that does not fold back is written as what the step read (`readBack.ts`). Then scrub bytes (`scrub.ts`) and bundle construction (`recordCommit.ts`). The layouts only read what was staged, which is why they are files of their own and not methods of the buffer.
 - Staged reads: `hardWriteCoverage.ts` checks literal path prefixes; the buffer owns hard-write keys and `RecordFrame` uses them only for an undefined read. Hard sets/deletes own their path and descendants; merges alone do not mask live fallback.
 - Public writer: `SharedMemory` holds copy-on-write state, `EventLog` owns the frozen base and append-only bundles, and `RecordFrame` stages one step's reads/writes and commits them.
 - Sink port (1.1.0): `RecordSink` and `memorySink` (`sink.ts`) — where a log's entries go as they land. `EventLog` delivers, counts and reports; the log's own record never depends on the sink.
-- Readers: commit queries and causal analysis; slice and time-travel libraries compose these rules.
+- Readers: commit queries and causal analysis; slice and time-travel libraries compose these rules. The walk back is `backtrack.ts`, with what it hands out and takes in (`backtrackTypes.ts`), the two ways to read its result (`backtrackViews.ts`) and its writer lookup (`writerLookup.ts`) beside it.
 
 Dependency ranks are explicit in `scripts/layers.json`. The checker rejects unranked source, upward runtime edges, cycles, external imports and unresolved or opaque imports. This package loads no engine, scope, runner, provider or Node API.
 

@@ -67,7 +67,7 @@ const edgesOf = (root: CausalNode) =>
   );
 const walk = (log: CommitBundle[], id: string, reads: Record<string, string[]>) =>
   causalChain(log, `${id}#0`, keysReadFromMap(reads).lookup)!;
-/** The `'pre-run-view'` note of a timeline, word for word (`slice/keyIndex.ts · preRunViewNote`). */
+/** The `'pre-run-view'` note of a timeline, word for word (`slice/notes.ts · preRunViewNote`). */
 const PRE_RUN_VIEW_WORDS = (key: string, at: string) =>
   `'${key}' at ${at} is held, in whole or in part, in a set row the writer built on its step's view, and that ` +
   'view held no write of the key (or may have held none, where the moment lists other writes it could have ' +

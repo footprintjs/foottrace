@@ -28,7 +28,7 @@ import {
   nestedRowsNote,
   redactedValueNote,
   viewNotPlacedNote,
-} from './keyIndex.js';
+} from './notes.js';
 import { resolveKeysReadSource } from './keysReadSources.js';
 import type { KeysReadSource, StateKey, VariableSlice } from './types.js';
 

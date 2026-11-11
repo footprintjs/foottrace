@@ -403,8 +403,9 @@ export function applySmartMergeInto(
  * every recorded value placed BY REFERENCE — no clone, so it costs what the
  * bundle wrote and nothing more. It aliases the payload and every subtree of
  * `base` the bundle did not write, and edits neither. Never hand it out,
- * store it or write through it: `TransactionBuffer` builds one to ask whether
- * a bundle folds back to what the stage read, then drops it.
+ * store it or write through it: a commit builds one to ask whether a bundle
+ * folds back to what the stage read (`admission.ts · lossyFamilies`), or what
+ * value its rows give a path (`fullRows.ts · fullRowsValue`), then drops it.
  */
 export function dryFold(base: any, updates: MemoryPatch, overwrite: MemoryPatch, trace: TraceEntry[]): any {
   return foldRows(ownedRootOf(base), updates, overwrite, trace, 'byReference');

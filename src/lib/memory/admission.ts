@@ -16,20 +16,12 @@
  */
 
 import { isContainer, nativeGet as _get, ownChild } from './pathOps.js';
+import type { StagedOp } from './staged.js';
 import type { MemoryPatch, TraceEntry } from './types.js';
 import { deepEqual, DELIM, dryFold } from './utils.js';
 
 /** The rows a payload is built from, before the commit names its redacted paths. */
 export type Rows = { overwrite: MemoryPatch; updates: MemoryPatch; trace: TraceEntry[] };
-
-/** One staged op, as `TransactionBuffer` records it. */
-export type StagedOp = {
-  path: string;
-  verb: string;
-  readKeys?: string[];
-  readAttempts?: readonly string[];
-  readAttemptsOmitted?: number;
-};
 
 /** A staged path in a {@link Family}, with its last op's read prefix. */
 export type Member = {

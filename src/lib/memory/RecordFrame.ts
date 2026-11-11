@@ -42,13 +42,13 @@ import { captureFor } from '../read-sources/bindings.js';
  */
 
 import { isViewRow } from './builtOn.js';
-import type { OpVerb } from './deltaEncoding.js';
 import type { EventLog } from './EventLog.js';
 import { nativeGet, type NativeReadObservation } from './pathOps.js';
 import type { SourceFrame } from '../read-sources/capture.js';
 import type { ReadSourceOccurrence, ReadSourceOwner } from '../read-sources/types.js';
 import { type CommitStamp, recordCommit } from './recordCommit.js';
 import type { SharedMemory } from './SharedMemory.js';
+import type { OpVerb } from './staged.js';
 import { TransactionBuffer } from './TransactionBuffer.js';
 import type { CommitValuesMode, WriteProvenanceMode } from './types.js';
 
@@ -63,7 +63,7 @@ export interface RecordEncoding {
 }
 
 /**
- * What a stage can stage (law 7) — the transaction buffer's op verbs (`deltaEncoding.ts · OpVerb`), one
+ * What a stage can stage (law 7) — the transaction buffer's op verbs (`staged.ts · OpVerb`), one
  * union. `append` is not one: it is how the log encodes a grown array (`'delta'`).
  */
 export type WriteVerb = OpVerb;
