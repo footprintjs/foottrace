@@ -464,7 +464,7 @@ describe('back and forward agree, commit by commit', () => {
   //
   // The space is bounded on purpose, by two older facts of the graph that are not this change's:
   //   - a reader commits once: a later commit of a step is not another run of its reads;
-  //   - every row here is on the key itself. The node of a path INSIDE a key lists the readers of the
+  //   - no row here is on a path inside a key. The node of a path INSIDE a key lists the readers of the
   //     whole key among its children, and the way back from such a reader names the node of the whole
   //     key at that commit, not the node of the path (so that child has no way back to that node; the
   //     released version does the same). So this is a check of these logs, not a law of the graph. What
