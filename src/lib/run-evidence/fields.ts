@@ -4,10 +4,10 @@
  * refusal is `truncated`; anything else is `invalid-data`. A refusal carries no text from the file.
  */
 
-import { boundedList, boundedName, EvidenceRefusal, ownData, spendFields } from '../evidence/admission.js';
+import { boundedList, EvidenceRefusal, ownData, spendFields } from '../evidence/admission.js';
 import type { GapCode } from '../evidence/codes.js';
 import { executionIndexOf } from '../ids/runtimeStageId.js';
-import { isCount, type RUN_EVIDENCE_LIMITS } from './kinds.js';
+import { checkedExecutionId, isCount, type RUN_EVIDENCE_LIMITS } from './kinds.js';
 
 /** One refused row: never a partial one. */
 export class RowRefusal extends EvidenceRefusal {
@@ -84,13 +84,13 @@ export function field<K extends string, T>(name: K, raw: unknown, read: (value: 
   return (raw === undefined ? {} : { [name]: read(raw) }) as { [P in K]?: T };
 }
 
-const ID_GRAMMAR = /^[^#]+#(0|[1-9]\d*)$/;
-
-/** A runtimeStageId that passes the grammar: one `#`, a safe execution index, no control characters. */
+/**
+ * A runtimeStageId that passes the grammar the writer also holds (`kinds.ts · checkedExecutionId`): one `#`, a safe
+ * execution index, no control characters. Past the `text` cap it is `truncated`, as any other text is.
+ */
 export function executionId(value: unknown, a: Admission): string {
-  const id = boundedName(value, a.limits.text, refuse);
-  if (!ID_GRAMMAR.test(id) || !Number.isSafeInteger(executionIndexOf(id))) throw refuse();
-  return id;
+  if (typeof value === 'string' && value.length > a.limits.text) throw tooMany();
+  return checkedExecutionId(value, a.limits.text, refuse);
 }
 
 /** Is `value` a runtimeStageId? For text that is only named, such as a mount's segment of an address. */

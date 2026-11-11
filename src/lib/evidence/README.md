@@ -5,6 +5,13 @@ and reference-only requirement records. It imports no engine, graph walker,
 storage host, provider or platform runtime. Cause readers consume this leaf;
 root requirement imports do not load the optional cause algorithms.
 
+- `marks.ts` is the one admission of attention marks (a fixed reason, a named kind,
+  evidence references only), shared by the writer's `about`, the run-evidence reader
+  and the cause graph.
+- `readAttempts.ts` holds the read-attempt window: `READ_ATTEMPT_LIMIT`, which
+  `RecordFrame` keeps to, and `readAttemptWindow`, which the prov and cause readers
+  use to admit `readAttemptsOmitted`.
+
 `RequirementResult`, `RequirementCheck`, `RequirementCheckDisposition`, `RequirementReason`,
 `readRequirementResults`, `RequirementValidationError` and
 `REQUIREMENT_RESULT_LIMITS` have one public door: `foottrace`. `GapCode` retains

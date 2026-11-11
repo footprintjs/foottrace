@@ -169,7 +169,7 @@ export function createStoredRecordGraph(host: StoredRecordHost, options: RecordG
                   log.commitLog.map((bundle) => bundle.runtimeStageId),
                   budget,
                 );
-          const stored: Gap['code'][] = record.unread.length || log.gaps.length ? ['not-collected'] : [];
+          const stored: Gap['code'][] = record.unread.length ? ['not-collected'] : [];
           return {
             scope: {
               address,

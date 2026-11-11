@@ -14,10 +14,10 @@ import type {
 
 const descriptors = { translateTrapErrors: true, requireOwnValue: true };
 const refuse = () => new TraceMetadataError();
-export const own = (value: unknown, key: string): unknown => ownData(value, key, refuse, descriptors);
+const own = (value: unknown, key: string): unknown => ownData(value, key, refuse, descriptors);
 
 /** Decoded inert objects only. Reflection can run Proxy traps; this is not a Proxy sandbox. */
-export class Admission {
+class Admission {
   private fields = 250000;
   private strings = 2000000;
   segments = 0;
@@ -103,14 +103,14 @@ export class Admission {
     });
   }
 }
-export function integer(value: unknown, minimum = 0, maximum = Number.MAX_SAFE_INTEGER): number {
+function integer(value: unknown, minimum = 0, maximum = Number.MAX_SAFE_INTEGER): number {
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < minimum || value > maximum) throw refuse();
   return value;
 }
 export function earlier(a: TraceMetadataPosition, b: TraceMetadataPosition): boolean {
   return a.commitIndex < b.commitIndex || (a.commitIndex === b.commitIndex && a.traceIndex < b.traceIndex);
 }
-export function checkPosition(position: TraceMetadataPosition, commits: readonly TraceMetadataCommit[]): void {
+function checkPosition(position: TraceMetadataPosition, commits: readonly TraceMetadataCommit[]): void {
   if (
     position.commitIndex > commits.length ||
     (position.commitIndex === commits.length
@@ -119,7 +119,7 @@ export function checkPosition(position: TraceMetadataPosition, commits: readonly
   )
     throw refuse();
 }
-export interface PreparedMetadata extends TraceMetadataInput {
+interface PreparedMetadata extends TraceMetadataInput {
   readonly index: WriterIndex;
   readonly occurrenceCount: number;
   readonly pathSegmentCount: number;
@@ -214,7 +214,7 @@ export function metadataOf(handle: TraceMetadata): PreparedMetadata {
   if (!source) throw new TraceMetadataError('invalid-handle');
   return source;
 }
-export interface AdmittedQuery extends TraceMetadataQuery {
+interface AdmittedQuery extends TraceMetadataQuery {
   readonly maxDepth: number;
   readonly maxNodes: number;
   readonly maxEdges: number;

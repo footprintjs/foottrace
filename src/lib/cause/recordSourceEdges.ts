@@ -16,11 +16,12 @@ function evidence(read: ExactRecordRead): string[] {
     ...(read.occurrence.attemptId && read.occurrence.attemptId.length <= 512 ? [read.occurrence.attemptId] : []),
   ];
 }
-function append(edges: GraphEdge[], edge: GraphEdge, maximum: number): boolean {
-  if (edge.nodeId === 'record:invalid') return false;
-  if (edges.length >= maximum) return false;
+/** An identity past the ID ceiling is invalid data, not a full list: only `'full'` stops a caller's loop. */
+function append(edges: GraphEdge[], edge: GraphEdge, maximum: number): 'added' | 'invalid' | 'full' {
+  if (edge.nodeId === 'record:invalid') return 'invalid';
+  if (edges.length >= maximum) return 'full';
   edges.push(edge);
-  return true;
+  return 'added';
 }
 
 /** An exact source proves a read by an execution; no occurrence-to-write join is recorded. */
@@ -71,33 +72,30 @@ export function inspectSourceParents(
   const edges: GraphEdge[] = [];
   for (const read of reads) {
     if (read.commitIdx === undefined) continue;
-    if (
-      !append(
-        edges,
-        {
-          nodeId: nodeIdFor(scope.address, {
-            runtimeStageId: scope.log[read.commitIdx].runtimeStageId,
-            commitIdx: read.commitIdx,
-            key: read.path,
-          }),
-          kind: 'data',
-          attribution: identity.key !== undefined && !identity.read ? 'stage' : 'recorded-read',
-          evidence: evidence(read),
-        },
-        maximum,
-      )
-    ) {
+    const added = append(
+      edges,
+      {
+        nodeId: nodeIdFor(scope.address, {
+          runtimeStageId: scope.log[read.commitIdx].runtimeStageId,
+          commitIdx: read.commitIdx,
+          key: read.path,
+        }),
+        kind: 'data',
+        attribution: identity.key !== undefined && !identity.read ? 'stage' : 'recorded-read',
+        evidence: evidence(read),
+      },
+      maximum,
+    );
+    if (added === 'invalid') coverage.addGap('invalid-data');
+    if (added === 'full') {
       coverage.addGap('edge-limit');
       break;
     }
   }
   const deciderId = scope.control?.get(identity.runtimeStageId)?.deciderId;
   const parentIndex = scope.log.findIndex((entry) => entry.runtimeStageId === deciderId);
-  if (
-    deciderId &&
-    parentIndex >= 0 &&
-    parentIndex < first &&
-    !append(
+  if (deciderId && parentIndex >= 0 && parentIndex < first) {
+    const added = append(
       edges,
       {
         nodeId: nodeIdFor(scope.address, { runtimeStageId: deciderId, commitIdx: parentIndex }),
@@ -106,9 +104,10 @@ export function inspectSourceParents(
         evidence: ['commit:' + parentIndex],
       },
       maximum,
-    )
-  )
-    coverage.addGap('edge-limit');
+    );
+    if (added === 'invalid') coverage.addGap('invalid-data');
+    if (added === 'full') coverage.addGap('edge-limit');
+  }
   collectSourceChildCoverage(node, first, maximum, coverage.addGap);
   return { adjacency: { edges, complete: coverage.gaps.length === 0 }, gaps: coverage.gaps };
 }
@@ -123,6 +122,7 @@ function collectSourceChildCoverage(
   const { scope, identity } = node,
     children = sourceDataChildren(scope, node, maximum),
     neighbors = new Set(children.edges.map((_, index) => JSON.stringify(['data', index])));
+  if (children.invalid) addGap('invalid-data');
   if (!children.complete) addGap('edge-limit');
   collectControlChildCoverage(scope, identity, firstCommitIndex, neighbors, addGap);
   if (neighbors.size > maximum) addGap('edge-limit');
@@ -137,10 +137,19 @@ export function sourceChildrenCollected(node: ResolvedRecordNode): boolean {
   return true;
 }
 
-/** Forward impact is the exact consuming execution, never an inferred output-write life. */
-export function sourceDataChildren(scope: PreparedRecordScope, node: ResolvedRecordNode, maximum: number): Adjacency {
+/**
+ * Forward impact is the exact consuming execution, never an inferred output-write life. `complete: false` means
+ * the edge list is full; `invalid` means an identity past the ID ceiling was left out, reported by the parent
+ * inspection as `invalid-data`.
+ */
+export function sourceDataChildren(
+  scope: PreparedRecordScope,
+  node: ResolvedRecordNode,
+  maximum: number,
+): Adjacency & { readonly invalid: boolean } {
   const keys = writtenKeysForNode(scope.log[node.commitIndex], node.identity),
     edges: GraphEdge[] = [];
+  let invalid = false;
   for (const read of scope.readSources!.byCommit.get(node.commitIndex) ?? []) {
     if (
       read.commitIdx !== node.commitIndex ||
@@ -151,19 +160,18 @@ export function sourceDataChildren(scope: PreparedRecordScope, node: ResolvedRec
     )
       continue;
     const commitIdx = read.readerCommitIdx;
-    if (
-      !append(
-        edges,
-        {
-          nodeId: nodeIdFor(scope.address, { runtimeStageId: read.occurrence.runtimeStageId, commitIdx }),
-          kind: 'data',
-          attribution: 'recorded-read',
-          evidence: evidence(read),
-        },
-        maximum,
-      )
-    )
-      return { edges, complete: false };
+    const added = append(
+      edges,
+      {
+        nodeId: nodeIdFor(scope.address, { runtimeStageId: read.occurrence.runtimeStageId, commitIdx }),
+        kind: 'data',
+        attribution: 'recorded-read',
+        evidence: evidence(read),
+      },
+      maximum,
+    );
+    if (added === 'invalid') invalid = true;
+    if (added === 'full') return { edges, complete: false, invalid };
   }
-  return { edges, complete: true };
+  return { edges, complete: true, invalid };
 }

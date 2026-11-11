@@ -216,3 +216,58 @@ describe('source coverage review regressions', () => {
     expect(await sufficient.gaps(selected, context())).toEqual([]);
   });
 });
+
+describe('gap codes that name the real limit', () => {
+  it('reports an overlong source identity as invalid data and keeps the remaining source edges', async () => {
+    const long = { logRunId: 'r'.repeat(900), drillPath: [] };
+    const writer = 'w'.repeat(600) + '#0',
+      key = 'k'.repeat(600);
+    const commitLog = [
+      { ...commit(writer, key, []), idx: 0 },
+      { ...commit('first#1', 'n', []), idx: 1 },
+      { ...commit('reader#2', 'out', []), idx: 2 },
+    ];
+    const occurrence = (ordinal: number, name: string, commitIdx: number) => ({
+      ordinal,
+      runtimeStageId: 'reader#2',
+      attemptId: 'reader#2@1',
+      attemptStatus: 'known',
+      frame: 1,
+      key: name,
+      stateAddress: [],
+      source: { kind: 'committed', commitIdx },
+      disposition: 'released',
+    });
+    const g = createRecordGraph([
+      {
+        address: long,
+        commitLog,
+        initialState: {},
+        reads: { [writer]: [], 'first#1': [], 'reader#2': [key, 'n'] },
+        controlDeps: {},
+        attention: {},
+        complete: true,
+        readSources: {
+          record: {
+            version: 1,
+            address: long,
+            segment: 1,
+            status: 'captured',
+            occurrences: [occurrence(1, key, 0), occurrence(2, 'n', 1)],
+            gaps: [],
+            limits: { maxOccurrences: 32, maxPerExecution: 32, maxBytes: 16384, maxOrigins: 32, maxStaging: 32 },
+          },
+          executions: [{ runtimeStageId: 'reader#2', stateAddress: [], attemptIds: ['reader#2@1'] }],
+        },
+      } as RecordScope,
+    ]);
+    const reader = g.nodeId(long, { runtimeStageId: 'reader#2', commitIdx: 2 });
+    const parents = await g.parents(reader, context());
+    expect(parents.edges.map((edge) => edge.nodeId)).toEqual([
+      g.nodeId(long, { runtimeStageId: 'first#1', commitIdx: 1, key: 'n' }),
+    ]);
+    const codes = (await g.gaps(reader, context())).map((gap) => gap.code);
+    expect(codes).toContain('invalid-data');
+    expect(codes).not.toContain('edge-limit');
+  });
+});

@@ -11,7 +11,9 @@
  */
 
 import type { Attention } from '../cause/types.js';
+import { boundedName, type RefuseEvidence } from '../evidence/admission.js';
 import { admitMarks, ATTENTION_LIMITS } from '../evidence/marks.js';
+import { executionIndexOf } from '../ids/runtimeStageId.js';
 
 /**
  * The one integer `opened.collects.v` holds. Additive fields keep it; a reader of a larger `v` says `newer-writer`. A new
@@ -46,7 +48,10 @@ export const RUN_EVIDENCE_LIMITS = /* @__PURE__ */ Object.freeze({
   chosen: 256,
   /** Characters in any one text field of a note: label, reason, summary, error message, id. */
   text: 4096,
-  /** Items in a threshold the writer stores as written; past it, or non-scalar, it stores a summary. */
+  /**
+   * Items in a threshold the writer stores as written; past it, or non-scalar, it stores a summary. A writer-side
+   * constant: no reader reads it, so raising it for a read changes nothing.
+   */
   thresholdItems: 16,
   /** Size of a threshold the reader admits (a forged object, say), counted as {@link RUN_EVIDENCE_LIMITS.payloadSize}. */
   thresholdSize: 4096,
@@ -223,6 +228,23 @@ export function isRunNoteKind(kind: unknown): kind is RunNoteKind {
   return typeof kind === 'string' && RUN_NOTE_KINDS.has(kind);
 }
 
+const ID_GRAMMAR = /^[^#]+#(0|[1-9]\d*)$/;
+
+/**
+ * The one runtimeStageId rule of a run's evidence, for the writer and the reader alike: a name inside `maximum`, one
+ * `#`, a safe execution index, no control characters. Returns the id, or throws what `refuse` makes.
+ */
+export function checkedExecutionId(value: unknown, maximum: number, refuse: RefuseEvidence): string {
+  const id = boundedName(value, maximum, refuse);
+  if (!ID_GRAMMAR.test(id) || !Number.isSafeInteger(executionIndexOf(id))) throw refuse();
+  return id;
+}
+
+/** Does `kind` take the `run.` prefix only `EventLog · noteRun` may write? A writer's own `note` is refused one. */
+export function isReservedNoteKind(kind: unknown): boolean {
+  return typeof kind === 'string' && kind.startsWith('run.');
+}
+
 /** Is `value` a count: a non-negative safe integer? */
 export function isCount(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
@@ -232,7 +254,29 @@ function textField(value: unknown, name: string): void {
   if (value !== undefined && typeof value !== 'string') throw new TypeError(`about.${name} must be a string`);
 }
 
-/** The read names a sink keeps, and how many it left out. Only the bound's worth of entries is ever looked at. */
+/** A `parent` or `resumes` the reader would admit as a runtimeStageId, or a `TypeError`. */
+function idField(value: unknown, name: string): void {
+  if (value === undefined) return;
+  textField(value, name);
+  checkedExecutionId(value, RUN_EVIDENCE_LIMITS.text, () => new TypeError(`about.${name} must be a runtimeStageId`));
+}
+
+const NOT_A_READ_NAME = new TypeError('not a read name');
+
+/** Would the reader admit `name` as a read key? The reader's own name rule, with the record's path separator allowed. */
+function isReadName(name: string): boolean {
+  try {
+    boundedName(name, RUN_EVIDENCE_LIMITS.readLength, () => NOT_A_READ_NAME, true);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The read names a sink keeps, and how many it left out. Only the bound's worth of entries is ever looked at. A name
+ * the reader would refuse (empty, too long, a control character) is left out and counted, never cut or rewritten.
+ */
 function boundedReads(reads: unknown): { readonly kept: string[]; readonly left: number } {
   if (!Array.isArray(reads)) throw new TypeError('about.reads must be an array of strings');
   const length: unknown = reads.length;
@@ -242,7 +286,7 @@ function boundedReads(reads: unknown): { readonly kept: string[]; readonly left:
   for (let i = 0; i < looked; i++) {
     const name: unknown = reads[i];
     if (typeof name !== 'string') throw new TypeError('about.reads must be an array of strings');
-    if (name.length > 0 && name.length <= RUN_EVIDENCE_LIMITS.readLength) kept.push(name);
+    if (isReadName(name)) kept.push(name);
   }
   return { kept, left: length - kept.length };
 }
@@ -268,8 +312,8 @@ export function boundedAbout(about: CommitAbout): CommitAbout {
     throw new TypeError('about must be a plain object');
   }
   const { parent, resumes, reads, readsOmitted, description, attention } = about;
-  textField(parent, 'parent');
-  textField(resumes, 'resumes');
+  idField(parent, 'parent');
+  idField(resumes, 'resumes');
   textField(description, 'description');
   if (readsOmitted !== undefined && !isCount(readsOmitted)) throw new TypeError('about.readsOmitted must be a count');
   const named = reads === undefined ? undefined : boundedReads(reads);

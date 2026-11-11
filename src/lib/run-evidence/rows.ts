@@ -7,6 +7,24 @@ import type { UntrackedSource } from '../memory/types.js';
 import type { RunDecisionNote, RunStopNote } from './kinds.js';
 
 /**
+ * Why a channel or a `control` answer could not say more. The log-wide reasons: `no-collects` (no `opened.collects`, so
+ * an older writer or evidence off), `newer-writer` (a larger `collects.v`), `invalid-collects`, `reads-off` (the reads
+ * channel of a run that tracked none), `no-log` (no log given for the leg). The `control` reasons: `resumed-leg` (a
+ * parentless execution that is not the root), `log-not-given` (a parent no given log holds), `no-about` (a stage with
+ * no `about`), `unknown-execution` (an id no given log committed).
+ */
+export type RunEvidenceWhy =
+  | 'no-collects'
+  | 'newer-writer'
+  | 'invalid-collects'
+  | 'reads-off'
+  | 'no-log'
+  | 'resumed-leg'
+  | 'log-not-given'
+  | 'no-about'
+  | 'unknown-execution';
+
+/**
  * One kind of fact, and how far to trust its absence.
  *
  * - `collected`: the writer collected it and the log is whole, so an empty channel means none happened.
@@ -16,7 +34,7 @@ import type { RunDecisionNote, RunStopNote } from './kinds.js';
 export type EvidenceChannel<T> =
   | { readonly status: 'collected'; readonly rows: readonly T[] }
   | { readonly status: 'partial'; readonly rows: readonly T[]; readonly gaps: readonly GapCode[] }
-  | { readonly status: 'not-collected'; readonly rows: readonly []; readonly why: string };
+  | { readonly status: 'not-collected'; readonly rows: readonly []; readonly why: RunEvidenceWhy };
 
 /** A `run.decision` note, admitted. */
 export interface StoredDecision extends RunDecisionNote {
@@ -75,8 +93,8 @@ export interface RunControl {
   /** The matched rule's label; a selector has none. */
   readonly label?: string;
   readonly gaps: readonly GapCode[];
-  /** Why the chain could not finish, or why nothing was collected: `resumed-leg`, `log-not-given`, `no-about`, … */
-  readonly why?: string;
+  /** Why the chain could not finish, or why nothing was collected: one {@link RunEvidenceWhy}. */
+  readonly why?: RunEvidenceWhy;
 }
 
 /** A row refused, by its position in its log's entries. The reason names a field, never the file's text. */

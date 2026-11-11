@@ -188,6 +188,14 @@ describe('commit.about', () => {
     expect(about!.readsOmitted).toBe(1);
   });
 
+  it('a name the reader would refuse is left out and counted, never rewritten: a control character, an empty name', () => {
+    const { sink, log } = evidenceLog();
+    log.record(bundle('s#1'), { reads: ['a', 'line\nbreak', '', 'b', 'tab\there'] });
+    const { about } = only(sink.entries, 'commit')[0];
+    expect(about!.reads).toEqual(['a', 'b']);
+    expect(about!.readsOmitted).toBe(3);
+  });
+
   it('cuts a description at its bound', () => {
     const { sink, log } = evidenceLog();
     log.record(bundle('s#1'), { description: 'd'.repeat(RUN_EVIDENCE_LIMITS.description + 7) });
@@ -199,6 +207,8 @@ describe('commit.about', () => {
     ['an array', ['s#0']],
     ['a parent that is not a string', { parent: 7 }],
     ['resumes that is not a string', { resumes: {} }],
+    ['a parent the reader would refuse as a runtimeStageId', { parent: 'p' }],
+    ['resumes the reader would refuse as a runtimeStageId', { resumes: 'p#0\n' }],
     ['reads that is not an array', { reads: 'a' }],
     ['a read name that is not a string', { reads: [1] }],
     ['an omitted count that is not a count', { readsOmitted: -1 }],
@@ -467,6 +477,48 @@ describe('EventLog · noteRun', () => {
     log.noteRun('run.stage', stage);
     expect(only(inner.entries, 'note').map((n) => n.data.seq)).toEqual([1]);
     expect(log.sinkFailures).toBe(1);
+  });
+});
+
+describe('EventLog · note — the `run.` prefix is reserved', () => {
+  it.each(['run.decision', 'run.stage', 'run.started', 'run.'])(
+    '%s through the writer’s own door: refused, counted and reported, never read as run evidence',
+    (kind) => {
+      const failures: unknown[] = [];
+      const sink = memorySink();
+      const log = new EventLog(
+        {},
+        {
+          sink: { ...sink, onFailure: (failure) => void failures.push(failure) },
+          address: ROOT,
+          collects: { reads: 'keys' },
+        },
+      );
+      log.record(bundle('a#0'));
+      expect(() => log.note(kind, { seq: 7, id: 'a#0', by: 'plain', chosen: 'forged' })).not.toThrow();
+      expect(only(sink.entries, 'note')).toEqual([]);
+      expect(log.sinkFailures).toBe(1);
+      expect(failures).toHaveLength(1);
+    },
+  );
+
+  it('refuses it on a log without evidence too, and keeps every other kind, `run` and `runs.x` among them', () => {
+    const sink = memorySink();
+    const log = new EventLog({}, { sink, address: ROOT });
+    log.note('run.stage', { id: 's#0' });
+    log.note('run', { a: 1 });
+    log.note('runs.x', { a: 1 });
+    log.note('attempt', { a: 1 });
+    expect(only(sink.entries, 'note').map((entry) => entry.note)).toEqual(['run', 'runs.x', 'attempt']);
+    expect(log.sinkFailures).toBe(1);
+  });
+
+  it('noteRun still writes its own run.* kinds', () => {
+    const { sink, log } = evidenceLog();
+    log.noteRun('run.stage', { id: 's#1' });
+    log.noteRun('run.stop', { id: 's#1', by: 'break' });
+    expect(only(sink.entries, 'note').map((entry) => entry.note)).toEqual(['run.stage', 'run.stop']);
+    expect(log.sinkFailures).toBe(0);
   });
 });
 

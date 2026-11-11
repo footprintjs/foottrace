@@ -38,12 +38,12 @@ export class ProvOutput {
   add(node: ProvNode): boolean {
     if (this.stopped) return false;
     const bytes = utf8Bytes(JSON.stringify(node)) + 1;
-    if (
-      !this.budget.spend('work', bytes) ||
-      !this.budget.spend('nodes') ||
-      !this.budget.spend('relations', linksIn(node)) ||
-      envelopeBytes + this.bytes + bytes + this.budget.gapBytes > this.budget.limits.maxOutputBytes
-    ) {
+    // Serialized bytes have their own ceiling; they are not charged as work too.
+    if (!this.budget.spend('nodes') || !this.budget.spend('relations', linksIn(node))) {
+      this.stopped = true;
+      return false;
+    }
+    if (envelopeBytes + this.bytes + bytes + this.budget.gapBytes > this.budget.limits.maxOutputBytes) {
       this.budget.outputLimitReached();
       this.stopped = true;
       return false;

@@ -1,5 +1,5 @@
-import type { GapCode } from '../evidence/codes.js';
-export type { GapCode } from '../evidence/codes.js';
+import type { AttentionReason, GapCode } from '../evidence/codes.js';
+export type { AttentionReason, GapCode } from '../evidence/codes.js';
 
 /** Names and evidence references only. No state values, messages, credentials or business payloads. */
 export type NodeId = string;
@@ -13,16 +13,6 @@ export type AttentionKind =
   | 'not-collected'
   | 'outlier'
   | (string & {});
-export type AttentionReason =
-  | 'ERROR_RECORDED'
-  | 'UNKNOWN_EFFECT_RECORDED'
-  | 'RETRY_STOP_RECORDED'
-  | 'TIMEOUT_RECORDED'
-  | 'RETRY_RECORDED'
-  | 'QUALITY_DROP_RECORDED'
-  | 'EVIDENCE_NOT_COLLECTED'
-  | 'OUTLIER_RECORDED'
-  | 'BUSINESS_RULE_MATCHED';
 export interface Attention {
   readonly kind: AttentionKind;
   readonly reason: AttentionReason;

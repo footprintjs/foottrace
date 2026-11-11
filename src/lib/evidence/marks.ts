@@ -3,24 +3,14 @@
  * and the run-evidence reader read marks through this rule, and the writer's `about` stores them through it, each with its
  * own refusal: what a writer stores, its reader admits.
  */
-import type { Attention, AttentionReason } from '../cause/types.js';
+import type { Attention } from '../cause/types.js';
 import { boundedList, boundedName, type RefuseEvidence, ownData } from './admission.js';
-import type { GapCode } from './codes.js';
+import { ATTENTION_REASONS, type AttentionReason, type GapCode } from './codes.js';
 
 /** How much one stage may carry: the writer is bound by these too. */
 export const ATTENTION_LIMITS = /* @__PURE__ */ Object.freeze({ marks: 32, refs: 16, refLength: 512 });
 
-const REASONS: ReadonlySet<string> = /* @__PURE__ */ new Set<AttentionReason>([
-  'ERROR_RECORDED',
-  'UNKNOWN_EFFECT_RECORDED',
-  'RETRY_STOP_RECORDED',
-  'TIMEOUT_RECORDED',
-  'RETRY_RECORDED',
-  'QUALITY_DROP_RECORDED',
-  'EVIDENCE_NOT_COLLECTED',
-  'OUTLIER_RECORDED',
-  'BUSINESS_RULE_MATCHED',
-]);
+const REASONS: ReadonlySet<string> = /* @__PURE__ */ new Set<string>(ATTENTION_REASONS);
 
 /** What one caller brings to the rule: its refusal, its treatment of proxy traps, and its caps where it has its own. */
 export interface MarkAdmission {

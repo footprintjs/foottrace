@@ -7,11 +7,11 @@ import type { GapCode } from '../evidence/codes.js';
 import type { LogAddress } from '../memory/eventPosition.js';
 import { type Admission, isExecutionId } from './fields.js';
 import { type Channel, type LogFold, mountOf } from './logFold.js';
-import type { EvidenceChannel, StoredMarks, StoredReads, StoredRunningSubflow } from './rows.js';
+import type { EvidenceChannel, RunEvidenceWhy, StoredMarks, StoredReads, StoredRunningSubflow } from './rows.js';
 
 const NOT_COLLECTED_ROWS: readonly [] = Object.freeze([]) as readonly [];
 
-function notCollected<T>(why: string): EvidenceChannel<T> {
+function notCollected<T>(why: RunEvidenceWhy): EvidenceChannel<T> {
   return Object.freeze({ status: 'not-collected', rows: NOT_COLLECTED_ROWS, why });
 }
 
@@ -23,7 +23,7 @@ export function channelOf<T>(
   extra: readonly GapCode[] = [],
 ): EvidenceChannel<T> {
   if (folds.length === 0) return notCollected('no-log');
-  const whyOf = (fold: LogFold): string | undefined =>
+  const whyOf = (fold: LogFold): RunEvidenceWhy | undefined =>
     fold.why ?? (name === 'reads' && fold.collects?.reads === 'off' ? 'reads-off' : undefined);
   const held = folds.filter((fold) => whyOf(fold) === undefined);
   if (held.length === 0) return notCollected(whyOf(folds[0])!);
