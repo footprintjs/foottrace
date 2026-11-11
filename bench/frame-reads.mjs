@@ -51,9 +51,9 @@ for (let pass = 1; pass <= 2; pass++) {
       const times = Array.from({ length: ROUNDS }, () => round(library, address)).sort((a, b) => a - b);
       const median = times[(ROUNDS - 1) / 2];
       console.log(
-        `pass ${pass}  ${name.padEnd(9)}  ${tier}  ${median.toFixed(1)} ns per read  (min ${times[0].toFixed(1)}, max ${times[
-          ROUNDS - 1
-        ].toFixed(1)})`,
+        `pass ${pass}  ${name.padEnd(9)}  ${tier}  ${median.toFixed(1)} ns per read  (min ${times[0].toFixed(
+          1,
+        )}, max ${times[ROUNDS - 1].toFixed(1)})`,
       );
     }
   }
