@@ -102,7 +102,7 @@ export type OpaqueRule = 'identity' | 'copies';
  * What a comparison knows about the object pairs it has met. Created lazily by
  * the first object pair, so primitive compares allocate nothing.
  *
- * A pair is in one of three states (the number stored for `a → b`):
+ * A pair is in one of four states (the number stored for `a → b`):
  *
  *   - **still being compared** (its depth on the stack, `>= 0`). Meeting it
  *     again is a cycle: the pair is taken as equal BY ASSUMPTION, and the
@@ -111,31 +111,41 @@ export type OpaqueRule = 'identity' | 'copies';
  *   - **`PROVEN`** equal, or **`DISPROVEN`**: compared to the end with nothing
  *     in the comparison leaning on a pair above it. A fact — true whatever
  *     happens to the comparisons around it.
+ *   - **`LEANING`**: compared to the end and equal, but only as long as a pair
+ *     still being compared above it is equal. It is kept on a list
+ *     ({@link SeenPairs.leaning}) and answers "equal, by the same assumption"
+ *     when met again, so a value that points back at itself is still walked
+ *     once. The list is settled when the pair it leans on is: every entry
+ *     made inside a comparison becomes `PROVEN` when that comparison ends
+ *     equal with nothing above it leaned on, and is forgotten when it ends
+ *     different.
  *
- * An answer that DID lean on a pair further up is not stored at all, whether it
- * was "equal" or "different". "Equal" is then only as true as that pair. And
- * "different" can be an accident of the search: a set pairs its members
- * greedily, and a member paired on a wrong assumption can leave another member
- * with no partner. Nothing provisional is ever remembered, which is what makes
- * a set safe: it tries a member against candidates that do not match, so a
- * `false` there does not end the comparison, and anything provisional such a
- * try left behind would be read later as known.
+ * A "different" that leaned on a pair above it is never stored. It can be an
+ * accident of the search: a set pairs its members greedily, and a member
+ * paired on a wrong assumption can leave another member with no partner. That
+ * is also what makes a set safe: it tries a member against candidates that do
+ * not match, so a `false` there does not end the comparison, and nothing such
+ * a failed try believed is left behind to be read later as known.
  *
- * The facts are also what keep the walk linear on a value that shares
- * sub-objects without cycles: nothing is ever assumed there, so each pair is
- * compared once, whichever way a set search goes.
+ * (The bookkeeping is the one Tarjan's strongly-connected-components walk
+ * keeps: `low` is the lowlink, the list is the component stack.)
  */
 interface SeenPairs {
   /** `a → b → state` (see above). */
   readonly pairs: WeakMap<object, Map<object, number>>;
   /** The stack depth the next pair gets. */
   depth: number;
-  /** The shallowest still-open pair the comparison in progress assumed equal; `Infinity` for none. */
+  /** The shallowest still-open pair the comparison in progress leaned on; `Infinity` for none. */
   low: number;
+  /** The `LEANING` pairs, oldest first, each as the map and key that hold its state. */
+  readonly leaning: Array<[Map<object, number>, object]>;
+  /** The shallowest pair any entry of {@link leaning} leans on; `Infinity` when the list is empty. */
+  leaningLow: number;
 }
 
 const PROVEN = -1;
 const DISPROVEN = -2;
+const LEANING = -3;
 
 function equalPairs(a: any, b: any, seen: SeenPairs | undefined, opaque: OpaqueRule): boolean {
   if (a === b) return true; // same reference or identical primitive
@@ -172,30 +182,50 @@ function equalPairs(a: any, b: any, seen: SeenPairs | undefined, opaque: OpaqueR
 
 /** The kinds whose content is other values: compared part by part, under the cycle guard. */
 function equalContainers(a: any, b: any, kind: ValueKind, seen: SeenPairs | undefined, opaque: OpaqueRule): boolean {
-  seen ??= { pairs: new WeakMap(), depth: 0, low: Infinity };
+  seen ??= { pairs: new WeakMap(), depth: 0, low: Infinity, leaning: [], leaningLow: Infinity };
   let partners = seen.pairs.get(a);
   const state = partners?.get(b);
   if (state === PROVEN) return true;
   if (state === DISPROVEN) return false;
   if (state !== undefined) {
-    // Cycle guard — a pair we are already inside is equal by assumption.
-    if (state < seen.low) seen.low = state;
+    // Cycle guard — a pair we are already inside is equal by assumption. So is a pair that was
+    // found equal on such an assumption: it reaches as far up as the list it is on does.
+    const reach = state === LEANING ? seen.leaningLow : state;
+    if (reach < seen.low) seen.low = reach;
     return true;
   }
   if (!partners) seen.pairs.set(a, (partners = new Map()));
 
   const depth = seen.depth++;
   const outerLow = seen.low;
+  const leaningFrom = seen.leaning.length;
+  const outerLeaningLow = seen.leaningLow;
   partners.set(b, depth);
   seen.low = Infinity;
   const equal = equalParts(a, b, kind, seen, opaque);
   seen.depth = depth;
-  // The answer is a fact when nothing in this comparison leaned on a pair above it (a pair that
-  // met ITSELF again is closed here: equal on the assumption that it is equal is equal). An answer
-  // that did lean on one is not stored, either way, and that pair is told through `low`.
+
+  // Closed: nothing in this comparison leaned on a pair above it (a pair that met ITSELF again is
+  // closed here: equal on the assumption that it is equal is equal). Then the answer is a fact.
   const closed = seen.low >= depth;
+  if (closed || !equal) {
+    // Whatever was found equal in here by leaning on this pair, or on a pair inside it, is settled
+    // with it: proven when this is a proven equal, forgotten when this is different.
+    for (let i = leaningFrom; i < seen.leaning.length; i++) {
+      const [states, other] = seen.leaning[i];
+      if (equal) states.set(other, PROVEN);
+      else states.delete(other);
+    }
+    seen.leaning.length = leaningFrom;
+    seen.leaningLow = outerLeaningLow;
+  }
   if (closed) partners.set(b, equal ? PROVEN : DISPROVEN);
-  else partners.delete(b);
+  else if (equal) {
+    partners.set(b, LEANING);
+    seen.leaning.push([partners, b]);
+    if (seen.low < seen.leaningLow) seen.leaningLow = seen.low;
+  } else partners.delete(b);
+  // An answer that leaned on a pair above tells the comparisons in between, for either answer.
   seen.low = closed ? outerLow : Math.min(outerLow, seen.low);
   return equal;
 }

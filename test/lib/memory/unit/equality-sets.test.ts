@@ -133,6 +133,34 @@ describe('deepEqual — values that point back at themselves', () => {
     expect(deepEqual(ring([1, 2]), ring([1, 2, 1, 2]))).toBe(true);
   });
 
+  it('a ring whose links are doubled is still walked once', () => {
+    // Each node points at the next one twice. The second link meets a pair that was found equal
+    // only as long as the ring's first pair is; comparing it again each time would double per node.
+    const counter = { reads: 0 };
+    const ring = (length: number) => {
+      const nodes = Array.from({ length }, (_, i) => {
+        const node: Record<string, unknown> = { i };
+        if (i === length - 1) {
+          Object.defineProperty(node, 'mark', {
+            enumerable: true,
+            get() {
+              counter.reads++;
+              return 'last';
+            },
+          });
+        }
+        return node;
+      });
+      nodes.forEach((node, i) => {
+        node.left = nodes[(i + 1) % length];
+        node.right = nodes[(i + 1) % length];
+      });
+      return nodes[0];
+    };
+    expect(deepEqual(ring(18), ring(18))).toBe(true);
+    expect(counter.reads).toBeLessThanOrEqual(8);
+  });
+
   it('an equal answer that rested on a pair still being compared is not kept when that pair fails', () => {
     // inner(a) and inner(b) look equal only while their owners are assumed equal; the owners differ in `tail`.
     const make = (tail: number) => {
@@ -169,6 +197,123 @@ describe('deepEqual — values that point back at themselves', () => {
     const a = new Set<unknown>([{ probe: h1 }, { probe: h2x }, { w: A }]);
     const b = new Set<unknown>([{ probe: h2 }, { probe: h1x }, { w: B }]);
     expect(deepEqual(a, b)).toBe(true);
+  });
+
+  it('equal sets whose members lead back to a set that pairs the other way round', () => {
+    // Aa ~ Ab2 and Y ~ Ab. Comparing Aa with Ab first (different) walks into (X, X') on a wrong
+    // assumption; what it concludes there must not decide the later, right comparison.
+    const build = (side: 'a' | 'b', wrapped: boolean) => {
+      const X = new Set<unknown>();
+      const link = wrapped ? { w: X } : X;
+      const first = { x: link, k: side === 'a' ? 1 : 2 };
+      const second = { x: link, k: side === 'a' ? 2 : 1 };
+      X.add({ r: first }).add({ r: second });
+      return { X, S: new Set<unknown>([first, second]) };
+    };
+    expect(deepEqual(build('a', false).X, build('b', false).X)).toBe(true);
+    expect(deepEqual(build('a', false).S, build('b', false).S)).toBe(true);
+    expect(deepEqual(build('a', true).S, build('b', true).S)).toBe(true);
+    const one = build('a', false).S;
+    expect(deepEqual(one, structuredClone(one))).toBe(true);
+  });
+
+  it('a member that leads back to its owner: the same shape with two values swapped is different', () => {
+    const owner = (v: number, w: number) => {
+      const r: Record<string, unknown> = {};
+      const members = [
+        { back: r, v },
+        { back: r, v: w },
+      ];
+      r.s = new Set(members);
+      r.o = members[0];
+      return r;
+    };
+    expect(deepEqual(owner(1, 2), owner(1, 2))).toBe(true);
+    expect(deepEqual(owner(1, 2), owner(2, 1))).toBe(false);
+  });
+
+  it('a chain that shares each next node twice and points back at its root is walked once', () => {
+    const counter = { reads: 0 };
+    const chain = (depth: number) => {
+      const root: Record<string, unknown> = {};
+      let node: Record<string, unknown> = Object.defineProperty({ back: root }, 'leaf', {
+        enumerable: true,
+        get() {
+          counter.reads++;
+          return 1;
+        },
+      });
+      for (let d = 0; d < depth; d++) node = { p: node, q: node, back: root };
+      root.top = node;
+      return root;
+    };
+    expect(deepEqual(chain(18), chain(18))).toBe(true);
+    expect(counter.reads).toBeLessThanOrEqual(8);
+  });
+
+  it('a state whose items all share one config that points back at the state is walked once', () => {
+    const counter = { reads: 0 };
+    const state = (items: number) => {
+      const root: Record<string, unknown> = {};
+      const cfg: Record<string, unknown> = { owner: root };
+      Object.defineProperty(cfg, 'setting', {
+        enumerable: true,
+        get() {
+          counter.reads++;
+          return 'on';
+        },
+      });
+      root.cfg = cfg;
+      root.items = Array.from({ length: items }, (_, id) => ({ id, cfg }));
+      return root;
+    };
+    expect(deepEqual(state(200), state(200))).toBe(true);
+    // One comparison of (cfg, cfg'), not one per item.
+    expect(counter.reads).toBeLessThanOrEqual(8);
+  });
+
+  it('an answer that leaned on an "equal by assumption" answer leans on what that one leaned on', () => {
+    // r and r2 differ (tail). P is equal to P2 only while r is taken as equal to r2, and G is equal
+    // to G2 only through P. Comparing r with r2 first (a failed set try) must leave no belief about
+    // (G, G2) behind: the wrappers { g: G } and { g: G2 } are different.
+    const record = (tail: number) => {
+      const r: Record<string, unknown> = {};
+      const P = { back: r };
+      const G = { p: P };
+      Object.assign(r, { p: P, g: G, tail });
+      return { r, G };
+    };
+    const a1 = record(1);
+    const aTwin = record(2);
+    const b2 = record(2);
+    const bTwin = record(1);
+    const a = new Set<unknown>([a1.r, { g: a1.G }, aTwin.r]);
+    const b = new Set<unknown>([b2.r, bTwin.r, { g: b2.G }]);
+    expect(deepEqual({ g: a1.G }, { g: b2.G })).toBe(false);
+    expect(deepEqual(a, b)).toBe(false);
+  });
+
+  it('an "equal by assumption" answer is forgotten when the comparison it was made in ends different', () => {
+    // f and f2 differ (tail), and both lead back to the two roots. P is equal to P2 only while f is
+    // taken as equal to f2. That try fails, and while the roots are still taken as equal f pairs
+    // with its twin instead. The roots then compare P with P2 directly: they are different, so the
+    // roots are.
+    const rootA: Record<string, unknown> = {};
+    const rootB: Record<string, unknown> = {};
+    const member = (root: object, tail: number) => {
+      const f: Record<string, unknown> = {};
+      const P = { back: f };
+      Object.assign(f, { p: P, r: root, tail });
+      return { f, P };
+    };
+    const a1 = member(rootA, 1);
+    const aTwin = member(rootA, 2);
+    const b2 = member(rootB, 2);
+    const bTwin = member(rootB, 1);
+    Object.assign(rootA, { s: new Set([a1.f, aTwin.f]), later: a1.P });
+    Object.assign(rootB, { s: new Set([b2.f, bTwin.f]), later: b2.P });
+    expect(deepEqual(rootA, rootB)).toBe(false);
+    expect(deepEqual(rootB, rootA)).toBe(false);
   });
 
   it('a map that holds a set that holds the map', () => {
