@@ -243,10 +243,28 @@ function decideProposalState(w) {
   if (w.predecessor) {
     if (!validSha(w.expectedTree) || !validSha(w.predecessor.head) || w.predecessor.closedMerged !== true)
       return no;
-    if (w.pulls.length === 0)
-      return w.existing.head === w.predecessor.head && w.prior === undefined && w.rebuild === undefined
-        ? { action: 'rollover', force: false, parents: [w.base, w.predecessor.head] }
-        : no;
+    if (w.pulls.length === 0) {
+      if (w.unfinished === undefined)
+        return w.existing.head === w.predecessor.head && w.prior === undefined && w.rebuild === undefined
+          ? { action: 'rollover', force: false, parents: [w.base, w.predecessor.head] }
+          : no;
+      // No pull request was ever opened for this head: an earlier run moved the branch and
+      // stopped before the pull request. The caller has shown the head is the runner's own
+      // build, on this main or on an older main that is in current main's history. There is
+      // no pull request, so no approval can sit on it.
+      const u = w.unfinished;
+      if (w.rebuild !== undefined || u?.authored !== true || u.accounted !== true || !validSha(w.existing.head) ||
+        w.existing.head === w.predecessor.head || !Array.isArray(w.existing.parents) || w.existing.parents.length !== 2)
+        return no;
+      // Built on an older main: rebuilt on this main; the new head descends from the old one.
+      if (w.existing.parents[0] !== w.base)
+        return w.prior === undefined ? { action: 'adopt-rebuild', force: false, parents: [w.base, w.existing.head] } : no;
+      // Built on this main: only the pull request is missing. As exact as the no-op below.
+      if (w.prior !== undefined && (!validSha(w.prior) || w.prior === w.predecessor.head)) return no;
+      return w.existing.parents[1] === (w.prior ?? w.predecessor.head) && w.existing.tree === w.expectedTree
+        ? { action: 'adopt', force: false } : no;
+    }
+    if (w.unfinished !== undefined) return no;
     const open = w.pulls[0];
     if (open.head?.sha !== w.existing.head || open.base?.ref !== 'main' || open.state !== 'open' ||
       !validSha(w.existing.head) || !Array.isArray(w.existing.parents) || w.existing.parents.length !== 2) return no;
