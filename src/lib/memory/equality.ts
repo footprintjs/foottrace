@@ -99,20 +99,41 @@ export function deepEqual(a: any, b: any, opaque: OpaqueRule = 'identity'): bool
 export type OpaqueRule = 'identity' | 'copies';
 
 /**
- * Object pairs met so far. Created lazily by the first object pair, so primitive
- * compares allocate nothing. A stored pair is either still under comparison or
- * already known equal: every `false` returns straight up to the caller (each
- * recursive call short-circuits on it), so nothing is looked up after a mismatch.
- * The one place a `false` does NOT end the comparison is a set, which tries a
- * member against candidates that do not match — see {@link tryPair}, which
- * forgets what a failed try met.
+ * What a comparison knows about the object pairs it has met. Created lazily by
+ * the first object pair, so primitive compares allocate nothing.
+ *
+ * A pair is in one of three states (the number stored for `a → b`):
+ *
+ *   - **still being compared** (its depth on the stack, `>= 0`). Meeting it
+ *     again is a cycle: the pair is taken as equal BY ASSUMPTION, and the
+ *     comparison that met it remembers how far up the assumption reaches
+ *     ({@link low}).
+ *   - **`PROVEN`** equal: compared to the end with no assumption left open
+ *     above it. A fact — true whatever happens to the comparisons around it.
+ *   - **`DISPROVEN`**: found different. Also a fact: an assumption can only
+ *     make two values look MORE equal, never less.
+ *
+ * A pair found equal only under an assumption about a pair further up is not
+ * stored at all: it is true if that pair turns out equal, and by then it is no
+ * longer needed. Nothing provisional is ever remembered, which is what makes a
+ * set safe: a set tries a member against candidates that do not match, so a
+ * `false` there does not end the comparison, and anything such a failed try
+ * left behind would be read later as "already known equal".
+ *
+ * The two facts are also what keep the walk linear on a value that shares
+ * sub-objects: each pair is compared once, whichever way a set search goes.
  */
 interface SeenPairs {
-  /** `a → the b's it has been paired with`. */
-  readonly pairs: WeakMap<object, WeakSet<object>>;
-  /** The pairs stored since the innermost try began; absent outside a try. */
-  trail?: Array<[object, object]>;
+  /** `a → b → state` (see above). */
+  readonly pairs: WeakMap<object, Map<object, number>>;
+  /** The stack depth the next pair gets. */
+  depth: number;
+  /** The shallowest still-open pair the comparison in progress assumed equal; `Infinity` for none. */
+  low: number;
 }
+
+const PROVEN = -1;
+const DISPROVEN = -2;
 
 function equalPairs(a: any, b: any, seen: SeenPairs | undefined, opaque: OpaqueRule): boolean {
   if (a === b) return true; // same reference or identical primitive
@@ -149,14 +170,35 @@ function equalPairs(a: any, b: any, seen: SeenPairs | undefined, opaque: OpaqueR
 
 /** The kinds whose content is other values: compared part by part, under the cycle guard. */
 function equalContainers(a: any, b: any, kind: ValueKind, seen: SeenPairs | undefined, opaque: OpaqueRule): boolean {
-  // Cycle guard — a pair we are already inside is equal by assumption.
-  seen ??= { pairs: new WeakMap() };
+  seen ??= { pairs: new WeakMap(), depth: 0, low: Infinity };
   let partners = seen.pairs.get(a);
-  if (partners?.has(b)) return true;
-  if (!partners) seen.pairs.set(a, (partners = new WeakSet()));
-  partners.add(b);
-  seen.trail?.push([a, b]);
+  const state = partners?.get(b);
+  if (state === PROVEN) return true;
+  if (state === DISPROVEN) return false;
+  if (state !== undefined) {
+    // Cycle guard — a pair we are already inside is equal by assumption.
+    if (state < seen.low) seen.low = state;
+    return true;
+  }
+  if (!partners) seen.pairs.set(a, (partners = new Map()));
 
+  const depth = seen.depth++;
+  const outerLow = seen.low;
+  partners.set(b, depth);
+  seen.low = Infinity;
+  const equal = equalParts(a, b, kind, seen, opaque);
+  seen.depth = depth;
+  // Equal with every assumption it made closed at this pair or below it: a fact. Equal under an
+  // assumption about a pair further up: not stored, and that pair is told. Different: a fact.
+  const open = equal && seen.low < depth;
+  if (open) partners.delete(b);
+  else partners.set(b, equal ? PROVEN : DISPROVEN);
+  seen.low = open ? Math.min(outerLow, seen.low) : outerLow;
+  return equal;
+}
+
+/** The parts of two containers of one kind, compared in order; the first difference ends it. */
+function equalParts(a: any, b: any, kind: ValueKind, seen: SeenPairs, opaque: OpaqueRule): boolean {
   if (kind === 'map') return equalMaps(a, b, seen, opaque);
   if (kind === 'set') return equalSets(a, b, seen, opaque);
   if (kind === 'error') return equalErrors(a, b, seen, opaque);
@@ -277,31 +319,11 @@ function equalSets(a: Set<unknown>, b: Set<unknown>, seen: SeenPairs, opaque: Op
     if (member === null || typeof member !== 'object') return false;
     unmatched ??= [...b].filter((candidate) => !a.has(candidate));
     // Each match retires its slot so two structurally-equal members of `a`
-    // cannot both claim the same member of `b`.
-    const found = unmatched.findIndex((candidate) => tryPair(member, candidate, seen, opaque));
+    // cannot both claim the same member of `b`. A candidate that does not match
+    // leaves only a fact behind ({@link SeenPairs}), so trying it is safe.
+    const found = unmatched.findIndex((candidate) => equalPairs(member, candidate, seen, opaque));
     if (found < 0) return false;
     unmatched.splice(found, 1);
   }
   return true;
-}
-
-/**
- * Compare one set member with one candidate, where a `false` only means "try the next candidate".
- * A try that fails forgets every pair it stored: left behind, they would read as "already known
- * equal" to a later comparison of the same two objects. A try that succeeds keeps its pairs, and
- * hands them to the try it ran inside, which may still fail.
- */
-function tryPair(member: unknown, candidate: unknown, seen: SeenPairs, opaque: OpaqueRule): boolean {
-  const enclosing = seen.trail;
-  const stored: Array<[object, object]> = [];
-  seen.trail = stored;
-  let equal = false;
-  try {
-    equal = equalPairs(member, candidate, seen, opaque);
-  } finally {
-    seen.trail = enclosing;
-  }
-  if (!equal) for (const [x, y] of stored) seen.pairs.get(x)?.delete(y);
-  else if (enclosing) for (const pair of stored) enclosing.push(pair);
-  return equal;
 }

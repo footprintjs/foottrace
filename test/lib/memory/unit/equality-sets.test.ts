@@ -58,6 +58,108 @@ describe('deepEqual — a failed try inside a set leaves no memory', () => {
   });
 });
 
+describe('deepEqual — a pair is compared once, whichever way a set search goes', () => {
+  /**
+   * `depth` levels, each a set of two objects that share the level below. The innermost object counts
+   * how often it is read, so the tests count comparisons and need no clock. `flip` lists the two
+   * objects of each level in the other order, so the first candidate tried is the wrong one.
+   */
+  function shared(depth: number, leaf: number, flip = false) {
+    const counter = { reads: 0 };
+    const innermost = Object.defineProperty({}, 'v', {
+      enumerable: true,
+      get() {
+        counter.reads++;
+        return leaf;
+      },
+    });
+    let level: unknown = new Set([innermost]);
+    for (let d = 0; d < depth; d++) {
+      const below = level;
+      const pair = [
+        { n: below, t: 1 },
+        { n: below, t: 2 },
+      ];
+      level = new Set(flip ? pair.reverse() : pair);
+    }
+    return { value: level, counter };
+  }
+  const DEPTH = 16; // comparing the innermost pair once per path would be 2^16 comparisons
+
+  it('equal values: a pair proven equal inside a try that fails is not compared again', () => {
+    const a = shared(DEPTH, 0);
+    const b = shared(DEPTH, 0, true);
+    expect(deepEqual(a.value, b.value)).toBe(true);
+    expect(a.counter.reads).toBeLessThanOrEqual(4);
+  });
+
+  it('different values: a pair found different is not compared again', () => {
+    const a = shared(DEPTH, 0);
+    const b = shared(DEPTH, 1);
+    expect(deepEqual(a.value, b.value)).toBe(false);
+    expect(a.counter.reads).toBeLessThanOrEqual(4);
+  });
+
+  it('a value that shares one object many times, with no set at all, is walked once', () => {
+    const counter = { reads: 0 };
+    const leaf = () =>
+      Object.defineProperty({}, 'v', {
+        enumerable: true,
+        get() {
+          counter.reads++;
+          return 1;
+        },
+      });
+    const diamonds = (inner: object) => {
+      let level: object = inner;
+      for (let d = 0; d < DEPTH; d++) level = { left: level, right: level };
+      return level;
+    };
+    expect(deepEqual(diamonds(leaf()), diamonds(leaf()))).toBe(true);
+    expect(counter.reads).toBeLessThanOrEqual(4);
+  });
+});
+
+describe('deepEqual — values that point back at themselves', () => {
+  it('two rings of the same shape are equal, and a ring with one different link is not', () => {
+    const ring = (values: number[]) => {
+      const nodes = values.map((v) => ({ v, next: null as unknown }));
+      nodes.forEach((node, i) => (node.next = nodes[(i + 1) % nodes.length]));
+      return nodes[0];
+    };
+    expect(deepEqual(ring([1, 2, 3]), ring([1, 2, 3]))).toBe(true);
+    expect(deepEqual(ring([1, 2, 3]), ring([1, 2, 4]))).toBe(false);
+    // The same ring unrolled twice has the same structure: every walk from the start reads the same values.
+    expect(deepEqual(ring([1, 2]), ring([1, 2, 1, 2]))).toBe(true);
+  });
+
+  it('an equal answer that rested on a pair still being compared is not kept when that pair fails', () => {
+    // inner(a) and inner(b) look equal only while their owners are assumed equal; the owners differ in `tail`.
+    const make = (tail: number) => {
+      const owner: Record<string, unknown> = {};
+      const inner = { back: owner };
+      owner.first = new Set([inner]);
+      owner.tail = tail;
+      return { owner, inner };
+    };
+    const a = make(1);
+    const b = make(2);
+    expect(deepEqual([a.owner, a.inner], [b.owner, b.inner])).toBe(false);
+    expect(deepEqual(a.inner, b.inner)).toBe(false);
+  });
+
+  it('a map that holds a set that holds the map', () => {
+    const make = (extra: number) => {
+      const map = new Map<string, unknown>();
+      map.set('k', new Set([map]));
+      map.set('n', extra);
+      return map;
+    };
+    expect(deepEqual(make(1), make(1))).toBe(true);
+    expect(deepEqual(make(1), make(2))).toBe(false);
+  });
+});
+
 describe('deepEqual — sets, the rules that stay', () => {
   it('order does not matter, for primitives and for objects', () => {
     expect(deepEqual(new Set([1, 'a', null]), new Set([null, 1, 'a']))).toBe(true);
