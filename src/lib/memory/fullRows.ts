@@ -9,7 +9,7 @@
 import type { Lossy, Rows } from './admission.js';
 import { nativeGet as _get, nativeSet as _set } from './pathOps.js';
 import { emitReadBack } from './readBack.js';
-import { type Staged, type StagedOp, changedSinceBase, provenance } from './staged.js';
+import { type BufferOp, type Staged, changedSinceBase, provenance } from './staged.js';
 import type { TraceEntry } from './types.js';
 import { DELIM, dryFold } from './utils.js';
 
@@ -129,7 +129,7 @@ function fullRows(staged: Staged): TraceEntry[] {
  * as set-of-undefined. Per-write provenance (#P1) rides each surviving entry
  * untouched.
  */
-function flattenedTraceRow(op: StagedOp): TraceEntry {
+function flattenedTraceRow(op: BufferOp): TraceEntry {
   return op.verb === 'delete'
     ? { path: op.path, verb: 'set' as const, ...provenance(op.readKeys, op.readAttempts, op.readAttemptsOmitted) }
     : op;

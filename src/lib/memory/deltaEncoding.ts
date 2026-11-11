@@ -9,10 +9,15 @@
  */
 
 import type { Rows } from './admission.js';
-import type { OpVerb } from './staged.js';
 import type { TraceEntry } from './types.js';
 import { nativeSet as _set } from './pathOps.js';
 import { deepEqual, DELIM } from './utils.js';
+
+/** Op-level verbs staged into `opTrace`. `'delete'` is staged distinctly so
+ *  delta-mode commits (#13c-B) can emit a real `delete` trace entry; under
+ *  the default `'full'` mode it commits as `'set'` (of `undefined`) —
+ *  byte-identical to the historical flattening. */
+export type OpVerb = 'set' | 'merge' | 'delete';
 
 /** A path that passed the net-change filter, with everything the delta
  *  encoder needs to decide its verb — resolved once, then reused by the

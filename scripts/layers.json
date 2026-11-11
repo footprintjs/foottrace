@@ -47,7 +47,7 @@
   "src/lib/slice/keyIndex.ts": 3,
   "src/lib/slice/keyTimeline.ts": 3,
   "src/lib/slice/keysReadSources.ts": 3,
-  "src/lib/slice/notes.ts": 3,
+  "src/lib/slice/notes.ts": 0,
   "src/lib/slice/serialize.ts": 3,
   "src/lib/slice/sliceForKey.ts": 3,
   "src/lib/slice/types.ts": 3,

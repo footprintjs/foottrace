@@ -1,7 +1,6 @@
 /**
  * equality.ts — structural equality of committed-state values: THE owner of
- * "what counts as a change". What a commit's net-change filter
- * (`staged.ts · changedSinceBase`), the
+ * "what counts as a change". What `TransactionBuffer`'s net-change filter, the
  * admitted record's compare, the read model's writer rule and the
  * borrowed-mutation guard all ask. Its one import is the classifier of value
  * kinds (`capture/valueKinds.ts`, a leaf); re-exported from `utils.ts`, so no
@@ -13,7 +12,7 @@ import { type ValueKind, kindOf } from '../capture/valueKinds.js';
 /**
  * Structural deep equality for committed-state values.
  *
- * Used at commit (`staged.ts · changedSinceBase`) to decide whether a stage actually CHANGED
+ * Used by {@link TransactionBuffer} to decide whether a stage actually CHANGED
  * a path or merely re-wrote / reverted it to the value it already held (a
  * "no-op write"), and by `borrowedMutation.firstDifferingPath` to find where a
  * borrowed read moved. Committed state must survive `structuredClone`, so the
@@ -88,7 +87,7 @@ export function deepEqual(a: any, b: any, opaque: OpaqueRule = 'identity'): bool
  *
  *   - `'identity'` (the default) — equal only to itself. The answer when one
  *     side is a value a stage handed in: the net-change filter
- *     (`staged.ts`), the append check (`deltaEncoding`). A new object
+ *     (`TransactionBuffer`), the append check (`deltaEncoding`). A new object
  *     is a change, because nothing can say it is not.
  *   - `'copies'` — equal to any other of its kind. The answer when BOTH sides
  *     are copies of one recorded value — a fold's generations (`logModel`,

@@ -9,11 +9,11 @@
  */
 
 import type { Lossy, Rows } from './admission.js';
-import { type Survivor, emitInFamilyOrder, groupIntoFamilies, pushValueRow } from './deltaEncoding.js';
+import { type OpVerb, type Survivor, emitInFamilyOrder, groupIntoFamilies, pushValueRow } from './deltaEncoding.js';
 import { viewMark } from './hardWriteCoverage.js';
 import { nativeGet as _get, nativeSet as _set } from './pathOps.js';
 import { emitReadBack } from './readBack.js';
-import { type OpVerb, type Staged, type StagedOp, changedSinceBase, markedBelow, provenance } from './staged.js';
+import { type BufferOp, type Staged, changedSinceBase, markedBelow, provenance } from './staged.js';
 import { DELIM } from './utils.js';
 
 /** A path's ops, folded into what the delta encoder needs: its verbs in order, its last touch, its last op's provenance. */
@@ -122,7 +122,7 @@ export function deltaRows(
  * within a stage, so last == union across the path. Delivered-answer windows instead
  * retain only the last window/count pair; eviction never changes that state-read law.
  */
-function opsByPath(ops: readonly StagedOp[]): Map<string, PathOps> {
+function opsByPath(ops: readonly BufferOp[]): Map<string, PathOps> {
   const byPath = new Map<string, PathOps>();
   for (let i = 0; i < ops.length; i++) {
     const op = ops[i];

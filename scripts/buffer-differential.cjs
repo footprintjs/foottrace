@@ -17,12 +17,25 @@
 // programs reached, so a run that reached nothing is visible), or `DIFFERENT` with the first
 // program that shows it, and exits 1.
 //
-// What it does NOT show: anything outside the buffer (the frame, the log, the readers), and any
-// value kind the generator does not make (it makes JSON values and `undefined`; no Date, Map or Set).
+// HOW MANY PROGRAMS. The default is 250,000 (about 12 seconds), and that is a floor, not a habit:
+// the second reader of the split changed the built files on purpose, one place at a time, and three
+// of those changes first showed after 30,966, 75,382 and 87,099 programs (a lone list written back
+// as an append, a delete under a parent that is no container, a redaction mark on a list element).
+// For a claim in a pull request run a million, over several seeds.
+//
+// THE RECORD MUST NOT SHARE AN OBJECT WITH THE CALLER, and comparing two payloads as text right
+// after the commit cannot see that: a build that hands the caller's own object to the record prints
+// the same text as one that copies it. So after the commit every value the stage handed over is
+// edited (and the state it began from, which in an engine is committed state), and the payload is
+// printed a second time. A payload that changed was not a copy.
+//
+// What it does NOT show: anything outside the buffer (the frame, the log, the readers), any value
+// kind the generator does not make (it makes JSON values and `undefined`; no Date, Map or Set), and
+// the ESM build (it loads the CommonJS one).
 'use strict';
 const path = require('node:path');
 
-const [distA, distB, countText = '20000', seedText = '1'] = process.argv.slice(2);
+const [distA, distB, countText = '250000', seedText = '1'] = process.argv.slice(2);
 if (!distA || !distB) {
   console.error('usage: node scripts/buffer-differential.cjs <dist of build A> <dist of build B> [programs] [seed]');
   process.exit(2);
@@ -114,12 +127,27 @@ function live(v) {
 const text = (v) =>
   JSON.stringify(v, (_k, x) => (x === undefined ? '«undefined»' : x instanceof Set ? { '«set»': [...x] } : x));
 
+// Edit a value everywhere it can be edited: a new key on every object, a new item on every list.
+function scribble(value) {
+  if (Array.isArray(value)) {
+    for (const item of value) scribble(item);
+    value.push('«edited after the commit»');
+  } else if (value !== null && typeof value === 'object') {
+    for (const key of Object.keys(value)) scribble(value[key]);
+    value['«edited after the commit»'] = true;
+  }
+}
+
 function run(Buffer, p) {
   const out = [];
   const reads = [];
   const slots = p.slots.map(live);
+  const base = live(p.base);
+  // Every value the buffer was handed (the state the stage began from, and what the stage wrote), to
+  // be edited once the commit is done.
+  const handed = [base, ...slots];
   const buffer = new Buffer(
-    live(p.base),
+    base,
     p.commitValues,
     p.provenance ? () => [...reads] : undefined,
     p.address,
@@ -131,6 +159,7 @@ function run(Buffer, p) {
   for (const op of p.ops) {
     try {
       const val = op.val === undefined ? undefined : 'slot' in op.val ? slots[op.val.slot] : live(op.val.literal);
+      if (op.val !== undefined && !('slot' in op.val)) handed.push(val);
       if (op.t === 'set') buffer.set(op.path, val, op.redact);
       else if (op.t === 'merge') buffer.merge(op.path, val, op.redact);
       else if (op.t === 'delete') buffer.delete(op.path, op.redact);
@@ -154,7 +183,10 @@ function run(Buffer, p) {
     }
   }
   try {
-    out.push(`commit ${text(buffer.commit())}`);
+    const payload = buffer.commit();
+    out.push(`commit ${text(payload)}`);
+    for (const value of handed) scribble(value);
+    out.push(`the same payload after the caller edited its own values ${text(payload)}`);
     out.push(`after ${text(buffer.commit())}`); // an emptied buffer commits nothing
   } catch (error) {
     out.push(`commit threw ${error && error.name}: ${error && error.message}`);

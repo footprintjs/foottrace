@@ -5,37 +5,36 @@
  * stage's writes (two patch trees, a working copy, the copy-on-write reads), and at commit it ENCODES
  * them into rows (the 'full' layout, the 'delta' layout, the read-back of a family that does not fold
  * back). The encoders only read what was staged. They now live in files of their own (`fullRows.ts`,
- * `deltaRows.ts`, `readBack.ts`) and are handed the view below. The buffer keeps its state private,
- * and each encoder says in its signature that it changes none of it.
+ * `deltaRows.ts`, `readBack.ts`) and are handed the view below, so the buffer's state stays private
+ * to the buffer and each encoder takes one argument that says what it reads.
  *
- * This file is the bottom of that group: the vocabulary of a staged op, the view, and the three
- * questions every encoder asks of it the same way (did a path change, what provenance does a row
- * carry, which redaction marks matter for a row).
+ * This file holds what that group shares: the buffer's op, the view, and the three questions every
+ * encoder asks of it the same way (did a path change, what provenance does a row carry, which
+ * redaction marks matter for a row).
+ *
+ * A RULE, NOT A LOCK. The view's own fields are marked read-only. What they point at is not frozen:
+ * the patch trees, the base, the working copy and the ops are the buffer's live objects. That an
+ * encoder writes to none of them is a rule each one keeps, which a reviewer checks, and which the
+ * types do not enforce. One thing is handed on by design: the 'full' layout puts a staged op object
+ * itself into the trace it returns, as the buffer always did.
  */
 
+import type { StagedOp } from './admission.js';
+import type { OpVerb } from './deltaEncoding.js';
 import { nativeGet as _get } from './pathOps.js';
 import type { MemoryPatch, TraceEntry } from './types.js';
 import { deepEqual, DELIM } from './utils.js';
 
-/** Op-level verbs staged into `opTrace`. `'delete'` is staged distinctly so
- *  delta-mode commits (#13c-B) can emit a real `delete` trace entry; under
- *  the default `'full'` mode it commits as `'set'` (of `undefined`) —
- *  byte-identical to the historical flattening. */
-export type OpVerb = 'set' | 'merge' | 'delete';
-
-/** One staged op, as `TransactionBuffer` records it: a path, its verb, and the read provenance the dials recorded with it. */
-export type StagedOp = {
-  path: string;
-  verb: OpVerb;
-  readKeys?: string[];
-  readAttempts?: readonly string[];
-  readAttemptsOmitted?: number;
-};
+/**
+ * One op as the buffer staged it: the op the admission reads (`admission.ts · StagedOp`), with the
+ * verbs the buffer really stages (`deltaEncoding.ts · OpVerb`). WHY a name of its own: the admission
+ * takes any verb as text, and the layouts need to know it is one of the three.
+ */
+export type BufferOp = StagedOp & { verb: OpVerb };
 
 /**
  * What a stage staged, fixed at commit: the view `TransactionBuffer · atCommit` hands the encoders.
- * Every field is the buffer's own object, by reference (nothing is copied to build the view), and
- * the encoders write to none of them.
+ * Every field is the buffer's own object, by reference (nothing is copied to build the view).
  */
 export interface Staged {
   /** The net-change diff base: state when the stage began. */
@@ -47,7 +46,7 @@ export interface Staged {
   /** The accumulated delta of the stage's `merge` ops, by path. */
   readonly updatePatch: MemoryPatch;
   /** Every op the stage staged, in order. */
-  readonly ops: readonly StagedOp[];
+  readonly ops: readonly BufferOp[];
   /** The paths a `set` or a `delete` of the stage owns (`hardWriteCoverage.ts`). */
   readonly hardWriteKeys: ReadonlySet<string>;
   /** The paths marked secret, whole keys and fields alike. */

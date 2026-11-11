@@ -74,6 +74,7 @@
 import { putOwn } from '../capture/ownData.js';
 import { type Lossy, type Rows, addressDepthOf, lossyFamilies } from './admission.js';
 import { deltaRows } from './deltaRows.js';
+import type { OpVerb } from './deltaEncoding.js';
 import { changeOnlyRows, fullRowsValue } from './fullRows.js';
 import { hardWriteCovers } from './hardWriteCoverage.js';
 import { relation } from './keyPaths.js';
@@ -88,7 +89,7 @@ import {
   ownSpine,
   shallowCopy,
 } from './pathOps.js';
-import { type OpVerb, type Staged, type StagedOp, survivingRedactedPaths } from './staged.js';
+import { type BufferOp, type Staged, survivingRedactedPaths } from './staged.js';
 import type { CommitValuesMode, MemoryPatch, TraceEntry } from './types.js';
 import type { NativeReadObservation } from './pathOps.js';
 import type { SourceStaging } from '../read-sources/staging.js';
@@ -106,7 +107,7 @@ export class TransactionBuffer {
 
   private overwritePatch: MemoryPatch = {};
   private updatePatch: MemoryPatch = {};
-  private opTrace: StagedOp[] = [];
+  private opTrace: BufferOp[] = [];
   private redactedPaths = new Set<string>();
   private hardWriteKeys = new Set<string>();
   /**
@@ -206,7 +207,7 @@ export class TransactionBuffer {
   /** Stamp the current read prefix onto a staged op — only when the
    *  provenance dial is on (provider present), so the default path allocates
    *  nothing and commit bundles stay byte-identical. */
-  private stampReadKeys(op: StagedOp): StagedOp {
+  private stampReadKeys(op: BufferOp): BufferOp {
     if (this.readKeysProvider) op.readKeys = this.readKeysProvider();
     const attempts = this.readAttemptsProvider?.();
     if (attempts?.readAttempts?.length) {
@@ -568,7 +569,7 @@ export class TransactionBuffer {
    * At commit we hold BOTH `baseSnapshot` (state when the stage began) and
    * `workingCopy` (state after all its writes). For each path the stage touched
    * we keep it in the bundle ONLY if its final value differs from the base
-   * value ({@link deepEqual}). No-op AND write-revert paths drop out, because
+   * value (`deepEqual`, asked by `staged.ts · changedSinceBase`). No-op AND write-revert paths drop out, because
    * both compare equal to base. This is a single net-delta diff at commit time
    * — one deep compare per touched path, O(changed state), paid once per stage
    * (NOT per write). A naive per-write deep-equal skip would be more expensive
