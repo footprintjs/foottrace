@@ -71,12 +71,17 @@ export function admitProvRecord(
     inspected = inspectPrivacy(prefix.log, prefix.truncated, budget);
   const commits: AdmittedCommit[] = [],
     log = prefix.log.map(() => gapBundle());
+  // The index of the copy before the current row: each copy's own rises past it, and a row that could not
+  // be read keeps its place in the order, one past the row before (`memory/readWindow.ts · admitStamps`).
+  let after = -1;
   for (let commitIdx = 0; commitIdx < prefix.log.length; commitIdx++) {
-    const commit = admitBundle(prefix.log[commitIdx], commitIdx, inspected.redactions.get(commitIdx) ?? [], budget);
+    const redactions = inspected.redactions.get(commitIdx) ?? [];
+    const commit = admitBundle(prefix.log[commitIdx], commitIdx, redactions, budget, after);
     if (commit) {
       commits.push(commit);
       log[commitIdx] = commit.bundle;
-    }
+    } else log[commitIdx].idx = after + 1;
+    after = log[commitIdx].idx as number;
     if (budget.exhausted('work') || budget.exhausted('fields')) break;
   }
   try {

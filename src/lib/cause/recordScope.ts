@@ -56,7 +56,12 @@ export function prepareRecordScope(
   if (addressKey(addressOf(recordOwn(value, 'address'))) !== addressKey(address)) throw new RecordRefusal();
   const rawLog = recordList(recordOwn(value, 'commitLog'), maximumCommits),
     budget = { left: maximumFields };
-  const log = rawLog.map((_, commitIndex) => bundleOf(recordOwn(rawLog, String(commitIndex)), commitIndex, budget));
+  let after = -1;
+  const log = rawLog.map((_, commitIndex) => {
+    const bundle = bundleOf(recordOwn(rawLog, String(commitIndex)), after, budget);
+    after = bundle.idx as number;
+    return bundle;
+  });
   const reads = mapOf(
     recordOwn(value, 'reads'),
     maximumCommits,

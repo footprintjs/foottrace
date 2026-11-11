@@ -70,6 +70,69 @@ describe('the candidate source of a read in the PROV export', () => {
     expect(gaps).toContainEqual({ code: 'invalid-data', commitIdx: 2, reason: 'unreadable commit bundle' });
   });
 
+  // Found by the second reader: one odd idx on a neighbour made the sibling the candidate again.
+  const candidateOf = async (rows: object[]) => {
+    const result = await exportProv({ commitLog: rows }, { base: 'urn:test:window/' });
+    const nodes = result.document['@graph'];
+    const read = nodes.find((node) => node['@type'] === 'ft:Read');
+    const link = read?.['ft:candidateEntity'] as { '@id': string } | undefined;
+    return { commit: nodes.find((node) => node['@id'] === link?.['@id'])?.['ft:commitIdx'], read, gaps: result.gaps };
+  };
+  const [seedRow, fastRow, slowRow] = run({ beganAt: 1 }).commitLog;
+
+  it.each([
+    [
+      'a neighbour that says an index further on than the step',
+      [seedRow, { ...fastRow, idx: 7 }, { ...slowRow, idx: 2 }],
+    ],
+    ["a neighbour that repeats the step's index", [seedRow, { ...fastRow, idx: 2 }, { ...slowRow, idx: 2 }]],
+  ])('%s: the stamped row is refused as unreadable', async (_name, rows) => {
+    const { read, gaps } = await candidateOf(rows);
+    expect(read).toBeUndefined();
+    expect(gaps).toContainEqual({ code: 'invalid-data', commitIdx: 2, reason: 'unreadable commit bundle' });
+  });
+
+  it.each([
+    [
+      'a slice whose middle row says no index',
+      [{ ...seedRow, idx: 10 }, fastRow, { ...slowRow, idx: 12, beganAt: 11 }],
+    ],
+    [
+      'a slice whose middle row says an index that is not a number',
+      [
+        { ...seedRow, idx: 10 },
+        { ...fastRow, idx: 'x' },
+        { ...slowRow, idx: 12, beganAt: 11 },
+      ],
+    ],
+    [
+      'a neighbour that repeats an earlier index',
+      [
+        { ...seedRow, idx: 0 },
+        { ...fastRow, idx: 0 },
+        { ...slowRow, idx: 2 },
+      ],
+    ],
+    [
+      'a row that could not be read at all, in a slice',
+      [{ ...seedRow, idx: 10 }, null, { ...slowRow, idx: 12, beganAt: 11 }],
+    ],
+    [
+      // The unread row is commit 11 and the row with no index after it is commit 12, where the step began:
+      // each takes the next place in the order, never its bare position.
+      'an unread row and then a row with no index, in a slice',
+      [
+        { ...seedRow, idx: 10 },
+        null,
+        fastRow,
+        { runtimeStageId: 'other#3', trace: [], idx: 13 },
+        { ...slowRow, idx: 14, beganAt: 12 },
+      ],
+    ],
+  ])('%s: it keeps its place in the order, and the candidate is the real one', async (_name, rows) => {
+    expect((await candidateOf(rows as object[])).commit).toBe(0);
+  });
+
   it('rows that say their own index are read by it: a slice of a log keeps its windows', async () => {
     // Rows 0 to 2 of this export were commits 7 to 9 of their log; the last began when that log held 8.
     const sliced = run({ beganAt: 8 });

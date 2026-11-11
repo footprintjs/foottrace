@@ -184,6 +184,16 @@ describe('when a step looked at state (windowOf)', () => {
     expect(windowOf([...other, ...own], 10)).toEqual({ start: 3, end: 10 });
   });
 
+  it('a bundle that does not say its index is placed relative to the step, not at its bare position', () => {
+    // Found by the second reader. A slice numbered 10 to 12; the step at 12 began when the log held 11.
+    // The middle bundle is commit 11 whatever it says: read at its bare position (1) it would look like
+    // one of the first commits of the log, seen by the step, and the step would be dated at its own commit.
+    const stepAt12 = bundle({ idx: 12, beganAt: 11 });
+    expect(windowOf([bundle({ idx: 10 }), bundle({}), stepAt12], 2)).toEqual({ start: 1, end: 1 });
+    const junk = bundle({ idx: 'x' as unknown as number });
+    expect(windowOf([bundle({ idx: 10 }), junk, stepAt12], 2)).toEqual({ start: 1, end: 1 });
+  });
+
   it('a hand-built bundle with no idx is read at its position', () => {
     expect(windowOf(log(5, { beganAt: 1, sawUntil: 3 }), 4)).toEqual({ start: 1, end: 3 });
   });
@@ -214,21 +224,24 @@ describe('when a step looked at state (windowOf)', () => {
 });
 
 describe('admitting the place of a bundle from outside', () => {
-  it("no stamp: the copy keeps the bundle's own index, or its position when it has none", () => {
-    expect(admitStamps(undefined, undefined, 4, 4)).toEqual({ idx: 4 });
-    expect(admitStamps(undefined, undefined, 9, 4)).toEqual({ idx: 9 }); // its own index, not where it sits
-    expect(admitStamps(undefined, undefined, undefined, 4)).toEqual({ idx: 4 });
-    // An idx that is not one is passed over on a bundle with no stamp, as before the stamps existed.
-    expect(admitStamps(undefined, undefined, 'junk', 4)).toEqual({ idx: 4 });
+  // The last argument is the index of the copy before this one in the log: the copy's own rises past it.
+  it("no stamp: the copy keeps the bundle's own index when it rises, and takes the next one otherwise", () => {
+    expect(admitStamps(undefined, undefined, 0, -1)).toEqual({ idx: 0 }); // the first bundle of a log
+    expect(admitStamps(undefined, undefined, 4, 3)).toEqual({ idx: 4 });
+    expect(admitStamps(undefined, undefined, 9, 3)).toEqual({ idx: 9 }); // further on: a log with bundles taken out
+    expect(admitStamps(undefined, undefined, undefined, 3)).toEqual({ idx: 4 }); // it says none
+    expect(admitStamps(undefined, undefined, 'junk', 3)).toEqual({ idx: 4 }); // not a whole number
+    expect(admitStamps(undefined, undefined, 3, 3)).toEqual({ idx: 4 }); // not past the copy before
+    expect(admitStamps(undefined, undefined, 1, 3)).toEqual({ idx: 4 }); // behind it
   });
 
   it('good stamps are kept as they are, with the index they count against', () => {
-    expect(admitStamps(2, undefined, 5, 5)).toEqual({ idx: 5, beganAt: 2 });
-    expect(admitStamps(2, 4, 5, 5)).toEqual({ idx: 5, beganAt: 2, sawUntil: 4 });
-    expect(admitStamps(0, 5, 5, 5)).toEqual({ idx: 5, beganAt: 0, sawUntil: 5 });
-    // A bundle from a slice of its log: nothing is counted again from where the copy sits.
-    expect(admitStamps(6, 8, 9, 4)).toEqual({ idx: 9, beganAt: 6, sawUntil: 8 });
-    expect(admitStamps(2, 4, undefined, 5)).toEqual({ idx: 5, beganAt: 2, sawUntil: 4 }); // no idx: read at its position
+    expect(admitStamps(2, undefined, 5, 4)).toEqual({ idx: 5, beganAt: 2 });
+    expect(admitStamps(2, 4, 5, 4)).toEqual({ idx: 5, beganAt: 2, sawUntil: 4 });
+    expect(admitStamps(0, 5, 5, 4)).toEqual({ idx: 5, beganAt: 0, sawUntil: 5 });
+    // A bundle from a slice or a filtered log: nothing is counted again from where the copy sits.
+    expect(admitStamps(6, 8, 9, 3)).toEqual({ idx: 9, beganAt: 6, sawUntil: 8 });
+    expect(admitStamps(2, 4, undefined, 4)).toEqual({ idx: 5, beganAt: 2, sawUntil: 4 }); // no idx: the next index
   });
 
   it.each([
@@ -246,8 +259,10 @@ describe('admitting the place of a bundle from outside', () => {
     ['a stamp beside an idx that is not a whole number', [2, 4, 5.5]],
     ['a stamp beside an idx that is not a number', [2, 4, '5']],
     ['a stamp beside an idx too large to count with', [2, 4, 2 ** 60]],
+    ['a stamp beside an idx that is not past the copy before', [2, undefined, 4]],
+    ['a stamp beside an idx behind the copy before', [1, undefined, 2]],
   ])('%s is refused, never dropped', (_name, [beganAt, sawUntil, idx]) => {
-    expect(admitStamps(beganAt, sawUntil, idx, 5)).toBeUndefined();
+    expect(admitStamps(beganAt, sawUntil, idx, 4)).toBeUndefined();
   });
 });
 

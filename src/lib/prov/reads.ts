@@ -1,4 +1,4 @@
-import { readSourcesOf, windowOf } from '../memory/readWindow.js';
+import { readSourcesOf } from '../memory/readWindow.js';
 import { buildKeyIndex, lastIndexBefore, writeEntry } from '../slice/keyIndex.js';
 import { pathSegments } from '../record-paths/codec.js';
 import { reference } from './translation.js';
@@ -37,6 +37,9 @@ export function mapReads(mapping: ProvMapping): void {
     if (output.full || !mapping.activities.has(runtimeStageId)) continue;
     const keys = mapping.reads.get(runtimeStageId) ?? [],
       readIds = new Map<string, string>();
+    // When this step looked at state: placed once per step by the index, never once per key.
+    const first = commits[0].commitIdx;
+    const window = index.windows.get(first) ?? { start: first, end: first };
     for (let ordinal = 0; ordinal < keys.length; ordinal++) {
       if (output.full) break;
       const key = keys[ordinal];
@@ -46,9 +49,7 @@ export function mapReads(mapping: ProvMapping): void {
         hidden = mapping.hidden(key);
       const writes = index.writesOf(key);
       if (!budget.spend('work', writes.length + Math.ceil(Math.log2(writes.length + 1)))) return;
-      const sources = readSourcesOf(key, windowOf(record.log, commits[0].commitIdx), (_key, before) => {
-        return lastIndexBefore(writes, before) ?? -1;
-      });
+      const sources = readSourcesOf(key, window, (_key, before) => lastIndexBefore(writes, before) ?? -1);
       const contested = sources.during.length > 0;
       const previous = sources.before < 0 ? undefined : sources.before;
       if (previous !== undefined && !budget.spend('work', record.log[previous].trace.length)) return;

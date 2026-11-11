@@ -39,6 +39,8 @@ export function admitBundle(
   commitIdx: number,
   redactions: readonly string[],
   budget: ProvBudget,
+  /** The index of the copy before this row in the log (-1 for the first): this copy's own rises past it. */
+  after: number,
 ): AdmittedCommit | undefined {
   try {
     // Preserve the canonical primitive-envelope refusal without touching any untrusted property.
@@ -123,7 +125,7 @@ export function admitBundle(
       dataField(raw, 'beganAt', budget),
       dataField(raw, 'sawUntil', budget),
       dataField(raw, 'idx', budget),
-      commitIdx,
+      after,
     );
     if (!placed) throw new ProvDataRefusal();
     const untrackedSources = untracked === undefined ? undefined : dataNames(untracked, budget, 'fields');

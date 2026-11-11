@@ -130,6 +130,48 @@ describe('two writers inside one window', () => {
   });
 });
 
+describe('one odd idx on a neighbour cannot put a wrong writer forward as the certain one', () => {
+  // Found by the second reader. seed writes x, fast replaces it, slow began before fast committed. The
+  // right answer is seed. Each case damages the idx of one bundle; before the doors made the copies'
+  // indices rise, every one of them answered "fast", as a certain parent with no gap.
+  const withIdx = (bundle: CommitBundle, idx: unknown): CommitBundle => ({ ...bundle, idx: idx as number });
+  const ask = async (commitLog: unknown[]) => {
+    const g = createRecordGraph([scope(commitLog) as never]);
+    const node = (stage: string, at: number, key: string) =>
+      g.nodeId(address, { runtimeStageId: `${stage}#${at}`, commitIdx: at, key });
+    const copy = node('slow', 2, 'copy');
+    return {
+      parents: (await g.parents(copy, ctx())).edges.map((edge) =>
+        edge.nodeId === node('seed', 0, 'x') ? 'seed' : edge.nodeId,
+      ),
+      gaps: (await g.gaps(copy, ctx())).map((gap) => gap.code),
+    };
+  };
+  const [seed, fast, slow] = run({ beganAt: 1 });
+
+  it.each([
+    ['a neighbour that says an index further on than the step', [seed, withIdx(fast, 7), slow]],
+    ["a neighbour that repeats the step's index", [seed, withIdx(fast, 2), slow]],
+  ])("%s: the step's stamp counts against nothing, so the record is refused", async (_name, commitLog) => {
+    expect((await ask(commitLog)).gaps).toEqual(['invalid-data']);
+  });
+
+  const sliced = (middle: unknown) => [withIdx(seed, 10), { ...fast, idx: middle }, { ...slow, idx: 12, beganAt: 11 }];
+  it.each([
+    [
+      'a slice whose middle bundle says no index',
+      (() => {
+        const { idx: _idx, ...noIdx } = fast;
+        return [withIdx(seed, 10), noIdx, { ...slow, idx: 12, beganAt: 11 }];
+      })(),
+    ],
+    ['a slice whose middle bundle says an index that is not a number', sliced('x')],
+    ['a neighbour that repeats an earlier index', [seed, withIdx(fast, 0), slow]],
+  ])('%s: it keeps its place in the order, and the parent is the real one', async (_name, commitLog) => {
+    expect(await ask(commitLog)).toEqual({ parents: ['seed'], gaps: [] });
+  });
+});
+
 describe('a record in memory handed over as part of a log', () => {
   it('without the continuation bundles that sat in the window, the parent is the same', async () => {
     // seed 0, fast 1, fast (exit) 2, fast (repeat) 3, slow 4 began at 1. Rows 2 and 3 are not handed over.

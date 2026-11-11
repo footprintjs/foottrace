@@ -102,7 +102,8 @@ export function dataCopy(value: unknown, budget: { left: number }): unknown {
   }
   return root;
 }
-export function bundleOf(value: unknown, idx: number, budget: { left: number }): CommitBundle {
+/** `after`: the index of the copy before this one in the log (-1 for the first); the copy's own rises past it. */
+export function bundleOf(value: unknown, after: number, budget: { left: number }): CommitBundle {
   const runtimeStageId = recordName(recordOwn(value, 'runtimeStageId')),
     stageId = recordName(recordOwn(value, 'stageId'));
   const trace = recordList(recordOwn(value, 'trace'), 128).map((_, i) => {
@@ -144,7 +145,7 @@ export function bundleOf(value: unknown, idx: number, budget: { left: number }):
     phase = recordOwn(value, 'phase');
   // The walk dates this step's reads by its stamps, read against each bundle's own `idx`. So the copy keeps
   // both, and stamps that cannot be stamps refuse the record (`memory/readWindow.ts · admitStamps`).
-  const placed = admitStamps(recordOwn(value, 'beganAt'), recordOwn(value, 'sawUntil'), recordOwn(value, 'idx'), idx);
+  const placed = admitStamps(recordOwn(value, 'beganAt'), recordOwn(value, 'sawUntil'), recordOwn(value, 'idx'), after);
   if (!placed) throw new RecordRefusal();
   spend(budget, redactedPaths.length + (untracked === undefined ? 0 : recordList(untracked, 128).length));
   return {

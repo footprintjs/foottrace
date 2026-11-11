@@ -38,7 +38,7 @@ One bundle is one stage's commit: what it wrote, as the log spells it.
 | `beganAt` | whole number | no | How many commits the log held when the stage first looked at state. Written only when another stage committed between that look and this commit. It dates the stage's reads: they saw state as it stood at `beganAt`, not at this commit. |
 | `sawUntil` | whole number | no | How many commits the log held when the stage last read live state. Written only with `beganAt` and only when greater. Commits `beganAt` to `sawUntil - 1` are the stage's read window: a read may have seen any of them. |
 | `stage`, `stageId` | | no | Advisory. |
-| `idx` | whole number | no | The bundle's commit index in the log it was written to. Replay and the cursor derive the commit index from position and do not read it. The read window does: the commits a stage had seen are the ones whose `idx` is below its `beganAt`, so a log handed over as a slice, or without some of its bundles, still reads right. A producer that writes `beganAt` writes `idx` on every bundle. A bundle without `idx` counts as sitting at its position. |
+| `idx` | whole number | no | The bundle's commit index in the log it was written to. Replay and the cursor derive the commit index from position and do not read it. The read window does: the commits a stage had seen are the ones whose `idx` is below its `beganAt`, so a log handed over as a slice, or without some of its bundles, still reads right. For that the `idx` values must rise along the array. A producer that writes `beganAt` writes `idx` on every bundle. A bundle without `idx` is placed by its position relative to the stage being asked about. |
 
 A trace row's `verb` is one of exactly four: `set`, `merge`, `append`,
 `delete`. `path` must be a string: a top-level key or a nested path; a nested path uses
@@ -130,9 +130,13 @@ use, remote commitment or complete external ancestry.
   and the answer carries a `'concurrent-write'` note: possible sources, the
   real one among them. The window is placed by the `idx` each bundle carries,
   so a log handed over as a slice or without some of its bundles reads the
-  same. The fold does not read the stamps. A door that takes records from
-  outside (the cause graph, the PROV export) keeps each bundle's own `idx` and
-  refuses a bundle whose stamps cannot be stamps; it never drops them.
+  same, as long as its `idx` values rise along the array. The fold does not
+  read the stamps. A door that takes records from outside (the cause graph,
+  the PROV export) makes the indices of its copies rise: it keeps a bundle's
+  own `idx` when that is a whole number past the bundle before it and gives
+  the next index otherwise, so one odd `idx` cannot move another stage's
+  window. It refuses a bundle whose stamps cannot be stamps, or whose stamps
+  sit beside such an `idx`; it never drops them.
 - **One saved-row boundary.** `isCommitBundle(row)` applies the same checks as
   replay. Causal readers still accept typed `CommitBundle[]`, not unknown input.
   A consumer preparing a causal query from stored rows must validate every row
