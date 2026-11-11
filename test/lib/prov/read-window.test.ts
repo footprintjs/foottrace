@@ -157,6 +157,42 @@ describe('the candidate source of a read in the PROV export', () => {
     expect((await candidateOf(rows as object[])).commit).toBe(0);
   });
 
+  it('a row that says no index, in a record with rows taken out: no one candidate, and the export says so', async () => {
+    // Found by the second reader (round 4). The whole log: 0 seed, 1 to 3 (not handed over), 4 fast, 5 slow,
+    // which began at 2 and so read seed's x. With `fast` saying no index the door used to write the next
+    // index on its copy, `fast` looked seen by `slow`, and it was exported as the candidate.
+    const stepAt5 = { ...slowRow, idx: 5, beganAt: 2 };
+    const holed = await candidateOf([{ ...seedRow, idx: 0 }, fastRow, stepAt5]);
+    expect(holed.read?.['ft:basis']).toBe('unknown');
+    expect(holed.read).not.toHaveProperty('ft:candidateEntity');
+    expect(holed.gaps).toContainEqual(NOT_ONE_BINDING);
+    // Said, there is one candidate either way.
+    expect((await candidateOf([{ ...seedRow, idx: 0 }, { ...fastRow, idx: 4 }, stepAt5])).commit).toBe(0);
+    expect((await candidateOf([{ ...seedRow, idx: 0 }, { ...fastRow, idx: 1 }, stepAt5])).commit).toBe(1);
+  });
+
+  it('a row that could not be read, in a record with rows taken out, is never a source and moves no window', async () => {
+    // seed 0, an unreadable row, fast 4, slow 5 began at 4: the unreadable row is one of the commits 1 to
+    // 3, seen by the step whichever it is. It holds no write, so the candidate is seed for certain.
+    const rows = [{ ...seedRow, idx: 0 }, null, { ...fastRow, idx: 4 }, { ...slowRow, idx: 5, beganAt: 4 }];
+    const { commit, gaps } = await candidateOf(rows as object[]);
+    expect(commit).toBe(0);
+    expect(gaps).not.toContainEqual(NOT_ONE_BINDING);
+  });
+
+  it('a row that could not be read keeps its place: rows that leave it no room contradict the record', async () => {
+    // Row 1 cannot be read, and rows 2 and 3 say they are commits 1 and 2: one row too many for those
+    // indices. The door cannot tell which of them is damaged, so the stamped row counts against nothing.
+    const rows = [{ ...seedRow, idx: 0 }, null, { ...fastRow, idx: 1 }, { ...slowRow, idx: 2 }];
+    const { read, gaps } = await candidateOf(rows as object[]);
+    expect(read).toBeUndefined();
+    expect(gaps).toContainEqual({
+      code: 'invalid-data',
+      commitIdx: 3,
+      reason: 'read stamps do not fit the commit index',
+    });
+  });
+
   it('rows that say their own index are read by it: a slice of a log keeps its windows', async () => {
     // Rows 0 to 2 of this export were commits 7 to 9 of their log; the last began when that log held 8.
     const sliced = run({ beganAt: 8 });

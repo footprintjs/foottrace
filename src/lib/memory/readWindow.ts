@@ -88,15 +88,24 @@ const NONE: readonly number[] = Object.freeze([]);
 /** A whole number from 0 up: what a commit index or a stamp can be. */
 export const isCount = (value: unknown): value is number =>
   typeof value === 'number' && Number.isInteger(value) && value >= 0;
+/**
+ * A commit index a reader can count with: a whole number from 0 to 2^52. A reader adds positions to
+ * indices (`windowPlacement.ts`); up to here every such sum is exact for any array a program can
+ * hold, so two bundles are never read at one place. A larger `idx` is treated as not said.
+ */
+export const isIndex = (value: unknown): value is number => isCount(value) && value <= 2 ** 52;
 
-/** What an admitted copy of a bundle keeps of its place in its log: its commit index and its stamps. */
-export type Placed = Required<Pick<CommitBundle, 'idx'>> & Pick<CommitBundle, 'beganAt' | 'sawUntil'>;
+/**
+ * What an admitted copy of a bundle keeps of its place in its log: the commit index it said, when a
+ * reader can count with it, and its stamps. Nothing here is made up by the door.
+ */
+export type Placed = Pick<CommitBundle, 'idx' | 'beganAt' | 'sawUntil'>;
 
 /**
  * Admit the place of a bundle that came from outside (a stored record, a record handed to a reader):
- * the three values as the caller read them off it, and `after`, the index of the copy before it in
- * the log (-1 for the first). Returns what the copy keeps, or `undefined` when the stamps cannot be
- * stamps.
+ * the three values as the caller read them off it, and `after`, the lowest index the copy before it
+ * can have (-1 for the first; {@link placedAt} gives it for the next one). Returns what the copy
+ * keeps, or `undefined` when the stamps cannot be stamps.
  *
  * WHY REFUSE, NOT IGNORE. A stamp that is dropped reads as "this step saw everything before its own
  * commit": the dating the stamp exists to correct, and a narrower claim than the record made. So a
@@ -105,13 +114,19 @@ export type Placed = Required<Pick<CommitBundle, 'idx'>> & Pick<CommitBundle, 'b
  * and never present without `beganAt`.
  *
  * WHY THE COPIES' INDICES ALWAYS RISE. The stamps are read against the `idx` of the bundles around
- * them (`windowPlacement.ts · windowsOf`), so one odd `idx` on a neighbour can move another step's window and put a
- * wrong writer forward as the certain one. A door therefore keeps a bundle's own `idx` only when it
- * is a whole number past the copy before it. An `idx` that is missing, not a whole number or not
- * past the one before is replaced by the next index on a bundle with no stamp (such a bundle only
- * needs its place in the order). Beside a stamp the same `idx` refuses the bundle, because the stamp
- * then counts against nothing; a stamped bundle with no `idx` at all is read at the next index, as a
- * log built by hand is.
+ * them (`windowPlacement.ts · windowsOf`), so one odd `idx` on a neighbour can move another step's
+ * window and put a wrong writer forward as the certain one. A door therefore keeps a bundle's own
+ * `idx` only when it is a whole number past the copy before it. On a bundle with no stamp any other
+ * `idx` (missing, not a whole number, not past the one before) is left off the copy: such a bundle
+ * only needs its place in the order. Beside a stamp the same `idx` refuses the bundle, because the
+ * stamp then counts against nothing; a stamped bundle with no `idx` at all is admitted when its
+ * stamps fit the lowest index it can have, as a log built by hand is.
+ *
+ * WHY THE DOOR WRITES NO INDEX OF ITS OWN. It used to give a copy that said none the next index. In a
+ * record with rows taken out that number is a guess, and once written on the copy no reader could
+ * tell it from a said one: the bundle looked older than it was and came back as the one certain
+ * source (found by the second reader of this change). A copy that says no index is read by its
+ * neighbours, as a range where they show a hole (`windowPlacement.ts`, step 2).
  *
  * WHAT THIS COSTS, AND IS ACCEPTED. The door cannot tell which of two bundles is the damaged one. A
  * bundle that says an index far too large is kept, and then every stamped bundle after it is the one
@@ -119,13 +134,18 @@ export type Placed = Required<Pick<CommitBundle, 'idx'>> & Pick<CommitBundle, 'b
  * a guess would put a writer forward as certain.
  */
 export function admitStamps(beganAt: unknown, sawUntil: unknown, idx: unknown, after: number): Placed | undefined {
-  const own = isCount(idx) && Number.isSafeInteger(idx) && idx > after ? idx : undefined;
-  if (beganAt === undefined) return sawUntil === undefined ? { idx: own ?? after + 1 } : undefined;
+  const own = isIndex(idx) && idx > after ? idx : undefined;
+  const said: Placed = own === undefined ? {} : { idx: own };
+  if (beganAt === undefined) return sawUntil === undefined ? said : undefined;
+  // What the stamps must fit: the bundle's own index, or the lowest it can have when it says none.
   const at = idx === undefined ? after + 1 : own;
   if (at === undefined || !isCount(beganAt) || beganAt >= at) return undefined;
-  if (sawUntil === undefined) return { idx: at, beganAt };
-  return isCount(sawUntil) && sawUntil > beganAt && sawUntil <= at ? { idx: at, beganAt, sawUntil } : undefined;
+  if (sawUntil === undefined) return { ...said, beganAt };
+  return isCount(sawUntil) && sawUntil > beganAt && sawUntil <= at ? { ...said, beganAt, sawUntil } : undefined;
 }
+
+/** The `after` of the next bundle: the lowest index this copy can have, its own or one past the copy before it. */
+export const placedAt = (placed: Placed, after: number): number => placed.idx ?? after + 1;
 
 /**
  * The rule, backward (see the file header): the sources of a read of `key` by a step with `window`.

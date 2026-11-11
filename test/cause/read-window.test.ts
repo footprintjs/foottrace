@@ -172,6 +172,42 @@ describe('one odd idx on a neighbour cannot put a wrong writer forward as the ce
   });
 });
 
+describe('a row that says no index, in a record with rows taken out', () => {
+  // Found by the second reader (round 4). The whole log: 0 seed, 1 to 3 (not handed over), 4 fast, 5 slow,
+  // which began at 2 and so read seed's x. With `fast` saying no index the door used to write "1" on its
+  // copy, the next index: `fast` then looked seen by `slow` and came back as its one certain parent.
+  const ask = async (commitLog: unknown[]) => {
+    const g = createRecordGraph([scope(commitLog) as never]);
+    const node = (stage: string, at: number, key: string) =>
+      g.nodeId(address, { runtimeStageId: `${stage}#${at}`, commitIdx: at, key });
+    const copy = node('slow', 2, 'copy');
+    const short = (id: string) => (id === node('seed', 0, 'x') ? 'seed' : id === node('fast', 1, 'x') ? 'fast' : id);
+    return {
+      parents: (await g.parents(copy, ctx())).edges.map((edge) => short(edge.nodeId)),
+      gaps: (await g.gaps(copy, ctx())).map((gap) => gap.code),
+    };
+  };
+  const [seed, fast, slow] = run({ beganAt: 2 });
+  const { idx: _idx, ...silent } = fast;
+  const stepAt5 = { ...slow, idx: 5 };
+
+  it('the copy says no index either: both writers are possible, and the answer says it is a superset', async () => {
+    expect(await ask([seed, silent, stepAt5])).toEqual({ parents: ['seed', 'fast'], gaps: ['conservative'] });
+  });
+
+  it.each([
+    ['after the step began', 4, 'seed'],
+    ['before the step began', 1, 'fast'],
+  ])('said, %s, there is one certain parent', async (_name, idx, parent) => {
+    expect(await ask([seed, { ...fast, idx }, stepAt5])).toEqual({ parents: [parent], gaps: [] });
+  });
+
+  it('with no row taken out the silent row has one place, and the answer is exact', async () => {
+    // seed 0, fast (commit 1 whatever it says), slow 2 began at 1.
+    expect(await ask([seed, silent, { ...slow, beganAt: 1 }])).toEqual({ parents: ['seed'], gaps: [] });
+  });
+});
+
 describe('a record in memory handed over as part of a log', () => {
   it('without the continuation bundles that sat in the window, the parent is the same', async () => {
     // seed 0, fast 1, fast (exit) 2, fast (repeat) 3, slow 4 began at 1. Rows 2 and 3 are not handed over.

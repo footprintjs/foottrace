@@ -38,7 +38,7 @@ One bundle is one stage's commit: what it wrote, as the log spells it.
 | `beganAt` | whole number | no | How many commits the log held when the stage first looked at state. Written only when another stage committed between that look and this commit. It dates the stage's reads: they saw state as it stood at `beganAt`, not at this commit. |
 | `sawUntil` | whole number | no | How many commits the log held when the stage last read live state. Written only with `beganAt` and only when greater. Commits `beganAt` to `sawUntil - 1` are the stage's read window: a read may have seen any of them. |
 | `stage`, `stageId` | | no | Advisory. |
-| `idx` | whole number | no | The bundle's commit index in the log it was written to. Replay and the cursor derive the commit index from position and do not read it. The read window does: the commits a stage had seen are the ones whose `idx` is below its `beganAt`, so a log handed over as a slice, or without some of its bundles, still reads right. A producer that writes `beganAt` writes `idx` on every bundle, rising along the log. A bundle without `idx` is placed next to its neighbour (one past the bundle before it); a log where no bundle has one is read by position. |
+| `idx` | whole number | no | The bundle's commit index in the log it was written to. Replay and the cursor derive the commit index from position and do not read it. The read window does: the commits a stage had seen are the ones whose `idx` is below its `beganAt`, so a log handed over as a slice, or without some of its bundles, still reads right. A producer that writes `beganAt` writes `idx` on every bundle, rising along the log, each a whole number up to 2^52. A bundle without `idx` is placed by the bundles around it that have one: past the bundle before it, and before the next one that says an index. Where those two show that bundles are missing, it can be any commit in the hole, and a reader counts it inside a stage's window whenever it could be there. A log where no bundle has one is read by position. |
 
 A trace row's `verb` is one of exactly four: `set`, `merge`, `append`,
 `delete`. `path` must be a string: a top-level key or a nested path; a nested path uses
@@ -132,13 +132,26 @@ use, remote commitment or complete external ancestry.
   so a log handed over as a slice, without some of its bundles, or behind
   another log reads the same. Where the indices around a stage do not rise
   and cannot be trusted to hold its window, every earlier writer of the key
-  is given as a possible source: none certain, none left out. The fold does
-  not read the stamps. A door that takes records from outside (the cause graph,
-  the PROV export) makes the indices of its copies rise: it keeps a bundle's
-  own `idx` when that is a whole number past the bundle before it and gives
-  the next index otherwise, so one odd `idx` cannot move another stage's
-  window. It refuses a bundle whose stamps cannot be stamps, or whose stamps
-  sit beside such an `idx`; it never drops them.
+  is given as a possible source: none certain, none left out. A bundle that
+  says no `idx`, where the indices around it show that bundles are missing,
+  is counted inside the window whenever it could be there: a possible source,
+  never a certain one. The fold does not read the stamps. A door that takes
+  records from outside (the cause graph, the PROV export) keeps a bundle's
+  own `idx` only when that is a whole number past the bundle before it. On a
+  bundle with no stamp any other `idx` is left off the copy, and the door
+  writes none of its own, so one odd `idx` cannot move another stage's window
+  and a guessed one is never read as a said one. It refuses a bundle whose
+  stamps cannot be stamps, or whose stamps sit beside such an `idx`; it never
+  drops them.
+- **A reader names the writers that are in the array.** Every reader that
+  takes a commit log takes it as the history before each stage: the source of
+  a read is the last writer of the key that is in the array. A bundle that was
+  taken out may have written the key later, and a log joined after another
+  may have lost its own first commits; the answer then names an earlier
+  writer as certain, and nothing in the answer marks it. That holds with or
+  without the stamps. Hand over the whole log, or treat the answer as "the
+  last writer among these bundles". (`readStoredRecord` does know which
+  commits a stored log lost, and reports each as a gap.)
 - **One saved-row boundary.** `isCommitBundle(row)` applies the same checks as
   replay. Causal readers still accept typed `CommitBundle[]`, not unknown input.
   A consumer preparing a causal query from stored rows must validate every row

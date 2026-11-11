@@ -16,12 +16,28 @@
  *   1. STRETCHES. One pass finds where the indices stop rising: each such place starts a new stretch
  *      (another log, or a bundle that says an index not past the one before it). A step is searched
  *      for inside its own stretch only.
- *   2. A BUNDLE THAT SAYS NO INDEX is read next to its neighbour: one past the bundle before it; a
- *      run of them at the head of a stretch counts back from the first bundle that says one. A log
- *      where no bundle says an index (built by hand) is read by position.
+ *   2. A BUNDLE THAT SAYS NO INDEX has one only as far as its neighbours pin it. It sits past the
+ *      bundle before it (the EARLIEST it can be; its position, when it is at the head of the array)
+ *      and before the next bundle that says an index (the LATEST it can be). In an unbroken array
+ *      the two are the same number. Where the said indices show a hole (two bundles further apart
+ *      in index than in position, or a first said index larger than its position) the silent
+ *      bundles there could sit anywhere in the hole, and the two readings differ. Nothing after it
+ *      says an index: it is taken to follow the bundle before it directly, so a log where no bundle
+ *      says an index (built by hand) is read by position.
  *   3. PLACING. When the array is unbroken around the step, positions and indices move together: the
  *      place is one subtraction away and one look confirms it. Otherwise the indices still rise along
- *      the stretch, and the place is found by halving.
+ *      the stretch, and the place is found by halving. The window STARTS at the first bundle that
+ *      could sit at `beganAt` or later (its latest reading) and ENDS at the first bundle that surely
+ *      does (its earliest reading, against `sawUntil`, or against `beganAt` when the step never looked
+ *      again). So a bundle whose place is not known is inside the window whenever it could be: its
+ *      write is a possible source, never a certain one, and never left out.
+ *   4. WHEN THE STRETCH DOES NOT HOLD THE WINDOW'S START. A stretch that begins after the step began
+ *      (its first index is past `beganAt`) and is not the head of the array could be two things:
+ *      another log cut short, or this step's own log with one damaged index in it, which looks like
+ *      a boundary. The two cannot be told apart, so the window is opened over everything before the
+ *      step: every earlier writer of a key is then a possible source, none is certain, and none is
+ *      left out. (Shown by the second reader: one bundle that said an index too large cut the step
+ *      off from its own log, and the sibling came back as the one certain source.)
  *
  * WHY NOT WALK BACK FROM THE STEP. A walk costs the window's width for every step that has one. A
  * fan-out of thousands of branches gives thousands of wide windows, and a record from outside can
@@ -37,31 +53,36 @@
  *   - a search over the whole array: with one log in front of another, the window landed in the
  *     wrong log;
  *   - a missing index read at its bare position, or relative to the step: wrong in a slice, wrong in
- *     a filtered log.
+ *     a filtered log;
+ *   - a missing index read as ONE number, next to its neighbour: in a log with bundles taken out the
+ *     bundle looked older than it was, counted as seen, and came back as the one certain source.
  *
- *   4. WHEN THE STRETCH DOES NOT HOLD THE WINDOW'S START. A stretch that begins after the step began
- *      (its first index is past `beganAt`) and is not the head of the array could be two things:
- *      another log cut short, or this step's own log with one damaged index in it, which looks like
- *      a boundary. The two cannot be told apart, so the window is opened over everything before the
- *      step: every earlier writer of a key is then a possible source, none is certain, and none is
- *      left out. (Shown by the second reader: one bundle that said an index too large cut the step
- *      off from its own log, and the sibling came back as the one certain source.)
- *
- * NOT COVERED. A bundle that says a wrong index which still rises is believed: nothing can tell it
- * from a true one. A bundle that says none is placed next to its neighbour, which is right when no
- * bundle was taken out between the two and a guess otherwise. A door that takes records from outside
- * makes every copy say a rising index before any reader sees it (`readWindow.ts · admitStamps`).
+ * NOT COVERED, because nothing in the array shows it:
+ *   - a bundle that says a wrong index which still rises is believed;
+ *   - bundles that say no index AFTER the last one that does (or a log where none does) are taken to
+ *     follow one another directly. If bundles were taken out among them, they are older or newer
+ *     than they are read;
+ *   - the array is taken to hold the step's history. A reader names the last writer that is IN the
+ *     array: a writer that was taken out, or that sits in a part of another log that was cut away
+ *     before the logs were joined, cannot be named, and indices that still rise across such a join
+ *     do not show it. That is so with or without a window; it is the caller's claim, not checked here;
+ *   - the stamps sit on a step's FIRST bundle. An array without that bundle has lost them, and the
+ *     step's later bundles are read as any bundle with no stamp.
+ * A door that takes records from outside keeps a bundle's index only when it rises past the copy
+ * before it, so every admitted log is one stretch (`readWindow.ts · admitStamps`).
  */
 
-import { isCount, type ReadWindow } from './readWindow.js';
+import { isCount, isIndex, type ReadWindow } from './readWindow.js';
 import type { CommitBundle } from './types.js';
 
 /** What one pass over a log array finds. */
 interface Layout {
   /** Where each stretch of rising indices starts, ascending. The first is always 0. */
   readonly starts: readonly number[];
-  /** The index the bundle at a position is read at. */
-  indexAt(position: number): number;
+  /** The lowest index the bundle at each position can have. Rises along a stretch. */
+  readonly earliest: readonly number[];
+  /** The highest. The same array as `earliest` when every bundle's index is pinned to one number. */
+  readonly latest: readonly number[];
 }
 
 const LAYOUTS = new WeakMap<readonly CommitBundle[], Layout>();
@@ -70,50 +91,55 @@ const LAYOUTS = new WeakMap<readonly CommitBundle[], Layout>();
  * The layout of `log`. Kept for a frozen log (the array and every bundle frozen: an engine
  * snapshot's), which cannot change, as the log model is (`logModel.ts`). Computed when asked for any
  * other array, so a caller that asks for many steps takes {@link windowsOf} once.
+ *
+ * Each bundle's `idx` is read ONCE, here. Every later question is answered from these numbers, so a
+ * bundle that answers differently the second time (a getter, a proxy) cannot make two steps of one
+ * query disagree about where a commit sits.
  */
 function layoutOf(log: readonly CommitBundle[]): Layout {
   const kept = LAYOUTS.get(log);
   if (kept !== undefined) return kept;
   const starts = [0];
-  let last = -1;
-  let saying = 0;
+  const earliest = new Array<number>(log.length);
+  const silent: number[] = [];
+  let last = -1; // the earliest reading of the bundle before
   let frozen = Object.isFrozen(log);
   for (let at = 0; at < log.length; at++) {
     const bundle = log[at];
     frozen &&= Object.isFrozen(bundle);
     const idx = bundle?.idx;
-    if (!isCount(idx)) continue;
-    saying++;
-    if (at > 0 && idx <= last) starts.push(at);
-    last = idx;
+    if (isIndex(idx)) {
+      // Not past the bundle before it, even read as early as that one can be: another log starts here,
+      // or one of the two is damaged (step 4 decides what a step may then take from before it).
+      if (at > 0 && idx <= last) starts.push(at);
+      last = idx;
+    } else {
+      silent.push(at);
+      last += 1;
+    }
+    earliest[at] = last;
   }
-  const layout: Layout = { starts, indexAt: readerOf(log, starts, saying) };
+  const pinned = silent.length === 0 || silent.length === log.length;
+  const layout: Layout = { starts, earliest, latest: pinned ? earliest : latestOf(earliest, starts, silent) };
   if (frozen) LAYOUTS.set(log, layout);
   return layout;
 }
 
-/** How a position's index is read (step 2 of the file header). */
-function readerOf(log: readonly CommitBundle[], starts: readonly number[], saying: number): Layout['indexAt'] {
-  if (saying === log.length) return (position) => log[position].idx as number;
-  if (saying === 0) return (position) => position;
-  // Some say their index and some do not: place each silent bundle next to its neighbour, once.
-  const readAt = new Array<number>(log.length);
-  for (let s = 0; s < starts.length; s++) {
-    const from = starts[s];
-    const to = starts[s + 1] ?? log.length;
-    let first = from;
-    while (first < to && !isCount(log[first]?.idx)) first++;
-    if (first === to) {
-      for (let at = from; at < to; at++) readAt[at] = at - from;
-      continue;
-    }
-    for (let at = first; at >= from; at--) readAt[at] = (log[first].idx as number) - (first - at);
-    for (let at = first + 1; at < to; at++) {
-      const idx = log[at]?.idx;
-      readAt[at] = isCount(idx) ? idx : readAt[at - 1] + 1;
-    }
+/**
+ * The latest reading of every position (step 2 of the file header): a silent bundle sits before the
+ * bundle after it in its stretch. Walked from the end, so a run of silent bundles counts back from
+ * the bundle that says an index after them; a run with none after it keeps its earliest reading.
+ */
+function latestOf(earliest: readonly number[], starts: readonly number[], silent: readonly number[]): number[] {
+  const latest = earliest.slice();
+  let stretch = starts.length - 1;
+  for (let k = silent.length - 1; k >= 0; k--) {
+    const at = silent[k];
+    while (starts[stretch] > at + 1) stretch--;
+    const endsItsStretch = at + 1 === latest.length || starts[stretch] === at + 1;
+    if (!endsItsStretch) latest[at] = latest[at + 1] - 1;
   }
-  return (position) => readAt[position];
+  return latest;
 }
 
 /** The start of the stretch that holds `position`: the last start at or before it. */
@@ -128,15 +154,21 @@ function stretchOf(starts: readonly number[], position: number): number {
   return starts[low];
 }
 
-/** Where the commits "from index `index` on" begin, between `low` and the step at `first` (step 3). */
-function firstFrom({ indexAt }: Layout, low: number, first: number, index: number): number {
-  const at = first - (indexAt(first) - index);
-  if (at >= low && at <= first && indexAt(at) === index) return at;
+/**
+ * The first position between `low` and the step at `first` that `readings` puts at `index` or later;
+ * `first` when none before it is (step 3). `readings` rises strictly along a stretch (`layoutOf`
+ * starts a new one wherever it would not, and `isIndex` keeps every sum exact).
+ */
+function firstFrom(readings: readonly number[], low: number, first: number, index: number): number {
+  // Unbroken around the step: one subtraction lands on the bundle read at exactly `index`. The bundle
+  // before it is read lower, so this is the first.
+  const at = first - (readings[first] - index);
+  if (at >= low && at <= first && readings[at] === index) return at;
   let from = low;
   let to = first;
   while (from < to) {
     const mid = (from + to) >>> 1;
-    if (indexAt(mid) >= index) to = mid;
+    if (readings[mid] >= index) to = mid;
     else from = mid + 1;
   }
   return from;
@@ -162,17 +194,22 @@ export function windowsOf(log: readonly CommitBundle[]): (first: number) => Read
     const beganAt = bundle?.beganAt;
     const sawUntil = bundle?.sawUntil;
     if (beganAt === undefined && sawUntil === undefined) return { start: first, end: first };
-    const layout = (known ??= layoutOf(log));
-    const low = stretchOf(layout.starts, first);
-    const own = layout.indexAt(first);
+    const { starts, earliest, latest } = (known ??= layoutOf(log));
+    const low = stretchOf(starts, first);
+    // The step's own index, read as late as it can be: a stamp is unusable only when it fits no reading.
+    const own = latest[first];
     // Step 4: can the stretch be trusted to hold the step's history from index `from` on?
-    const heldFrom = (from: number) => low === 0 || layout.indexAt(low) <= from;
+    const heldFrom = (from: number) => low === 0 || latest[low] <= from;
     if (!isCount(beganAt) || beganAt >= own) return { start: heldFrom(0) ? low : 0, end: first };
     if (!heldFrom(beganAt)) return { start: 0, end: first };
-    const start = firstFrom(layout, low, first, beganAt);
-    if (sawUntil === undefined) return { start, end: start };
+    // Could sit at `beganAt` or later: from here on a commit may not have been in the step's first view.
+    const start = firstFrom(latest, low, first, beganAt);
+    // Surely at `index` or later: from here on a commit was not seen.
+    const surelyFrom = (index: number) => firstFrom(earliest, low, first, index);
+    // The step never looked again: no window, unless a bundle's place around `beganAt` is not known.
+    if (sawUntil === undefined) return { start, end: earliest === latest ? start : surelyFrom(beganAt) };
     if (!isCount(sawUntil) || sawUntil <= beganAt || sawUntil > own) return { start, end: first };
-    return { start, end: firstFrom(layout, low, first, sawUntil) };
+    return { start, end: surelyFrom(sawUntil) };
   };
 }
 

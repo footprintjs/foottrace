@@ -23,6 +23,13 @@
  *   NEEDED    the property is not vacuous, three times: with both stamps ignored (the walk as it was
  *             before) SOUND fails, and it fails with either one ignored alone. Each counterexample is a
  *             read whose real writer the walk would leave out.
+ *   HANDED OVER  the same judge on what a reader is really given: the log with any of its bundles
+ *             taken out, and any of the rest not saying its index. For every read whose real writer
+ *             is still in the array, that writer is among the parents listed for the key, and a
+ *             parent with no mark is the only one its key has. So a hole never turns a writer the
+ *             step did not see into its one certain source. ONE CONDITION, said in
+ *             `windowPlacement.ts` (NOT COVERED): the last bundle of the array says its index, so
+ *             every hole among silent bundles is shown by a said index after it.
  */
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
@@ -134,6 +141,40 @@ function firstUnexplained(log: CommitBundle[], observed: Read[][]): string | und
   return undefined;
 }
 
+/**
+ * More steps on fewer keys than `program`: HANDED OVER needs a step that read a key, a sibling that
+ * wrote the same key while it ran, and other commits around them to take out.
+ */
+const crowded = fc.record({
+  steps: fc.array(
+    fc.record({
+      namespaced: fc.boolean(),
+      ops: fc.array(
+        fc.record({
+          kind: fc.constantFrom('read' as const, 'read' as const, 'write' as const, 'write' as const, ...READS),
+          key: fc.constantFrom('a' as const, 'a' as const, 'a' as const, 'b' as const),
+        }),
+        { maxLength: 3 },
+      ),
+    }),
+    { minLength: 4, maxLength: 7 },
+  ),
+  schedule: fc.array(fc.nat({ max: 6 }), { maxLength: 40 }),
+});
+
+/**
+ * What a reader is handed: `log` without the bundles `drop` picks, and with `idx` taken off the ones
+ * `mute` picks. The last bundle left keeps its index (the one condition of HANDED OVER).
+ */
+function handedOver(log: CommitBundle[], drop: boolean[], mute: boolean[]): CommitBundle[] {
+  const kept = log.filter((_, at) => !drop[at % drop.length]);
+  return kept.map((bundle, at) => {
+    if (at === kept.length - 1 || !mute[at % mute.length]) return bundle;
+    const { idx: _idx, ...silent } = bundle;
+    return silent as CommitBundle;
+  });
+}
+
 describe('the walk back and interleaved steps', () => {
   it('SOUND: the writer a read value names is always among the parents listed for that key', () => {
     fc.assert(
@@ -235,6 +276,49 @@ describe('the walk back and interleaved steps', () => {
       }),
       { numRuns: 1500 },
     );
+  });
+
+  it('HANDED OVER: with bundles taken out and indices not said, the real writer is named and never outvoted by a certain one', () => {
+    let judged = 0;
+    let openedByAHole = 0;
+    fc.assert(
+      fc.property(
+        crowded,
+        fc.array(fc.boolean(), { minLength: 1, maxLength: 7 }),
+        fc.array(fc.boolean(), { minLength: 1, maxLength: 7 }),
+        (p, drop, mute) => {
+          const { log, observed } = run(p);
+          const handed = handedOver(log, drop, mute);
+          const present = new Set(handed.map((bundle) => bundle.runtimeStageId));
+          for (let i = 0; i < observed.length; i++) {
+            const id = `s${i}#0`;
+            if (!present.has(id)) continue;
+            const own = handed.find((bundle) => bundle.runtimeStageId === id)!;
+            const node = causalChain(handed, id, readsOf(observed))!;
+            for (const { key, token } of observed[i]) {
+              const edges = parentsVia(node, key);
+              // A parent with no mark is certain: then it is the only one.
+              if (edges.some((edge) => edge.overlap === undefined)) expect(edges, `${id} ${key}`).toHaveLength(1);
+              if (own.sawUntil === undefined && edges.some((edge) => edge.overlap !== undefined)) openedByAHole++;
+              if (fromBeforeTheRun(token) || writerOf(token!) === id) continue;
+              if (!present.has(writerOf(token!))) continue; // its bundle was taken out: nobody can name it
+              judged++;
+              expect(
+                edges.some((edge) => edge.parent.runtimeStageId === writerOf(token!)),
+                `${id} read ${key} = ${token}: ${writerOf(token!)} is not a parent through ${key}`,
+              ).toBe(true);
+            }
+          }
+        },
+      ),
+      { numRuns: 4000, seed: 20261111 },
+    );
+    expect(judged).toBeGreaterThan(1000);
+    // The case this property exists for was generated: a step that never looked again, whose answer is
+    // "possible" only because a bundle that says no index could sit on either side of where it began.
+    // (With a silent bundle read as ONE number, next to its neighbour, this property fails: at this seed
+    // after 1,549 programs, on a read whose real writer was left out for a sibling the step never saw.)
+    expect(openedByAHole).toBeGreaterThan(10);
   });
 
   it.each([
