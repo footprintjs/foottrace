@@ -316,6 +316,37 @@ describe('deepEqual — values that point back at themselves', () => {
     expect(deepEqual(rootB, rootA)).toBe(false);
   });
 
+  it('a failed set try keeps what it found that did not rest on the try itself', () => {
+    // Every level is a set of two objects that share the level below and point back at the root; the
+    // other side lists each set the other way round, so the first candidate tried is always the wrong
+    // one. What that try learned about the level below rests on the roots only, not on the try, so
+    // the right candidate must not compare the level below again.
+    const counter = { reads: 0 };
+    const value = (depth: number, flip: boolean) => {
+      const root: Record<string, unknown> = {};
+      const innermost = Object.defineProperty({ root }, 'v', {
+        enumerable: true,
+        get() {
+          counter.reads++;
+          return 0;
+        },
+      });
+      let level: unknown = new Set([innermost]);
+      for (let d = 0; d < depth; d++) {
+        const below = level;
+        const pair = [
+          { n: below, t: 1, root },
+          { n: below, t: 2, root },
+        ];
+        level = new Set(flip ? pair.reverse() : pair);
+      }
+      root.top = level;
+      return root;
+    };
+    expect(deepEqual(value(16, false), value(16, true))).toBe(true);
+    expect(counter.reads).toBeLessThanOrEqual(8);
+  });
+
   it('a map that holds a set that holds the map', () => {
     const make = (extra: number) => {
       const map = new Map<string, unknown>();

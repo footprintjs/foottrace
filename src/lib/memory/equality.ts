@@ -114,11 +114,14 @@ export type OpaqueRule = 'identity' | 'copies';
  *   - **`LEANING`**: compared to the end and equal, but only as long as a pair
  *     still being compared above it is equal. It is kept on a list
  *     ({@link SeenPairs.leaning}) and answers "equal, by the same assumption"
- *     when met again, so a value that points back at itself is still walked
- *     once. The list is settled when the pair it leans on is: every entry
- *     made inside a comparison becomes `PROVEN` when that comparison ends
- *     equal with nothing above it leaned on, and is forgotten when it ends
- *     different.
+ *     when met again, so a shared part of a value that points back at itself
+ *     is not compared again on every path that reaches it. The list is
+ *     settled when the pair it leans on is: every entry made inside a
+ *     comparison becomes `PROVEN` when that comparison ends equal with nothing
+ *     above it leaned on, and is forgotten when that comparison ends
+ *     different after its own pair was met again (only then can an entry lean
+ *     on it). A comparison that ends different without having been met again
+ *     was leaned on by nothing, and what was found inside it stays.
  *
  * A "different" that leaned on a pair above it is never stored. It can be an
  * accident of the search: a set pairs its members greedily, and a member
@@ -141,6 +144,8 @@ interface SeenPairs {
   readonly leaning: Array<[Map<object, number>, object]>;
   /** The shallowest pair any entry of {@link leaning} leans on; `Infinity` when the list is empty. */
   leaningLow: number;
+  /** By stack depth: was the pair at that depth met again while it was being compared? */
+  readonly met: boolean[];
 }
 
 const PROVEN = -1;
@@ -182,7 +187,7 @@ function equalPairs(a: any, b: any, seen: SeenPairs | undefined, opaque: OpaqueR
 
 /** The kinds whose content is other values: compared part by part, under the cycle guard. */
 function equalContainers(a: any, b: any, kind: ValueKind, seen: SeenPairs | undefined, opaque: OpaqueRule): boolean {
-  seen ??= { pairs: new WeakMap(), depth: 0, low: Infinity, leaning: [], leaningLow: Infinity };
+  seen ??= { pairs: new WeakMap(), depth: 0, low: Infinity, leaning: [], leaningLow: Infinity, met: [] };
   let partners = seen.pairs.get(a);
   const state = partners?.get(b);
   if (state === PROVEN) return true;
@@ -191,6 +196,7 @@ function equalContainers(a: any, b: any, kind: ValueKind, seen: SeenPairs | unde
     // Cycle guard — a pair we are already inside is equal by assumption. So is a pair that was
     // found equal on such an assumption: it reaches as far up as the list it is on does.
     const reach = state === LEANING ? seen.leaningLow : state;
+    if (state !== LEANING) seen.met[state] = true;
     if (reach < seen.low) seen.low = reach;
     return true;
   }
@@ -202,15 +208,18 @@ function equalContainers(a: any, b: any, kind: ValueKind, seen: SeenPairs | unde
   const outerLeaningLow = seen.leaningLow;
   partners.set(b, depth);
   seen.low = Infinity;
+  seen.met[depth] = false;
   const equal = equalParts(a, b, kind, seen, opaque);
   seen.depth = depth;
 
   // Closed: nothing in this comparison leaned on a pair above it (a pair that met ITSELF again is
   // closed here: equal on the assumption that it is equal is equal). Then the answer is a fact.
   const closed = seen.low >= depth;
-  if (closed || !equal) {
-    // Whatever was found equal in here by leaning on this pair, or on a pair inside it, is settled
-    // with it: proven when this is a proven equal, forgotten when this is different.
+  // Whatever was found equal in here by leaning on this pair is settled with it: proven when this
+  // is a proven equal, forgotten when this is different. A pair that ends different WITHOUT having
+  // been met again was leaned on by nothing, so what was found in here leans only on pairs above
+  // and stays: a set's failed try then costs the next candidate nothing it already learned.
+  if (closed || (!equal && seen.met[depth])) {
     for (let i = leaningFrom; i < seen.leaning.length; i++) {
       const [states, other] = seen.leaning[i];
       if (equal) states.set(other, PROVEN);
@@ -337,8 +346,12 @@ function equalMaps(a: Map<unknown, unknown>, b: Map<unknown, unknown>, seen: See
 }
 
 /**
- * Order-insensitive, deep per member. Quadratic in the worst case for sets of
- * objects — a set of primitives (the common shape) is one `has` per member.
+ * Order-insensitive, deep per member. A set of primitives (the common shape) is
+ * one `has` per member. A set of objects is quadratic in its members in the
+ * worst case, each pair of members compared once. One shape costs more, and
+ * the answers stay exact: a member that leads back to ITSELF, tried against a
+ * candidate that does not match, takes the `LEANING` answers found inside that
+ * try with it, and the next candidate compares those parts again.
  */
 function equalSets(a: Set<unknown>, b: Set<unknown>, seen: SeenPairs, opaque: OpaqueRule): boolean {
   if (a.size !== b.size) return false;
