@@ -23,6 +23,7 @@
   "src/lib/memory/pathOps.ts": 0,
   "src/lib/record-paths/codec.ts": 0,
   "src/lib/memory/placeholders.ts": 0,
+  "src/lib/memory/readWindow.ts": 0,
   "src/lib/memory/recordCommit.ts": 3,
   "src/lib/memory/scrub.ts": 2,
   "src/lib/memory/sink.ts": 0,

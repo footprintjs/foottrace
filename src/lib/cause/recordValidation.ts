@@ -1,3 +1,4 @@
+import { admitStamps } from '../memory/readWindow.js';
 import { readAttemptWindow } from '../evidence/readAttempts.js';
 import { parseAttemptId } from '../ids/attemptId.js';
 /** Admission before the existing readers touch untrusted record fields. Payloads never leave this module's graph. */
@@ -141,6 +142,10 @@ export function bundleOf(value: unknown, idx: number, budget: { left: number }):
   const redactedPaths = names(recordOwn(value, 'redactedPaths') ?? [], 128, true);
   const untracked = recordOwn(value, 'untrackedSources'),
     phase = recordOwn(value, 'phase');
+  // The walk dates this step's reads by its stamps, so they are kept; ones that cannot be stamps refuse
+  // the record (`memory/readWindow.ts · admitStamps` says why they are never dropped).
+  const stamps = admitStamps(recordOwn(value, 'beganAt'), recordOwn(value, 'sawUntil'), recordOwn(value, 'idx'), idx);
+  if (!stamps) throw new RecordRefusal();
   spend(budget, redactedPaths.length + (untracked === undefined ? 0 : recordList(untracked, 128).length));
   return {
     idx,
@@ -167,6 +172,7 @@ export function bundleOf(value: unknown, idx: number, budget: { left: number }):
             return phase;
           })(),
         }),
+    ...stamps,
   };
 }
 export function mapOf<T>(

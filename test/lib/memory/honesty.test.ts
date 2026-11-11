@@ -1,7 +1,7 @@
 /**
  * honesty.ts — the ONE vocabulary for what a reader cannot see (F4a).
  *
- *   unit      the registry is frozen and closed, holds exactly the twenty-two codes, and every explanation is
+ *   unit      the registry is frozen and closed, holds exactly the twenty-five codes, and every explanation is
  *             ONE sentence
  *   boundary  the TYPES, asked of the real compiler: a code the registry does not hold FAILS TO COMPILE; the
  *             six public unions are exactly the members they were (they did not widen); the sentences are
@@ -18,6 +18,12 @@
  * that member: the registry holds NINETEEN codes (six slice notes), and `HonestyNoteCode`'s literal union `Today`
  * gains `'nested-rows'`. The five 9.31.0 note bytes, and the check that their builders speak exactly those five,
  * are untouched (`SLICE_CODES_9_31`); the new note's builder is pinned on its own.
+ *
+ * The read window added THREE codes: `'concurrent-write'` (a slice note: a key was written while the step that
+ * read it ran and looked again) and the two marks a source of such a read carries, `'replaced-while-running'`
+ * and `'written-while-running'` (`ReadOverlap`: a causal edge's and a forward read's `overlap`). The registry
+ * holds TWENTY-FIVE codes (seven slice notes) and `Today` gains the note. No earlier sentence or note byte
+ * changed.
  *
  * F4b (9.33.0) added TWO codes, `'deleted'` and `'from-initial-state'` (the value basis of
  * `commitValueAtWithBasis`): the registry holds TWENTY-ONE. `'redacted'`'s sentence was reworded to be true of
@@ -59,14 +65,16 @@ const REPO = resolve(__dirname, '../../..');
 /** The codes each declared vocabulary speaks, and the signals that carry no code field of their own. */
 /** The five slice notes the library built at 9.31.0 — the bytes pinned below. */
 const SLICE_CODES_9_31 = ['conservative-fed-edges', 'pre-run-origin', 'reads-not-recorded', 'unknown-key', 'truncated'];
-/** Every slice note today: the five, and F3's `'nested-rows'`. */
-const SLICE_CODES = [...SLICE_CODES_9_31, 'nested-rows'];
+/** Every slice note today: the five, F3's `'nested-rows'`, and the read window's `'concurrent-write'`. */
+const SLICE_CODES = [...SLICE_CODES_9_31, 'nested-rows', 'concurrent-write'];
 const MISSING_REASONS = ['empty-log', 'never-written', 'not-an-array'];
 const FED_BASES = ['per-write', 'stage'];
 const ATTRIBUTION_BASES = ['append-verb', 'prefix-inference', 'whole-value'];
 const FOLD_BASES = ['initial+log', 'log-only'];
 /** F4b (9.33.0): the two codes only a key's value basis speaks (`ValueBasis` — the rest of it is shared). */
 const VALUE_BASES = ['deleted', 'from-initial-state'];
+/** The read window: why a source of a read is only possible (`readWindow.ts · ReadOverlap`). */
+const READ_OVERLAPS = ['replaced-while-running', 'written-while-running'];
 const SIGNALS_WITHOUT_A_CODE_FIELD = ['log-gap', 'incomplete-sources', 'redacted', 'unread-entry'];
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -89,7 +97,7 @@ describe('HONESTY_CODES — unit', () => {
     }).toThrow(TypeError);
   });
 
-  it('holds exactly twenty-two codes — six slice notes, three missing reasons, two fed-edge and three birth bases, two fold bases, two value bases, four codeless signals', () => {
+  it('holds exactly twenty-five codes — seven slice notes, three missing reasons, two fed-edge and three birth bases, two fold bases, two value bases, two read overlaps, four codeless signals', () => {
     const all = [
       ...SLICE_CODES,
       ...MISSING_REASONS,
@@ -97,9 +105,10 @@ describe('HONESTY_CODES — unit', () => {
       ...ATTRIBUTION_BASES,
       ...FOLD_BASES,
       ...VALUE_BASES,
+      ...READ_OVERLAPS,
       ...SIGNALS_WITHOUT_A_CODE_FIELD,
     ];
-    expect(all).toHaveLength(22);
+    expect(all).toHaveLength(25);
     expect(Object.keys(HONESTY_CODES).sort()).toEqual(all.sort());
   });
 
@@ -137,7 +146,8 @@ const HEADER = [
   "import type { ValueBasis, WriterBasis } from './commitLogUtils.js';",
   "import { HONESTY_CODES } from './honesty.js';",
   "import type { HonestyCode, RegisteredCode } from './honesty.js';",
-  "type Today = 'conservative-fed-edges' | 'nested-rows' | 'pre-run-origin' | 'reads-not-recorded' | 'unknown-key' | 'truncated' | 'redacted' | 'from-initial-state';",
+  "import type { ReadOverlap } from './readWindow.js';",
+  "type Today = 'conservative-fed-edges' | 'concurrent-write' | 'nested-rows' | 'pre-run-origin' | 'reads-not-recorded' | 'unknown-key' | 'truncated' | 'redacted' | 'from-initial-state';",
   "type TodayBasis = 'initial+log' | 'log-only';",
   "type TodayMissing = 'empty-log' | 'never-written';",
   "type TodayProvenance = 'empty-log' | 'never-written' | 'not-an-array';",
@@ -145,9 +155,10 @@ const HEADER = [
   "type TodayAttribution = 'append-verb' | 'prefix-inference' | 'whole-value';",
   "type TodayValue = 'never-written' | 'deleted' | 'nested-rows' | 'from-initial-state' | 'redacted';",
   "type TodayWriter = 'never-written' | 'nested-rows' | 'redacted';",
+  "type TodayOverlap = 'replaced-while-running' | 'written-while-running';",
   // every declared vocabulary, plus the four codes a field carries instead of a `code` value
   'type Declared = HonestyNoteCode | MissingSliceReason | MissingProvenanceReason | FedBasis | AttributionBasis | FoldBasis | ' +
-    'ValueBasis | WriterBasis | ' +
+    'ValueBasis | WriterBasis | ReadOverlap | ' +
     "'log-gap' | 'incomplete-sources' | 'redacted' | 'unread-entry';",
 ];
 
@@ -178,6 +189,8 @@ const CASES: Record<string, string> = {
     'const e5: TodayValue = null as unknown as ValueBasis; const f5: ValueBasis = null as unknown as TodayValue;',
   writerUnionIsToday:
     'const e6: TodayWriter = null as unknown as WriterBasis; const f6: WriterBasis = null as unknown as TodayWriter;',
+  overlapUnionIsToday:
+    'const e7: TodayOverlap = null as unknown as ReadOverlap; const f7: ReadOverlap = null as unknown as TodayOverlap;',
   // … and did NOT widen to every registered code
   sliceUnionRefusesALogGap: "const g: HonestyNoteCode = 'log-gap';",
   sliceUnionRefusesABasis: "const h: HonestyNoteCode = 'log-only';",
@@ -258,10 +271,11 @@ describe('the types — asked of the real compiler', () => {
     expect(byCase.get('lookupByAnUnregisteredCodeFails')).toEqual(['TS7053']);
   });
 
-  it("the eight public unions are exactly today's members: mutually assignable with the literal unions, and not widened", () => {
+  it("the nine public unions are exactly today's members: mutually assignable with the literal unions, and not widened", () => {
     for (const name of [
       'valueUnionIsToday',
       'writerUnionIsToday',
+      'overlapUnionIsToday',
       'sliceUnionIsToday',
       'foldUnionIsToday',
       'missingUnionIsToday',

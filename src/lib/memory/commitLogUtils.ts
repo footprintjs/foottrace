@@ -10,6 +10,7 @@ import type { RegisteredCode } from './honesty.js';
 import { queryWork, relation, rootOf, writesOnlyInside } from './keyPaths.js';
 import { leavesStringAbove, logModel, memoisedModel } from './logModel.js';
 import { nativeGet } from './pathOps.js';
+import { type ReadSources, readSourcesOf, windowOf } from './readWindow.js';
 import { DELIM } from '../record-paths/codec.js';
 import type { CommitBundle, CommitPhase } from './types.js';
 import { type Touch, foldKey, isTotal, isVerb, UnknownVerbError } from './verbs.js';
@@ -47,15 +48,44 @@ export function findCommits(commitLog: CommitBundle[], stageId: string): CommitB
  * found through a row INSIDE the key wrote only PART of its value — the slice readers say so with
  * the `'nested-rows'` note.
  *
+ * This answers "who last wrote the key before a POSITION in the log". To ask what a STEP read, use
+ * {@link findReadSources}: a step that ran beside others did not necessarily see the last write
+ * before its own commit.
+ *
  * @param key  A DELIM-joined path (`normalisePath`); a top-level key is a one-segment path.
  */
 export function findLastWriter(commitLog: CommitBundle[], key: string, beforeIdx?: number): CommitBundle | undefined {
+  const at = lastWriterPosition(commitLog, key, beforeIdx);
+  return at >= 0 ? commitLog[at] : undefined;
+}
+
+/**
+ * What the step whose FIRST bundle is `commitLog[position]` could have read when it read `key`: the
+ * public door of the one rule (`readWindow.ts`). Answers ARRAY positions: `before`, the last write
+ * before the step began (-1: none, the value is from before the run), and `during`, the writes inside
+ * its read window. `during` empty: `before` is the source, for certain. Otherwise each of them is a
+ * possible source and the real one is among them; `overlapOf(sources, at)` gives the mark of one.
+ *
+ * WHY NOT `findLastWriter(commitLog, key, position)`: that dates the read at the step's commit. For a
+ * step that read `key` when it started and committed after a sibling wrote it, the sibling is then
+ * named and the real source is left out. The step's bundle says when it looked at state
+ * (`CommitBundle.beganAt` / `sawUntil`), and this function reads it.
+ *
+ * @param position  The ARRAY position of the step's first bundle (a later bundle of the same
+ *                  `runtimeStageId` is a continuation and carries no reads of its own).
+ * @param key       A DELIM-joined path (`normalisePath`); a top-level key is a one-segment path.
+ */
+export function findReadSources(commitLog: readonly CommitBundle[], position: number, key: string): ReadSources {
+  return readSourcesOf(key, windowOf(commitLog, position), (path, before) => {
+    return lastWriterPosition(commitLog, path, before);
+  });
+}
+
+/** {@link findLastWriter}'s answer as an ARRAY position (-1: no commit before `beforeIdx` wrote `key`). */
+export function lastWriterPosition(commitLog: readonly CommitBundle[], key: string, beforeIdx?: number): number {
   const end = Math.min(beforeIdx ?? commitLog.length, commitLog.length);
   const model = memoisedModel(commitLog);
-  if (model !== undefined) {
-    const at = model.lastWriterBefore(key, end);
-    return at >= 0 ? commitLog[at] : undefined;
-  }
+  if (model !== undefined) return model.lastWriterBefore(key, end);
   // Not frozen: scan back and stop at the first write on or inside the key. A row AROUND the key
   // (or a nested `delete`, which cannot replace a string container) needs a verdict — the model's.
   const nested = rootOf(key) !== key;
@@ -71,13 +101,10 @@ export function findLastWriter(commitLog: CommitBundle[], key: string, beforeIdx
         else needsVerdict = true;
       }
     }
-    if (write && (!needsVerdict || !leavesStringAbove(commitLog[i], key))) return commitLog[i];
-    if (needsVerdict) {
-      const at = logModel(commitLog).lastWriterBefore(key, end);
-      return at >= 0 ? commitLog[at] : undefined;
-    }
+    if (write && (!needsVerdict || !leavesStringAbove(commitLog[i], key))) return i;
+    if (needsVerdict) return logModel(commitLog).lastWriterBefore(key, end);
   }
-  return undefined;
+  return -1;
 }
 
 /** What {@link writersOf} is asked. */

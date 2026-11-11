@@ -28,9 +28,12 @@ export {
   findCommits,
   findLastWriter,
   findLastWriterWithBasis,
+  findReadSources,
   inferLegacyPhases,
   recordsPhases,
 } from './lib/memory/commitLogUtils.js';
+export { overlapOf } from './lib/memory/readWindow.js';
+export type { ReadOverlap, ReadSources } from './lib/memory/readWindow.js';
 export type { CommitPhase } from './lib/memory/types.js';
 export type {
   AxisRefusal,

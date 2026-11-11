@@ -1,5 +1,6 @@
 import { readAttemptWindow } from '../evidence/readAttempts.js';
 import { parseAttemptId } from '../ids/attemptId.js';
+import { admitStamps } from '../memory/readWindow.js';
 import type { CommitBundle, CommitPhase, TraceEntry, UntrackedSource } from '../memory/types.js';
 import { bundleRefusal, isCommitBundle } from '../time-travel/bundles.js';
 import {
@@ -116,6 +117,14 @@ export function admitBundle(
       phase = dataField(raw, 'phase', budget),
       untracked = dataField(raw, 'untrackedSources', budget);
     if (phase !== undefined && phase !== 'exit' && phase !== 'repeat') throw new ProvDataRefusal();
+    // A read is dated by its step's stamps (`memory/readWindow.ts`); ones that cannot be stamps refuse the bundle.
+    const stamps = admitStamps(
+      dataField(raw, 'beganAt', budget),
+      dataField(raw, 'sawUntil', budget),
+      dataField(raw, 'idx', budget),
+      commitIdx,
+    );
+    if (!stamps) throw new ProvDataRefusal();
     const untrackedSources = untracked === undefined ? undefined : dataNames(untracked, budget, 'fields');
     if (untrackedSources?.some((source) => source !== 'args' && source !== 'env' && source !== 'silent'))
       throw new ProvDataRefusal();
@@ -130,6 +139,7 @@ export function admitBundle(
       ...(tags === undefined ? {} : { tags: dataNames(tags, budget, 'fields') }),
       ...(phase === undefined ? {} : { phase: phase as CommitPhase }),
       ...(untrackedSources === undefined ? {} : { untrackedSources: untrackedSources as UntrackedSource[] }),
+      ...stamps,
     };
     return { commitIdx, bundle, rows };
   } catch (error) {

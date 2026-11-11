@@ -58,17 +58,18 @@ import { relation } from '../memory/keyPaths.js';
 import type { CommitBundle } from '../memory/types.js';
 import { DELIM } from '../memory/utils.js';
 import {
-  type KeyIndex,
   buildKeyIndex,
+  concurrentReadsNote,
   conservativeEdgesNote,
   firstIndexAfter,
   hasRecordedReads,
-  indicesInRange,
+  type KeyIndex,
   lastIndexBefore,
   lastTraceEntry,
   nestedOnlyWrites,
   nestedRowsNote,
   preRunOriginNote,
+  readersOfLife,
   readsNotRecordedNote,
   truncatedNote,
   unknownKeyNote,
@@ -205,6 +206,7 @@ export function forwardSliceForKey(
   let truncatedByDepth = false;
   let truncatedByNodes = false;
   let anyConservative = false;
+  let concurrentReads = 0;
 
   const anchorIdx = lastIndexBefore(index.writesOf(normalisedKey), options?.before);
   const root = makeNode(commitLog, index, normalisedKey, anchorIdx, 0);
@@ -214,9 +216,9 @@ export function forwardSliceForKey(
   const queue: ForwardNode[] = [root];
   while (queue.length > 0) {
     const node = queue.shift()!;
-    // Live range: open below the write, CLOSED at the next write (see LAW).
-    const from = node.commitIdx !== undefined ? node.commitIdx + 1 : 0;
-    const readers = indicesInRange(index.readsOf(node.key), from, node.nextWriteIdx);
+    // Live range: open below the write, CLOSED at the next write (see LAW). A step that ran beside
+    // others is dated where it looked at state, not where it committed (`keyIndex · readersOfLife`).
+    const readers = readersOfLife(index, node.key, node.commitIdx, node.nextWriteIdx);
 
     if (node.depth >= maxDepth) {
       // Only a life that still HAD readers to expand counts as a cut.
@@ -224,13 +226,15 @@ export function forwardSliceForKey(
       continue;
     }
 
-    for (const readerIdx of readers) {
+    for (const { position: readerIdx, overlap } of readers) {
       const bundle = commitLog[readerIdx];
+      if (overlap) concurrentReads++;
       node.reads.push({
         runtimeStageId: bundle.runtimeStageId,
         stageId: bundle.stageId,
         stageName: bundle.stage,
         commitIdx: readerIdx,
+        ...(overlap && { overlap }),
       });
 
       // The reader IS the writer of everything it committed — each written
@@ -289,6 +293,7 @@ export function forwardSliceForKey(
       ),
     );
   if (anyConservative) notes.push(conservativeEdgesNote(normalisedKey));
+  if (concurrentReads > 0) notes.push(concurrentReadsNote(concurrentReads));
   if (truncatedByDepth || truncatedByNodes) {
     root.truncated = { byDepth: truncatedByDepth, byNodes: truncatedByNodes };
     notes.push(truncatedNote(truncatedByDepth, truncatedByNodes));

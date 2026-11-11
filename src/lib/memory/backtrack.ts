@@ -11,10 +11,14 @@
  *
  * 1. Locate startId in commitLog → root node
  * 2. Get keysRead for root via `getKeysRead` callback
- * 3. For each key read, find who last wrote it before this step → parent commit
+ * 3. For each key read, find what the read could have seen → parent commits
  *    ("wrote" is the writer rule of `keyPaths.ts`, 9.33.0: a row on the key, inside it, or
  *    around it that changed it — so a stage that read `cfg` links to the subflow seed or
- *    merge-back that wrote `cfg␟b`)
+ *    merge-back that wrote `cfg␟b`). The rule is `readWindow.ts · readSourcesOf`: the last
+ *    writer before the step began, plus every writer inside the step's read window (steps
+ *    side by side that looked at state again after a sibling committed). With a writer in
+ *    the window every edge for that key carries `overlap`: a possible source, not a certain
+ *    one. A step with no window has one parent per key, and it is certain.
  * 4. Create parent CausalNode, link to root.parents
  * 5. Enqueue parent. Repeat until queue empty or limits hit.
  *
@@ -56,10 +60,11 @@
  * ```
  */
 
-import { buildCommitIndex, findLastWriter } from './commitLogUtils.js';
+import { buildCommitIndex, lastWriterPosition } from './commitLogUtils.js';
 import type { RegisteredCode } from './honesty.js';
 import { queryWork, relation, writesOnlyInside } from './keyPaths.js';
 import { logModel } from './logModel.js';
+import { type LastWriterBefore, overlapOf, type ReadOverlap, readSourcesOf, windowOf } from './readWindow.js';
 import { shownPath } from '../record-paths/codec.js';
 import type { CommitBundle, TraceEntry, UntrackedSource } from './types.js';
 
@@ -158,6 +163,18 @@ export interface CausalEdge {
    * its 9.32.0 shape.
    */
   basis?: RegisteredCode<'nested-rows'>;
+  /**
+   * Present only on a `'data'` edge whose `key` was written inside the child's read window
+   * (`CommitBundle.beganAt` / `sawUntil`: steps side by side, and the child looked at state again
+   * after a sibling committed). The record cannot say which value the read saw, so EVERY edge of the
+   * child for that key carries a mark and is a possible source, not a certain one; the real source is
+   * among them (or is the value from before the run, when `preRunReads` lists the key):
+   *   - `'replaced-while-running'`: the parent wrote the value the key held when the child began;
+   *   - `'written-while-running'`: the parent wrote the key inside the window.
+   * Both are registered in `memory/honesty.ts · HONESTY_CODES`. Absent on a certain edge, so the
+   * edge of a step with no window keeps its shape.
+   */
+  overlap?: ReadOverlap;
 }
 
 /**
@@ -263,13 +280,13 @@ const REVERSE_INDEX_THRESHOLD = 256;
 
 /**
  * Writer lookup function signature.
- * Returns the CommitBundle that last wrote `key` before position `beforeIdx`.
+ * Returns the ARRAY position of the commit that last wrote `key` before position `beforeIdx`, or -1.
  */
-type WriterLookup = (key: string, beforeIdx: number) => CommitBundle | undefined;
+type WriterLookup = LastWriterBefore;
 
 /** Strategy 1: Linear scan — O(N) per lookup, zero setup cost. */
 function linearScanLookup(commitLog: CommitBundle[]): WriterLookup {
-  return (key, beforeIdx) => findLastWriter(commitLog, key, beforeIdx);
+  return (key, beforeIdx) => lastWriterPosition(commitLog, key, beforeIdx);
 }
 
 /**
@@ -282,10 +299,7 @@ function linearScanLookup(commitLog: CommitBundle[]): WriterLookup {
  */
 function reverseIndexLookup(commitLog: CommitBundle[]): WriterLookup {
   const model = logModel(commitLog);
-  return (key: string, beforeIdx: number): CommitBundle | undefined => {
-    const at = model.lastWriterBefore(key, beforeIdx);
-    return at >= 0 ? commitLog[at] : undefined;
-  };
+  return (key: string, beforeIdx: number): number => model.lastWriterBefore(key, beforeIdx);
 }
 
 /**
@@ -473,8 +487,9 @@ function buildCausalChain(
   /**
    * Link `node → parent` (creating + enqueueing the parent when new).
    * Shared by data-edge expansion (read→write) and control-edge expansion
-   * (D3). One CausalEdge per distinct (parent, kind, key) link; `parents`
-   * keeps its historical one-entry-per-parent dedup.
+   * (D3). One CausalEdge per distinct (parent, kind, key, overlap) link; `parents`
+   * keeps its historical one-entry-per-parent dedup. `overlap`: why the parent is
+   * only a possible source of the read (`readWindow.ts · overlapOf`).
    */
   function linkParent(
     node: CausalNode,
@@ -482,6 +497,7 @@ function buildCausalChain(
     kind: 'data' | 'control',
     key: string | undefined,
     depth: number,
+    overlap?: ReadOverlap,
   ): void {
     const parentId = parentCommit.runtimeStageId;
     // the dedup scans below, and the parent's trace when it is new — counted for the scaling test
@@ -550,7 +566,11 @@ function buildCausalChain(
     // One edge per distinct (parent, kind, key) link. The weigher (D4)
     // stamps the weight at creation; `undefined` → 1.0 — the engine never
     // computes weights itself.
-    if (!node.parentEdges.some((e) => e.parent.runtimeStageId === parentId && e.kind === kind && e.key === key)) {
+    if (
+      !node.parentEdges.some(
+        (e) => e.parent.runtimeStageId === parentId && e.kind === kind && e.key === key && e.overlap === overlap,
+      )
+    ) {
       // Error isolation (review finding): a consumer weigher that throws
       // must degrade to the default weight, never crash the slice — the
       // same contract every other consumer callback in the library gets.
@@ -569,6 +589,7 @@ function buildCausalChain(
         key,
         weight,
         ...(nested && { basis: 'nested-rows' as const }),
+        ...(overlap && { overlap }),
       });
     }
   }
@@ -590,16 +611,21 @@ function buildCausalChain(
     // it. Under 'stage' this is the node's full read-set (historical
     // behavior); under 'per-write' it is the linking writes' temporal prefix
     // (or a worklist delta on re-expansion).
+    // What each read could have seen is `readWindow.ts`'s rule: the last writer before the step
+    // began, and every writer inside its read window (none for a step with no window).
     const keysRead = keysToExpand;
+    const window = windowOf(commitLog, commitIdx);
     for (const key of keysRead) {
-      const writer = findWriter(key, commitIdx);
-      if (!writer) {
-        // F4b: say why there is no edge — no commit before this node wrote the key.
+      const sources = readSourcesOf(key, window, findWriter);
+      if (sources.before < 0) {
+        // F4b: say why there is no edge — no commit before this node began wrote the key. With
+        // writers in its window the read may still be of that earlier value, so it is said then too.
         node.preRunReads ??= { code: 'pre-run-origin', keys: [] };
         if (!node.preRunReads.keys.includes(key)) node.preRunReads.keys.push(key);
-        continue;
+      } else {
+        linkParent(node, commitLog[sources.before], 'data', key, depth, overlapOf(sources, sources.before));
       }
-      linkParent(node, writer, 'data', key, depth);
+      for (const at of sources.during) linkParent(node, commitLog[at], 'data', key, depth, overlapOf(sources, at));
     }
 
     // Control edge (RFC-003 D3): link the governing decider, labeled by the
@@ -665,19 +691,39 @@ export function flattenCausalDAG(root: CausalNode): CausalNode[] {
  * RFC-003 D3: control edges render as `← [control: <rule label>]`
  * (label omitted when the decision carried none). A data edge renders as
  * `← via <key>`: the key of the edge from the child the node is shown under
- * (the first one, when that child read several keys from this node).
+ * (the first one, when that child read several keys from this node). A parent
+ * that is only a possible source of a key (`CausalEdge.overlap`) says why:
+ * `← via x (as the reader began; written again while it ran)` or
+ * `← via x (written while the reader ran)`, naming the keys when they are not
+ * the one shown.
  *
  * RFC-003 D4: edge weights from the `weigh` hook render as a suffix —
  * `← via systemPrompt (0.18)` — only when ≠ 1.0, so unweighted output is
  * unchanged. A truncated slice (root.truncated) appends a final
  * `⚠ slice truncated …` line.
  */
+/** How a tree line says each mark. Short on purpose: the full sentence is the registry's. */
+const OVERLAP_WORDS: Record<ReadOverlap, string> = {
+  'replaced-while-running': 'as the reader began; written again while it ran',
+  'written-while-running': 'written while the reader ran',
+};
+
 export function formatCausalChain(root: CausalNode): string {
   const lines: string[] = [];
   const visited = new Set<string>();
 
   const weightSuffix = (edge: CausalEdge | undefined): string =>
     edge !== undefined && edge.weight !== 1 ? ` (${edge.weight})` : '';
+  // The keys this parent is only a possible source of, said per mark (`CausalEdge.overlap`).
+  const overlapSuffix = (edges: CausalEdge[] | undefined, shown: CausalEdge): string =>
+    (Object.keys(OVERLAP_WORDS) as ReadOverlap[])
+      .map((mark) => {
+        const keys = [...new Set((edges ?? []).filter((e) => e.overlap === mark && e.key).map((e) => e.key as string))];
+        if (keys.length === 0) return '';
+        const only = keys.length === 1 && keys[0] === shown.key;
+        return only ? ` (${OVERLAP_WORDS[mark]})` : ` (${OVERLAP_WORDS[mark]}: ${keys.map(shownPath).join(', ')})`;
+      })
+      .join('');
 
   function walk(node: CausalNode, indent: number, edgesFromChild?: CausalEdge[]): void {
     if (visited.has(node.runtimeStageId)) {
@@ -691,7 +737,10 @@ export function formatCausalChain(root: CausalNode): string {
     // child it named a key that child never read.
     const linkParts: string[] = [];
     const dataEdge = edgesFromChild?.find((e) => e.kind === 'data');
-    if (dataEdge?.key) linkParts.push(`via ${shownPath(dataEdge.key)}${weightSuffix(dataEdge)}`);
+    if (dataEdge?.key)
+      linkParts.push(
+        `via ${shownPath(dataEdge.key)}${weightSuffix(dataEdge)}${overlapSuffix(edgesFromChild, dataEdge)}`,
+      );
     const controlEdge = edgesFromChild?.find((e) => e.kind === 'control');
     if (controlEdge) {
       linkParts.push(`[control${controlEdge.key ? `: ${controlEdge.key}` : ''}]${weightSuffix(controlEdge)}`);

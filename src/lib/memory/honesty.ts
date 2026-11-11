@@ -67,6 +67,8 @@ export const HONESTY_CODES = /* @__PURE__ */ Object.freeze({
     "A write this answer rests on reached the key only through paths inside it (a subflow's input seed, an outputMapper merge-back, a fork child's namespace), so it changed part of the key's value, not the whole: earlier writes may account for the rest, and a reader of the key may not have read the part that write changed.",
   'pre-run-origin':
     'The value being followed was absent or already there before the first write this log can see (initial state, frozen run input or a closure), so who put it there is outside the commit log.',
+  'concurrent-write':
+    'A step read a key that another step committed while it was running, and it looked at state again after that commit (steps side by side), so the record cannot say which value the read saw: each writer shown for the key is a possible source, not a certain one, and the real source is among them or is the value from before the run when the key is listed as read from there.',
   'reads-not-recorded':
     "This log carries no recorded read at all (the readTracking: 'off' signature), so 'nothing read this value' is unknowable here, not true.",
   'unknown-key':
@@ -85,6 +87,11 @@ export const HONESTY_CODES = /* @__PURE__ */ Object.freeze({
     "This fed edge is exact: the downstream write carries per-write read provenance (TraceEntry.readKeys, recorded under writeProvenance: 'reads-prefix') and that list names the key, so the value was read before the write it feeds.",
   stage:
     'This fed edge is conservative: the downstream write carries no per-write read provenance (the writeProvenance dial was off, or the log is mixed), so all that is known is that its stage read this key and wrote that path in some order, and the edge may not be real.',
+  // ── why a source of a read is only possible — `CausalEdge.overlap`, `ForwardRead.overlap` (readWindow.ts: ReadOverlap) ─
+  'replaced-while-running':
+    'This write is the value the key held when the reading step began, and another step committed the key, in whole or in part, before the reading step last looked at state, so the step may have read that later value instead: this is a possible source, not a certain one.',
+  'written-while-running':
+    'This write was committed while the reading step was running and before the step last looked at state, so the step may have read the key before or after it: this is a possible source, not a certain one.',
   // ── how an element's birth was attributed — `ElementBirth.basis` (slice/: AttributionBasis) ─
   'append-verb':
     "The engine recorded the element in an append row's tail (how commitValues: 'delta' records an array's growth), so the commit that added it is known exactly, not inferred.",

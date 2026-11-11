@@ -38,6 +38,7 @@ import {
   writesOnlyInside,
 } from '../memory/keyPaths.js';
 import { logModel } from '../memory/logModel.js';
+import { type ReadOverlap, type ReadWindow, readOfValue, windowOf } from '../memory/readWindow.js';
 import { shownPath } from '../record-paths/codec.js';
 import type { CommitBundle, TraceEntry } from '../memory/types.js';
 import type { HonestyNote } from './types.js';
@@ -70,6 +71,12 @@ export interface KeyIndex {
   readonly readsByKey: Map<string, number[]>;
   /** key → commit ARRAY positions whose stage read it, a path inside it or a container around it, ascending. Memoised. */
   readsOf(key: string): number[];
+  /**
+   * The executions whose reads are NOT dated at their own commit (`CommitBundle.beganAt`): first-bundle
+   * ARRAY position → when the step looked at state (`readWindow.ts · windowOf`). Empty for a log with no
+   * such step, which is every log of a run whose steps go one after another.
+   */
+  readonly windows: ReadonlyMap<number, ReadWindow>;
   /** Every key this log knows BY NAME: written paths ∪ recorded read keys — the list an unknown-key note shows. */
   readonly knownKeys: Set<string>;
   /** Does the log know `key` — a write of it (the writer rule), or a read on, inside or around it? */
@@ -94,6 +101,7 @@ export function buildKeyIndex(commitLog: CommitBundle[], lookup: KeysReadLookup)
   const readsByKey = new Map<string, number[]>();
   const readKeysByRoot = new Map<string, string[]>();
   const executions = new Set<string>();
+  const windows = new Map<number, ReadWindow>();
   for (let i = 0; i < commitLog.length; i++) {
     const bundle = commitLog[i];
     // Reads: one lookup per EXECUTION, at its first bundle (see THE INVERSION above). A later bundle
@@ -101,6 +109,8 @@ export function buildKeyIndex(commitLog: CommitBundle[], lookup: KeysReadLookup)
     // backward walk dates it there too (`commitLogUtils · buildCommitIndex`).
     if (executions.has(bundle.runtimeStageId)) continue;
     executions.add(bundle.runtimeStageId);
+    const window = windowOf(commitLog, i);
+    if (window.start < i) windows.set(i, window);
     // A provider that throws is a consumer bug, not a reason to lose the
     // query — the same error-isolation posture recorder callbacks get.
     let keys: string[] = [];
@@ -144,7 +154,58 @@ export function buildKeyIndex(commitLog: CommitBundle[], lookup: KeysReadLookup)
   };
   const knownKeys = new Set<string>([...pathsWritten(writers), ...readsByKey.keys()]);
   const isKnown = (key: string): boolean => writesOf(key).length > 0 || readsOf(key).length > 0;
-  return { writers, writesOf, closingWritesOf, readsByKey, readsOf, knownKeys, isKnown };
+  return { writers, writesOf, closingWritesOf, readsByKey, readsOf, windows, knownKeys, isKnown };
+}
+
+/** One step that read a value, and why it is only a possible reader when it is (`readWindow.ts · ReadOverlap`). */
+export interface LifeReader {
+  /** The ARRAY position of the step's first bundle. */
+  readonly position: number;
+  readonly overlap?: ReadOverlap;
+}
+
+/**
+ * The steps that read the value of `key` written at `writeIdx` (`undefined`: the value from before the
+ * run), whose life ends at `nextWriteIdx` (`undefined`: it lives to the end of the log), ascending — the
+ * forward side of the one rule (`memory/readWindow.ts · readOfValue`).
+ *
+ * A step with no window read the value when its commit sits in the life: after the write, up to and
+ * including the next write (the step that commits the next write read the old value first). That is a
+ * range query, and it is the whole answer for a log whose steps go one after another. A step that carries
+ * `beganAt` is not dated at its own commit, so each of those is asked the rule instead: it read the value
+ * when one of its looks at state could see it, and it is a possible reader, not a certain one, when the
+ * key was written inside its window.
+ */
+export function readersOfLife(
+  index: Pick<KeyIndex, 'windows' | 'readsOf' | 'writesOf'>,
+  key: string,
+  writeIdx: number | undefined,
+  nextWriteIdx: number | undefined,
+): LifeReader[] {
+  const positions = index.readsOf(key);
+  const inLife = indicesInRange(positions, writeIdx === undefined ? 0 : writeIdx + 1, nextWriteIdx);
+  if (index.windows.size === 0) return inLife.map((position) => ({ position }));
+  const readers: LifeReader[] = [];
+  for (const position of inLife) if (!index.windows.has(position)) readers.push({ position });
+  const writes = index.writesOf(key);
+  for (const [position, window] of index.windows) {
+    if (!holds(positions, position)) continue;
+    const written = window.start < window.end && indicesInRange(writes, window.start, window.end - 1).length > 0;
+    const read = readOfValue(window, writeIdx ?? -1, nextWriteIdx, written);
+    if (read !== false) readers.push(read === true ? { position } : { position, overlap: read });
+  }
+  return readers.sort((one, other) => one.position - other.position);
+}
+
+/** At least one read a forward answer lists is only possible: the key was written inside the reader's window. */
+export function concurrentReadsNote(reads: number): HonestyNote {
+  return {
+    code: 'concurrent-write',
+    detail:
+      `${reads} read${reads === 1 ? ' was' : 's were'} made by a step that looked at state again after another ` +
+      'step committed the key (steps side by side). Such a step may have read this value or another one ' +
+      'written in that time, so it is a possible reader, not a certain one.',
+  };
 }
 
 /**
@@ -195,6 +256,11 @@ function lowerBound(sorted: number[], value: number): number {
     else hi = mid;
   }
   return lo;
+}
+
+/** Does the ascending array hold `value`? */
+function holds(sorted: number[], value: number): boolean {
+  return sorted[lowerBound(sorted, value)] === value;
 }
 
 /**
@@ -273,6 +339,18 @@ export function nestedRowsNote(key: string, commits: readonly number[]): Honesty
       `'${shownPath(key)}' was written only through paths inside it at ${at} — such a write changed part of ` +
       'its value, not the whole: earlier writes may account for the rest, and a reader of the key may ' +
       'not have read the part it changed.',
+  };
+}
+
+/** At least one read a backward slice follows has only possible sources: its key was written inside the reader's window. */
+export function concurrentWriteNote(reads: number): HonestyNote {
+  return {
+    code: 'concurrent-write',
+    detail:
+      `${reads} read${reads === 1 ? ' was' : 's were'} made by a step that looked at state again after another ` +
+      'step committed the same key (steps side by side). The record cannot say which value such a read saw, ' +
+      'so every writer shown for that key is a possible source, not a certain one; the real source is among ' +
+      'them, or is the value from before the run when the key is listed as read from there.',
   };
 }
 
