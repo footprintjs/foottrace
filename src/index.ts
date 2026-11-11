@@ -34,6 +34,7 @@ export {
 } from './lib/memory/commitLogUtils.js';
 export { overlapOf } from './lib/memory/readWindow.js';
 export type { ReadOverlap, ReadSources } from './lib/memory/readWindow.js';
+export type { ViewOverlap } from './lib/memory/builtOn.js';
 export type { CommitPhase } from './lib/memory/types.js';
 export type {
   AxisRefusal,

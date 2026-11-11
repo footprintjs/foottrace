@@ -29,12 +29,14 @@
  */
 
 import { flattenCausalDAG, formatCausalChain } from '../memory/backtrack.js';
-import type { ReadOverlap } from '../memory/readWindow.js';
+import type { SourceOverlap } from '../memory/parentEdges.js';
 import type {
+  FedBasis,
   ForwardNode,
   ForwardSlice,
   ForwardSliceJSON,
   HonestyNote,
+  KeyMoment,
   KeyTimeline,
   SliceJSON,
   VariableSlice,
@@ -73,6 +75,7 @@ export function sliceToJSON(slice: VariableSlice): SliceJSON {
       ...(node.incompleteSources !== undefined && { incompleteSources: node.incompleteSources }),
       ...(node.preRunReads !== undefined && { preRunReads: node.preRunReads }),
       ...(node.preRunBase !== undefined && { preRunBase: node.preRunBase }),
+      ...(node.preRunView !== undefined && { preRunView: node.preRunView }),
     };
     for (const edge of node.parentEdges) {
       edges.push({
@@ -234,9 +237,38 @@ export function forwardSliceToJSON(slice: ForwardSlice): ForwardSliceJSON {
  * rather than looking alike.
  */
 /** Why a forward read is only possible, in a tree line. The full sentence is the registry's. */
-const MAYBE_READ_WORDS: Record<ReadOverlap, string> = {
+const MAYBE_READ_WORDS: Record<SourceOverlap, string> = {
   'replaced-while-running': 'the key was written again while it ran',
   'written-while-running': 'it began before this write',
+  'view-not-placed': 'the array does not show where its view sits',
+};
+
+/**
+ * What a write moment's value still holds of earlier writes, as the end of its line. Two links, each
+ * said when it is there: the write it was folded onto, and the write its step's view held (for a row
+ * the writer built on that view; several when the reader cannot place the view at one position of
+ * the array). WHY two wordings: "added to" is true of a fold only. A `set` the writer built on its
+ * view replaced the value in the fold, so calling it "added to" would say a write is still under it
+ * that the fold dropped. Each link is worded from its own fields (`KeyMoment`), never from the other's.
+ */
+function builtOnWords(moment: KeyMoment): string {
+  const parts: string[] = [];
+  if (moment.builtOnWriteIdx !== undefined) parts.push(`added to the value of commit ${moment.builtOnWriteIdx}`);
+  else if (moment.builtOnPreRun) parts.push('added to the value from BEFORE the run');
+  const held = [
+    ...(moment.builtOnViewIdx !== undefined ? [`commit ${moment.builtOnViewIdx}`] : []),
+    ...(moment.builtOnViewPreRun ? ['the value from BEFORE the run'] : []),
+    ...(moment.orViewIdxs ?? []).map((idx) => `commit ${idx}`),
+  ];
+  if (held.length > 0) parts.push(`built on the value its step's view held: ${held.join(' or ')}`);
+  return parts.length > 0 ? ` (${parts.join('; ')})` : '';
+}
+
+/** How a fed edge was attributed, in a tree line. The full sentence is the registry's. */
+const FED_WORDS: Record<FedBasis, string> = {
+  'per-write': '[exact]',
+  stage: '[conservative]',
+  'built-on-view': '[exact, built on the view]',
 };
 
 export function formatForwardSlice(slice: ForwardSlice): string {
@@ -271,15 +303,18 @@ export function formatForwardSlice(slice: ForwardSlice): string {
     }
     for (const read of node.reads.slice(0, READS_RENDERED)) {
       // `maybe read by`: the key was written inside that step's window, so it may have read another value.
-      const verb = read.overlap !== undefined ? 'maybe read by' : 'read by';
+      // `held by`: no code of that step read the key; the writer built one of its rows on the step's view.
+      const sure = read.builtOnView ? 'held by' : 'read by';
+      const verb = read.overlap !== undefined ? `maybe ${sure}` : sure;
       const why = read.overlap !== undefined ? ` — ${MAYBE_READ_WORDS[read.overlap]}` : '';
-      lines.push(`${pad}  ${verb} ${read.stageName} (${read.runtimeStageId}) @${read.commitIdx}${why}`);
+      const how = read.builtOnView ? ' (in a row the writer built on its view)' : '';
+      lines.push(`${pad}  ${verb} ${read.stageName} (${read.runtimeStageId}) @${read.commitIdx}${how}${why}`);
     }
     if (node.reads.length > READS_RENDERED) {
       lines.push(`${pad}  … and ${node.reads.length - READS_RENDERED} more reads`);
     }
     for (const edge of node.fedEdges) {
-      walk(edge.child, indent + 1, `→ fed ${edge.basis === 'per-write' ? '[exact]' : '[conservative]'} `);
+      walk(edge.child, indent + 1, `→ fed ${FED_WORDS[edge.basis]} `);
     }
   };
   if (slice.root) walk(slice.root, 0);
@@ -314,14 +349,7 @@ export function formatTimeline(timeline: KeyTimeline): string {
   for (const moment of moments.slice(0, MOMENTS_RENDERED)) {
     const where = `${moment.stageName} (${moment.runtimeStageId})`;
     if (moment.kind === 'write') {
-      // A value built in steps: this write did not replace the value, it was folded onto an earlier one.
-      const under =
-        moment.builtOnWriteIdx !== undefined
-          ? ` (added to the value of commit ${moment.builtOnWriteIdx})`
-          : moment.builtOnPreRun
-          ? ' (added to the value from BEFORE the run)'
-          : '';
-      lines.push(`@${moment.commitIdx} write ${moment.verb ?? 'set'} — ${where}${under}`);
+      lines.push(`@${moment.commitIdx} write ${moment.verb ?? 'set'} — ${where}${builtOnWords(moment)}`);
     } else {
       const from =
         moment.fromWriteIdx !== undefined ? `value from commit ${moment.fromWriteIdx}` : 'value from BEFORE the run';

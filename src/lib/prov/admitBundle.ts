@@ -1,5 +1,6 @@
 import { readAttemptWindow } from '../evidence/readAttempts.js';
 import { parseAttemptId } from '../ids/attemptId.js';
+import { viewStampFits } from '../memory/builtOn.js';
 import { admitStamps } from '../memory/readWindow.js';
 import type { CommitBundle, CommitPhase, TraceEntry, UntrackedSource } from '../memory/types.js';
 import { bundleRefusal, isCommitBundle } from '../time-travel/bundles.js';
@@ -91,6 +92,11 @@ export function admitBundle(
             budget.addGap({ code: 'not-collected', commitIdx, rowIdx });
           }
         }
+        // The writer's mark on a `set` row it built on the step's view (`TraceEntry.builtOnView`). Kept,
+        // never dropped: without it the row reads as a replacement. Anything else in its place, or the
+        // mark on another verb, refuses the bundle.
+        const builtOnView = dataField(rawRow, 'builtOnView', budget);
+        if (builtOnView !== undefined && (builtOnView !== true || verb !== 'set')) throw new ProvDataRefusal();
         rows.push({
           commitIdx,
           rowIdx,
@@ -99,14 +105,16 @@ export function admitBundle(
           ...(readKeys === undefined ? {} : { readKeys }),
           ...(readAttempts?.length ? { readAttempts } : {}),
           ...(readAttemptsOmitted === undefined ? {} : { readAttemptsOmitted }),
+          ...(builtOnView === true ? { builtOnView: true as const } : {}),
         });
       }
-      projected.trace = rows.map(({ path, verb, readKeys, readAttempts, readAttemptsOmitted }) => ({
+      projected.trace = rows.map(({ path, verb, readKeys, readAttempts, readAttemptsOmitted, builtOnView }) => ({
         path,
         verb,
         ...(readKeys === undefined ? {} : { readKeys }),
         ...(readAttempts?.length ? { readAttempts } : {}),
         ...(readAttemptsOmitted === undefined ? {} : { readAttemptsOmitted }),
+        ...(builtOnView === true ? { builtOnView: true as const } : {}),
       }));
     } else projected.trace = rawTrace;
     if (!isCommitBundle(projected)) {
@@ -121,17 +129,30 @@ export function admitBundle(
     if (phase !== undefined && phase !== 'exit' && phase !== 'repeat') throw new ProvDataRefusal();
     // A read is dated by its step's stamps, read against each bundle's own `idx` (`memory/readWindow.ts`).
     // The copy keeps both; stamps that cannot be stamps refuse the bundle.
-    const placed = admitStamps(
-      dataField(raw, 'beganAt', budget),
-      dataField(raw, 'sawUntil', budget),
-      dataField(raw, 'idx', budget),
-      after,
-    );
-    if (!placed) {
+    const beganAt = dataField(raw, 'beganAt', budget),
+      sawUntil = dataField(raw, 'sawUntil', budget),
+      idx = dataField(raw, 'idx', budget),
+      viewAt = dataField(raw, 'viewAt', budget);
+    const read = admitStamps(beganAt, sawUntil, idx, after);
+    if (!read) {
       // Said apart from a bundle that cannot be read: this one reads, but its stamps count against an index
       // that cannot be its own (not a whole number, or not past the row before it, whichever of the two is
       // the damaged one). The row is left out, never dated by guess.
       budget.addGap({ code: 'invalid-data', commitIdx, reason: 'read stamps do not fit the commit index' });
+      return undefined;
+    }
+    // `viewAt` dates the rows the writer built on the step's view (`CommitBundle.viewAt`). It is held to
+    // the same rule and asked second, so that each of the two faults is named for what it is: a gap that
+    // said "read stamps" for a bad view stamp sent its reader to the wrong field.
+    const placed = viewAt === undefined ? read : admitStamps(beganAt, sawUntil, idx, after, viewAt);
+    if (!placed) {
+      budget.addGap({ code: 'invalid-data', commitIdx, reason: 'view stamp does not fit the commit index' });
+      return undefined;
+    }
+    // Without a row built on the view the stamp dates nothing, and the producer and this reader do not
+    // agree about the bundle: left out, with its own reason.
+    if (!viewStampFits(placed, rows)) {
+      budget.addGap({ code: 'invalid-data', commitIdx, reason: 'a view stamp with no row built on the view' });
       return undefined;
     }
     const untrackedSources = untracked === undefined ? undefined : dataNames(untracked, budget, 'fields');

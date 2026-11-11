@@ -28,7 +28,7 @@ One bundle is one stage's commit: what it wrote, as the log spells it.
 | Field | Type | Required | Rule |
 |---|---|---|---|
 | `runtimeStageId` | string | yes | The stage's address: `[subflowPath/]stageId#executionIndex`. Unique in the run. The reader splits on the LAST `#` and `/`. `~` is reserved. |
-| `trace` | array of rows | yes | The writes, in order. Each row is `{ path, verb, readKeys?, readAttempts?, readAttemptsOmitted? }`. |
+| `trace` | array of rows | yes | The writes, in order. Each row is `{ path, verb, readKeys?, readAttempts?, readAttemptsOmitted?, builtOnView? }`. |
 | `overwrite` | object | no | Values for `set` and `append` rows, keyed by path. Plain object. |
 | `updates` | object | no | Values for `merge` rows, keyed by path. Plain object. |
 | `redactedPaths` | array of strings | no | Paths a redaction policy cleared; the fold reports them. |
@@ -37,6 +37,7 @@ One bundle is one stage's commit: what it wrote, as the log spells it.
 | `phase` | `'exit'` or `'repeat'` | no | Which continuation of a stage's execution this bundle is. The first bundle of a `runtimeStageId` is the stage's own and has no `phase`. `'exit'` is a subflow mount's exit after its merge-back bundle; `'repeat'` is a fork child's fan-out settle. Readers group bundles by `runtimeStageId` and read this field. |
 | `beganAt` | whole number | no | How many commits the log held at the earliest moment one of the stage's reads saw. Written only when the stage read state and another stage committed between that moment and this commit. It dates the stage's reads: they saw state as it stood at `beganAt`, not at this commit. |
 | `sawUntil` | whole number | no | How many commits the log held at the latest moment one of the stage's reads saw. Written only with `beganAt` and only when greater. Commits `beganAt` to `sawUntil - 1` are the stage's read window: a read may have seen any of them. |
+| `viewAt` | whole number | no | How many commits the log held when the stage's view of state was taken. Written only on a bundle that holds a row marked `builtOnView`, and only when another stage committed between that moment and this commit. It dates those rows: what such a row holds of its path is state as it stood at `viewAt`, with the stage's own writes folded in. Absent on such a bundle: the view was the state just before this commit. It says nothing about the stage's reads (`beganAt` and `sawUntil` do that), and every bundle of a stage has a view of its own. |
 | `stage`, `stageId` | | no | Advisory. |
 | `idx` | whole number | no | The bundle's commit index in the log it was written to. Replay and the cursor derive the commit index from position and do not read it. The read window does: the commits a stage had seen are the ones whose `idx` is below its `beganAt`, so a log handed over as a slice, or without some of its bundles, still reads right. A producer that writes `beganAt` writes `idx` on every bundle, rising along the log, each a whole number up to 2^52. A bundle without `idx` is placed by the bundles around it that have one: past the bundle before it, and before the next one that says an index. Where those two show that bundles are missing, it can be any commit in the hole, and a reader counts it inside a stage's window whenever it could be there. A log where no bundle has one is read by position. |
 
@@ -99,6 +100,24 @@ use, remote commitment or complete external ancestry.
    wrote says neither. `RecordFrame` does both for a writer that uses it. A producer
    that leaves them out gets every read dated at its stage's commit: a read
    made before a sibling's commit is then attributed to that sibling.
+8. **A `set` row says when it was built on what was there.** A reader takes
+   `set` at its word: the value after it owes nothing to the value before
+   it. A producer that writes a `set` of an earlier value plus a change
+   (because one compact row could not hold the stage's writes) puts
+   `builtOnView: true` on that row. The mark says: this row holds what the
+   path held in the stage's view of state, with the stage's own writes folded
+   in. It belongs on a `set` row only, and only where the stage did not set
+   or delete the path, or a container around it, itself. The bundle says
+   when that view was taken, if that is not "just before its commit":
+   `viewAt`, held to the rule of `beganAt` (a whole number before the
+   bundle's own index) and never on a bundle with no such row. It is a stamp
+   of its own: a view is not a read by the stage's code, and counted as one
+   it would date those reads wrongly. `RecordFrame` does both. A producer
+   that writes such a row without the mark, and records no read of the key,
+   has left the earlier writers out of every walk back, and no reader can
+   tell. One that leaves `viewAt` out has the row dated at its commit: a
+   write a sibling committed in between is then named as what the row was
+   built on.
 
 ## What the reader promises
 
@@ -164,8 +183,30 @@ use, remote commitment or complete external ancestry.
   there is an edge each way. The test is by verb and path, never by value:
   a `merge` that overwrote the only field a value had is still followed.
   One writer too many, never one too few. A stage that also read the key
-  keeps its one edge, the read's. Not covered: a `set` row written in place
-  of rows that only added (see "What is not in this contract").
+  keeps its one edge, the read's.
+- **A `set` row built on what was there is followed to it.** A row marked
+  `builtOnView` (law 8) replaces the value in the fold and still holds what
+  the stage's view held. Every reader takes the mark as a read of the path,
+  made for the stage, at the commit that carries the row, and dates it by
+  that commit's `viewAt`: `causalChain` and `sliceForKey` with an edge
+  marked `builtOn: 'built-on-view'`, `forwardSliceForKey` with a read marked
+  `builtOnView` and one edge to that row (`basis: 'built-on-view'`),
+  `keyTimeline` with `builtOnViewIdx` on the write moment, the cause graph
+  with an edge of attribution `'recorded-write'`. The view has one source,
+  for certain. Where it held no write of the key, each reader says that in
+  the view's own words (`preRunView` on the node, `builtOnViewPreRun` and a
+  `'pre-run-view'` note on the timeline, the gap `untracked-input` in the
+  cause graph), and never in the words of a write folded onto the pre-run
+  value: the row is a whole write of its path, and only where part of it
+  came from is outside the log. (A commit whose marked row sits inside the key has a second
+  write under it as well, the one the key was folded onto: the timeline says
+  that one in `builtOnWriteIdx`, and the two can differ.) It is never
+  counted as a read by the stage's code: the timeline
+  shows no read moment for it, and the stage's own reads are dated as
+  before. A door that takes records from outside keeps the mark and the
+  stamp, and refuses a mark that cannot be one (another value, or another
+  verb) and a `viewAt` that cannot be one (not a whole number before the
+  bundle's index, or on a bundle with no marked row).
 - **A reader names the writers that are in the array.** Every reader that
   takes a commit log takes it as the history before each stage: the source of
   a read is the last writer of the key that is in the array. A bundle that was
@@ -198,20 +239,24 @@ use, remote commitment or complete external ancestry.
   own keys in the state; the fold carries them like any key.
 - A record version field. The contract is versioned by the foottrace
   version that reads it.
-- A mark on a `set` row whose value was built on what the key held. A reader
-  takes `set` at its word: the value after it owes nothing to the value
-  before it, except through a read the stage is recorded with. A producer
-  that writes a `set` of an earlier value plus a change, and records no read
-  of the key, has left that earlier writer out of every walk back, and no
-  reader can tell. `RecordFrame` itself does this in two cases. Under either
-  encoding, the default one included: rows that would not fold back to what
-  the stage read are written as `set` rows of what it read, and ordinary
-  writes reach that (one stage that merges into `a.x`, deletes `a.x` and
-  merges into `a` is recorded as `set a.x`, `set a`). Under
-  `commitValues: 'delta'`: also any stage that merged into a key and wrote a
-  path inside it. Both are pinned as a known limit
-  (`test/lib/memory/property/built-on.property.test.ts`); closing it needs
-  the writer to mark such a row.
+- A check that a `set` row with no mark really replaced the value. The mark
+  of law 8 is the producer's word. A producer that writes a `set` of an
+  earlier value plus a change and leaves the mark off is read as having
+  replaced the value, and the writers of that earlier value are left out.
+  `RecordFrame` marks the two cases in which it writes such a row itself:
+  under either encoding, rows that would not fold back to what the stage
+  read (one stage that merges into `a.x`, deletes `a.x` and merges into `a`
+  is recorded as `set a.x`, `set a`); and under `commitValues: 'delta'`, any
+  stage that merged into a key and wrote a path inside it.
+- Where a view sits in an array that does not show it. `viewAt` is an index
+  of the log the bundle was written to. A log handed over as a slice, or
+  with rows taken out, can hold bundles that say no index, and the place of
+  that index is then a range. Each write inside the range is named as a
+  possible source of the row (`overlap: 'view-not-placed'` on the walk's
+  edge, `orViewIdxs` on the timeline's write moment, `conservative` on the
+  cause graph's node, and a `'view-not-placed'` note from the slices and
+  the timeline), and none as the certain one. A stored record says
+  every bundle's index, so this cannot happen there.
 
 ## Bring your own record
 

@@ -109,21 +109,72 @@ WHY the rule speaks in commits and knows nothing of steps: a step can commit mor
 
 One consequence for `causalChain`: its result is a DAG unless a step commits a key between two commits of another step that both add to that key. Each of the two then rests on the other, and the walk says so with an edge each way. `flattenCausalDAG`, `formatCausalChain` and `sliceToJSON` visit a node once and end on it; code that follows `parents` itself must do the same. The cause graph, with one node per commit, is always acyclic.
 
-What each reader does with the rule:
+### A `set` row the writer made (`TraceEntry.builtOnView`)
 
-| Reader | What it says |
-|---|---|
-| `causalChain`, `sliceForKey` | `CausalEdge.builtOn` on the edge to the write underneath; `CausalNode.preRunBase` when nothing in the log is underneath. Text: `← built on box` |
-| `forwardSliceForKey` | a value's life does not end at a write that only added, so the readers after it are readers of this value too. A `'partial-write'` note names the commits it crossed |
-| `keyTimeline` | on the WRITE moment: `builtOnWriteIdx`, or `builtOnPreRun`. One number per write: a list on every read would grow with the square of a loop that appends and reads |
-| `foottrace/cause` | an edge with `attribution: 'recorded-write'` from a node to the write just before it, and from that write forward. Its nodes are commits, so it asks the rule for each node by its own commit and names a node once |
+The writer sometimes stores a `set` of a whole value where the step only added:
 
-What it does not cover is listed at the top of `builtOn.ts`. The one that matters: a `set` row that the WRITER makes out of writes that only added. It does so under both encodings:
+- under either encoding, when a step's rows would not fold back to what the step read. They are stored as `set` rows of what it read. Ordinary writes reach it: one step that merges into `a.x`, deletes `a.x` and merges into `a` leaves `set a.x`, `set a`;
+- under `'delta'`, whenever a step merged into a key and also wrote a path inside it. The two rows would share storage in the bundle, so the writer stores one `set` of the key.
 
-- `'full'`, the default: when a step's rows would not fold back to what the step read, they are written as `set` rows of what it read. Ordinary writes reach it, for example one step that merges into `a.x`, deletes `a.x` and merges into `a`: the record holds `set a.x`, `set a`.
-- `'delta'`: also any step that merged into a key and wrote a path inside it.
+Such a row says `set`, and in the fold it does replace the value. What it holds is the value as the step's VIEW held it, with the step's own writes folded in. Read as a plain replacement, the walk ended there and left out every step whose write was still in the value, with no note. (Found by this rule's own property test, and under the default encoding by its second reader.)
 
-Such a row says `set`, nothing in it says the value was built on what was there, and the walk stops at it: the steps whose writes are still in the value are left out, with no note. A reader cannot follow what the record does not say, so the fix is in the writer (it has to mark such a row) and changes record bytes. Both cases are pinned as `KNOWN LIMIT` in `test/lib/memory/property/built-on.property.test.ts`. Where the idea comes from, and what is ours: [REFERENCES.md](REFERENCES.md).
+A reader cannot follow what the record does not say, and the writer is the only one who knows. So the writer marks the row:
+
+```ts
+// commitValues: 'delta'. Start sets a = { s: 1 }. Fill merges { m: 1 } into a and sets a.in, reading nothing.
+log[1].trace;
+//   { path: 'a.in', verb: 'set' }
+//   { path: 'a',    verb: 'set', builtOnView: true }   the writer's row: what the view held, and Fill's writes
+causalChain(log, 'use#0', reads);
+//   before:  use <- fill via a                          (Start is missing, and it wrote `s`)
+//   now:     use <- fill via a
+//            fill <- start via a   builtOn: 'built-on-view'
+```
+
+A reader takes the mark as a READ of the path, made for the step, at the commit that carries the row (`builtOn.ts · readFromView`):
+
+| Question | Answer | Why |
+|---|---|---|
+| What is under the row? | the source of a read of the path, by the read rule (`readWindow.ts`) | the row holds what the VIEW held, and the view was pinned before the commit. A fold is dated at the commit: it would name what a sibling committed in between, and the row replaced that |
+| Dated by what? | the moment the view was pinned: `viewAt` on the commit that carries the row | a later commit of a step has a view of its own, pinned after the earlier one. And the view is not a read of the step's code: see below |
+| Is it a read by the step? | no | no code of the step asked for the key, so a forward answer and the timeline keep it apart from the steps' reads |
+
+WHY the mark is absent on a `set` the step made itself: such a row replaced the value because the step said so, and nothing older is in it. The writer knows which is which. It marks a row only when no `set` or `delete` of the step covers the path (`hardWriteCoverage.ts · viewMark`).
+
+WHY `viewAt` is a stamp of its own, and not part of the read window (`beganAt`, `sawUntil`). Those two date the reads of the step's CODE, on its first bundle. The view is pinned by the frame's first touch of state, which may be a write. The first form of this change counted the pin as one more look. Then a step that wrote first and read live state later had that read dated as if it could have seen older writes: one certain source became two possible ones, and a row's own source was only "possible" whenever its step had looked twice. Both answers were weaker than what the writer knew. Said on its own, a row has one exact source, and no read is dated differently than before:
+
+```ts
+// Fill writes `a` first (that pins its view), Other then replaces `a` and writes `flag`, Fill reads `flag`.
+log[2];   // fill: { ..., viewAt: 1 }        no beganAt: its one read saw state just before its commit
+causalChain(log, 'use#0', reads);
+//   fill <- start via a      builtOn: 'built-on-view'     one source, certain
+//   fill <- other via flag                                the read, certain as before
+```
+
+WHAT changes in the record, and nothing else does:
+
+- `builtOnView: true` on such a row;
+- `viewAt` on a commit that holds one, when another commit landed between the moment the view was pinned and that commit. A commit whose view was the state just before it says nothing.
+
+`beganAt` and `sawUntil` are byte for byte what they were, on every bundle.
+
+What each reader says:
+
+| Reader | A write that only added | A `set` row the writer built on the view |
+|---|---|---|
+| `causalChain`, `sliceForKey` | `CausalEdge.builtOn: 'partial-write'` on the edge to the write underneath; `CausalNode.preRunBase` when nothing in the log is underneath. Text: `← built on box` | `builtOn: 'built-on-view'` on the edge to the write the view held; `CausalNode.preRunView` when the view held none |
+| `forwardSliceForKey` | a value's life does not end at a write that only added, so the readers after it are readers of this value too. A `'partial-write'` note names the commits it crossed | the commit is a reader of the value its view held, marked `ForwardRead.builtOnView`, and it feeds that row alone (`basis: 'built-on-view'`) |
+| `keyTimeline` | on the WRITE moment: `builtOnWriteIdx`, or `builtOnPreRun`. One number per write: a list on every read would grow with the square of a loop that appends and reads | `builtOnViewIdx`, the write the view held (`builtOnViewPreRun` when it held none, with a `'pre-run-view'` note), in fields of its own: a commit with such a row INSIDE the key also has `builtOnWriteIdx` (the write it was folded onto), and the two can name different writes. No read moment: the step read nothing |
+| `foottrace/cause` | an edge with `attribution: 'recorded-write'` from a node to the write just before it, and from that write forward. Its nodes are commits, so it asks the rule for each node by its own commit and names a node once | the same edge to the write the view held; the gap `untracked-input` on the node when the view held none |
+
+WHEN NOTHING IN THE LOG IS UNDER THE WRITE, the two columns say it in different words, on purpose. A write folded onto the value from before the run has no write of the whole value under it: the value there may be partial, and the code for that is `'from-initial-state'` (`preRunBase`, `builtOnPreRun`). A `set` row built on a view that held no write is a whole write of its path, and only where part of it came from is outside the log: `'pre-run-view'` (`preRunView`, `builtOnViewPreRun`). One code for both told a reader that a key with two `set` rows in range had "no write of its whole value in range". And in the cause graph the fold's words were not enough: a whole write with no parent and no gap reads as the root of its value, so `explain` named the step that wrote such a row as the root cause of a value the step only passed on. The node says `untracked-input` now, the gap a step that read the key from before the run has always had.
+
+A view has one source. Two things are not exceptions to that, and are easy to take for one:
+
+- A commit whose marked row sits INSIDE the key read has two writes under it, both certain: the write its row's view held, and the write the key was folded onto at the commit (the row did not replace the whole key). They are two links, and every reader says both (two edges from the walk, `builtOnWriteIdx` and `builtOnViewIdx` on the timeline, two parents in the cause graph).
+- An array that does not show where the view sits. `viewAt` is an index of the log, and a log handed over as a slice, or with rows taken out, can hold bundles that say no index. The place of the view is then a range (`windowPlacement.ts`, as for a read). Each write inside it is named as a POSSIBLE source: an edge with `overlap: 'view-not-placed'` from the walk, `orViewIdxs` on the timeline's write moment, `conservative` on the cause graph's node, and a `'view-not-placed'` note from the slices and the timeline. None is called certain and none is left out. WHY a word of its own, and not a read's two (`'replaced-while-running'`, `'written-while-running'`): those say a step was running while the key was written. No step read the key here, and a view is one moment. With a read's words the walk printed `← built on a (written while the reader ran)` and noted "1 read was made by a step that looked at state again" for a row no step had read.
+
+What the rule does not cover is listed at the top of `builtOn.ts`. The one that matters: a producer other than `RecordFrame` that writes a `set` of an earlier value plus a change and neither marks it nor records a read (the record contract says what a producer owes). Where the idea comes from, and what is ours: [REFERENCES.md](REFERENCES.md).
 
 ## Run evidence rides the same doors
 

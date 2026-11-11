@@ -1,7 +1,7 @@
 import type { CommitBundle } from '../memory/types.js';
 import { relation } from '../memory/keyPaths.js';
 import { forwardSliceForKey } from '../slice/forwardSliceForKey.js';
-import { builtOnChildPosition } from './recordBuiltOn.js';
+import { builtOnChildPositions } from './recordBuiltOn.js';
 import { collectControlChildCoverage } from './recordControl.js';
 import { readKeysForStage } from './recordScope.js';
 import type { AddRecordGap, PreparedRecordScope, RecordIdentity, ResolvedRecordNode } from './recordTypes.js';
@@ -77,14 +77,19 @@ export function collectForwardCoverage(
     });
     // A one-hop query intentionally stops at depth one; only a node cap hides immediate adjacency.
     if (forward.root?.truncated?.byNodes) addGap('edge-limit');
+    // The forward walk's own edge for a row the writer built on the view is left out, as in
+    // `recordChildren.ts`: the rule below counts that child, once, under the node's key. Counted here
+    // too it was counted twice whenever the row sits inside or around the key, and a node whose edges
+    // were all listed said `edge-limit`.
     for (const edge of forward.root?.fedEdges ?? [])
-      neighbors.add(JSON.stringify(['data', edge.child.commitIdx, edge.child.key]));
+      if (edge.basis !== 'built-on-view') neighbors.add(JSON.stringify(['data', edge.child.commitIdx, edge.child.key]));
     for (const read of forward.root?.reads ?? [])
       if (!scope.log[read.commitIdx]?.trace.length) neighbors.add(JSON.stringify(['read', read.commitIdx, key]));
-    // The write folded onto this one is a neighbour too (`recordBuiltOn.ts`); when its step also read
-    // the key it is the same neighbour as that step's fed edge.
-    const over = builtOnChildPosition(scope, key, commitIndex);
-    if (over !== undefined) neighbors.add(JSON.stringify(['data', over, key]));
+    // The writes that still hold this one are neighbours too (`recordBuiltOn.ts`); one whose step also
+    // read the key is the same neighbour as that step's fed edge.
+    for (const over of builtOnChildPositions(scope, key, commitIndex, maximumEdges + 1)) {
+      neighbors.add(JSON.stringify(['data', over, key]));
+    }
   }
   collectControlChildCoverage(scope, identity, firstCommitIndex, neighbors, addGap);
   if (neighbors.size > maximumEdges) addGap('edge-limit');

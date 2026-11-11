@@ -41,6 +41,7 @@ import { captureFor } from '../read-sources/bindings.js';
  *      a scrub, and nothing outside it reaches its buffer.
  */
 
+import { isViewRow } from './builtOn.js';
 import type { OpVerb } from './deltaEncoding.js';
 import type { EventLog } from './EventLog.js';
 import { nativeGet, type NativeReadObservation } from './pathOps.js';
@@ -516,8 +517,13 @@ export class RecordFrame {
    */
   commit(stampOf: () => CommitStamp): void {
     const payload = this.buffer?.commit();
+    // A row the writer built on the view (`TraceEntry.builtOnView`) carries what the view held into
+    // the record, so the commit says when that view was pinned (`CommitBundle.viewAt`). Without it
+    // such a row would be dated at its commit, after siblings whose writes it never held. It is a
+    // stamp of its own and NOT a look ({@link sawAt}): the reads of the step's code keep their dates.
+    const viewAt = payload?.trace.some(isViewRow) ? this.#pinnedAt : undefined;
     const into = { state: this.state, mirror: this._mirror, log: this.log };
-    recordCommit(payload, stampOf(), into, this.#beganAt, this.#sawUntil);
+    recordCommit(payload, stampOf(), into, this.#beganAt, this.#sawUntil, viewAt);
     this.#committed = true;
   }
 

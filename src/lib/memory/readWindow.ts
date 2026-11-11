@@ -101,7 +101,7 @@ export const isIndex = (value: unknown): value is number => isCount(value) && va
  * What an admitted copy of a bundle keeps of its place in its log: the commit index it said, when a
  * reader can count with it, and its stamps. Nothing here is made up by the door.
  */
-export type Placed = Pick<CommitBundle, 'idx' | 'beganAt' | 'sawUntil'>;
+export type Placed = Pick<CommitBundle, 'idx' | 'beganAt' | 'sawUntil' | 'viewAt'>;
 
 /**
  * Admit the place of a bundle that came from outside (a stored record, a record handed to a reader):
@@ -134,14 +134,32 @@ export type Placed = Pick<CommitBundle, 'idx' | 'beganAt' | 'sawUntil'>;
  * bundle that says an index far too large is kept, and then every stamped bundle after it is the one
  * that does not rise: it is refused although it may be the sound one. A refusal says "not known";
  * a guess would put a writer forward as certain.
+ *
+ * `viewAt` (when the view behind a row the writer built on it was pinned, `CommitBundle.viewAt`) is
+ * held to the same rule as `beganAt`, and for the same reason: a whole number before the bundle's own
+ * index. Dropped, the row would be dated at its commit and a sibling's write would be named as what
+ * it was built on. Whether the bundle holds such a row at all is the caller's to check: it has the
+ * rows (`builtOn.ts · viewStampFits`).
  */
-export function admitStamps(beganAt: unknown, sawUntil: unknown, idx: unknown, after: number): Placed | undefined {
+export function admitStamps(
+  beganAt: unknown,
+  sawUntil: unknown,
+  idx: unknown,
+  after: number,
+  viewAt?: unknown,
+): Placed | undefined {
   const own = isIndex(idx) && idx > after ? idx : undefined;
   const said: Placed = own === undefined ? {} : { idx: own };
-  if (beganAt === undefined) return sawUntil === undefined ? said : undefined;
+  if (beganAt === undefined && viewAt === undefined) return sawUntil === undefined ? said : undefined;
   // What the stamps must fit: the bundle's own index, or the lowest it can have when it says none.
   const at = idx === undefined ? after + 1 : own;
-  if (at === undefined || !isCount(beganAt) || beganAt >= at) return undefined;
+  if (at === undefined) return undefined;
+  if (viewAt !== undefined) {
+    if (!isCount(viewAt) || viewAt >= at) return undefined;
+    said.viewAt = viewAt;
+  }
+  if (beganAt === undefined) return sawUntil === undefined ? said : undefined;
+  if (!isCount(beganAt) || beganAt >= at) return undefined;
   if (sawUntil === undefined) return { ...said, beganAt };
   return isCount(sawUntil) && sawUntil > beganAt && sawUntil <= at ? { ...said, beganAt, sawUntil } : undefined;
 }

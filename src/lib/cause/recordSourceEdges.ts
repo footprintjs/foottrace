@@ -1,6 +1,6 @@
 import { sliceForKey } from '../slice/sliceForKey.js';
 import { relation } from '../memory/keyPaths.js';
-import { builtOnChild, builtOnParent } from './recordBuiltOn.js';
+import { builtOnChildren, builtOnParents } from './recordBuiltOn.js';
 import { collectControlChildCoverage, collectControlParentCoverage } from './recordControl.js';
 import { collectScopeCoverage, recordGapCollector, writtenKeysForNode } from './recordCoverage.js';
 import { nodeIdFor } from './recordIdentity.js';
@@ -93,17 +93,22 @@ export function inspectSourceParents(
       break;
     }
   }
-  // A write that did not replace its key was folded onto what the write before it had left. No read
-  // occurrence says so; the record's rows do (`recordBuiltOn.ts`). A write folded onto the value from
-  // before the run adds nothing here: with exact sources the pre-run state is a known end of the walk,
-  // for a write as for a read of it (`docs/cause.md`), and not a gap. One edge per node: a read
-  // occurrence that already names that write keeps its edge.
+  // A write whose value still holds an earlier one with no read saying so: it was folded onto the
+  // write before it, or the writer built its `set` row on the step's view (`recordBuiltOn.ts`). No
+  // read occurrence names either. A value that rests on the state from before the run adds nothing
+  // here: with exact sources the pre-run state is a known end of the walk, for a write as for a read
+  // of it (`docs/cause.md`), and not a gap. One edge per node: a read occurrence that already names
+  // that write keeps its edge. A source that is only possible brings `conservative`.
   if (identity.key !== undefined && !identity.read) {
-    const under = builtOnParent(scope, identity.key, commitIndex);
-    if (under !== undefined && under !== 'pre-run' && !edges.some((edge) => edge.nodeId === under.nodeId)) {
-      const added = append(edges, under, maximum);
+    for (const { edge, certain } of builtOnParents(scope, identity.key, commitIndex, maximum + 1).parents) {
+      if (edges.some((other) => other.nodeId === edge.nodeId)) continue;
+      const added = append(edges, edge, maximum);
       if (added === 'invalid') coverage.addGap('invalid-data');
-      if (added === 'full') coverage.addGap('edge-limit');
+      if (added === 'full') {
+        coverage.addGap('edge-limit');
+        break;
+      }
+      if (added === 'added' && !certain) coverage.addGap('conservative');
     }
   }
   const deciderId = scope.control?.get(identity.runtimeStageId)?.deciderId;
@@ -187,13 +192,14 @@ export function sourceDataChildren(
     if (added === 'invalid') invalid = true;
     if (added === 'full') return { edges, complete: false, invalid };
   }
-  // The write that was folded onto this one: no read occurrence names it (`recordBuiltOn.ts`).
+  // The writes that still hold this one: no read occurrence names them (`recordBuiltOn.ts`).
   for (const key of keys) {
-    const over = builtOnChild(scope, key, node.commitIndex);
-    if (over === undefined || edges.some((edge) => edge.nodeId === over.nodeId)) continue;
-    const added = append(edges, over, maximum);
-    if (added === 'invalid') invalid = true;
-    if (added === 'full') return { edges, complete: false, invalid };
+    for (const over of builtOnChildren(scope, key, node.commitIndex, maximum + 1)) {
+      if (edges.some((edge) => edge.nodeId === over.nodeId)) continue;
+      const added = append(edges, over, maximum);
+      if (added === 'invalid') invalid = true;
+      if (added === 'full') return { edges, complete: false, invalid };
+    }
   }
   return { edges, complete: true, invalid };
 }

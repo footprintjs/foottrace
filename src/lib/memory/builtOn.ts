@@ -45,22 +45,44 @@
  * key at all is the writer rule's answer (`keyPaths.ts`), and that one does ask values for a row
  * AROUND the key: a `set` of a container that left the key as it was is not a write of the key.
  *
+ * A `set` ROW THE WRITER MADE (`TraceEntry.builtOnView`). The writer sometimes writes a `set` of a
+ * whole value in place of rows that only added: under either encoding when a step's rows would not
+ * fold back to what the step read (one step that merges into `a.x`, deletes `a.x` and merges into
+ * `a`), and under `'delta'` whenever a step merged into a key and also wrote a path inside it. In the
+ * fold such a row does replace the value, so nothing a sibling committed in between is under it.
+ * What IS in it is the value as the step's VIEW held it, with the step's own writes folded in. The
+ * writer marks the row, and a reader takes the mark as a READ of the path, made for the step, at the
+ * commit that carries the row ({@link readFromView}): its source is the read rule's
+ * (`readWindow.ts`), asked with the moment that commit's view was pinned (`CommitBundle.viewAt`).
+ * WHY A READ AND NOT A FOLD: a fold is dated at the commit; the view was pinned before it. A step
+ * that ran beside others and then wrote such a row holds what was there when its view was pinned,
+ * not what a sibling committed since. WHY A STAMP OF ITS OWN FOR THAT MOMENT, and not the step's
+ * read stamps: `CommitBundle.viewAt` says it.
+ * WHEN THE VIEW HELD NO WRITE OF THE KEY the row was built on the value from before the run, or on
+ * nothing. A reader says that in the view's own words (`'pre-run-view'`: `CausalNode.preRunView`,
+ * `KeyMoment.builtOnViewPreRun`, the cause graph's `untracked-input`) and never in the fold's
+ * (`'from-initial-state'`). WHY: the fold's code says no write of the whole value is under the
+ * value, so it may be partial. A marked `set` is a whole write of its path, and what the log
+ * cannot see is only where part of it came from. One code for both made a timeline that held two
+ * `set` rows of a key say it had "no write of its whole value in range", and left the cause
+ * graph's node with no parent and no gap, the shape of a root (found in round 4 of this change's
+ * second read, and by then asking every reader about the same row).
+ * Until the writer marked these rows they were read as plain replacements and the walk stopped at
+ * them (found by this rule's own property test, and under the default encoding by its second reader).
+ *
  * Every reader that follows a value to its writers asks here: the backward walk (`backtrack.ts`),
  * the forward index and the key timeline (`slice/`), and the cause graph (`cause/`).
  *
  * NOT COVERED:
- *   - a `set` row the WRITER made out of writes that only added. Under EITHER encoding, a step's
- *     rows that would not fold back to what the step read are written as `set` rows of that
- *     read-back (`TransactionBuffer · emitReadBack`); ordinary writes reach it under the default
- *     `'full'` encoding, for example a step that merges into `a.x`, deletes `a.x` and merges into
- *     `a`. Under `'delta'`, any step that merged into a key and also wrote a path inside it is
- *     written as a `set` of the whole value (the two rows share storage in the bundle). Such a row
- *     holds what the key held when the step began plus the step's own part, and nothing in it says
- *     so. It is read here as what its verb says, a replacement, and the walk stops at it. A reader
- *     cannot follow what the record does not say: the writer has to mark such a row. Pinned as
- *     KNOWN LIMIT in `test/lib/memory/property/built-on.property.test.ts`, under both encodings;
+ *   - a `set` row a producer other than `RecordFrame` writes out of an earlier value plus a change,
+ *     with no mark and no read of the key on record. It reads as a replacement, and no reader can
+ *     tell (the record contract says what a producer owes here);
  *   - which FIELDS a merge reached. The walk follows every write back to the last one that replaced
  *     the value, so it can name a step whose field has since been overwritten;
+ *   - an array that does not show where a view sits. `viewAt` is an index of the log the bundle
+ *     was written to. In an array handed over with bundles that say no index (a slice, rows taken
+ *     out) the place of that index can be a range (`windowPlacement.ts`). A write inside the range
+ *     is then a possible source of the row, never the certain one and never left out;
  *   - the PROV export does not link a write to the write it was folded onto. It exports a `merge`
  *     or an `append` row as that write alone, and counts it under "final value reconstruction is
  *     outside stage one" (`prov/gaps.ts`).
@@ -68,12 +90,68 @@
  * Where the idea comes from, and what is ours: `REFERENCES.md` in this folder.
  */
 
+import type { RegisteredCode } from './honesty.js';
 import { relation } from './keyPaths.js';
 import type { LastWriterBefore } from './readWindow.js';
-import type { CommitBundle } from './types.js';
+import type { CommitBundle, TraceEntry } from './types.js';
+
+/**
+ * Why a write is only a POSSIBLE source of a `set` row the writer built on its step's view: the array
+ * the reader was handed does not show where that view sits (`windowPlacement.ts`: bundles around the
+ * commit that say no index, several logs in one array, a `viewAt` that cannot be one). The row could
+ * then have been built on any write in the range the view could be in, and each is named.
+ *
+ * WHY NOT THE READ'S WORDS (`readWindow.ts · ReadOverlap`). Those say a step was RUNNING while the key
+ * was written: it began, another step committed, and it looked at state again. A view is one moment.
+ * Nothing is written "while it ran", and in a log as its writer wrote it a view has one source, for
+ * certain. What is missing here is only the reader's knowledge of that moment. Said in the read's
+ * words, a walk back told a person that a step "looked at state again after another step committed"
+ * where no step had read the key at all (found by asking every reader about one such row).
+ */
+export type ViewOverlap = RegisteredCode<'view-not-placed'>;
+
+/** The mark of each write a view could have held: none when it has ONE source (`during` is empty). */
+export function viewOverlapOf(sources: { readonly during: readonly number[] }): ViewOverlap | undefined {
+  return sources.during.length > 0 ? 'view-not-placed' : undefined;
+}
 
 /** What the rule reads of a commit: its rows. */
 type Written = Pick<CommitBundle, 'trace'>;
+
+/**
+ * Does this commit hold a `set` row the WRITER built on the step's view (`TraceEntry.builtOnView`) on
+ * `key`, around it or inside it? Then part of what `key` holds after the commit is what the VIEW
+ * held there: the commit read the key from its view, for its step, and a reader owes it the source
+ * of that read (`readWindow.ts · readSourcesOf`, asked with THIS commit's view,
+ * `windowPlacement.ts · Places.view`: a later commit of a step has a view of its own, pinned after
+ * the earlier one).
+ */
+export function readFromView(bundle: Written, key: string): boolean {
+  for (const row of bundle.trace) if (isViewRow(row) && relation(row.path, key) !== undefined) return true;
+  return false;
+}
+
+/**
+ * Is this a `set` row the WRITER built on the step's view? The mark counts on a `set` row only: on
+ * any other verb it says nothing the fold does not already say (such a row adds to what is there),
+ * and a door that takes records from outside refuses it there.
+ */
+export function isViewRow(row: Pick<TraceEntry, 'verb' | 'builtOnView'>): boolean {
+  return row.builtOnView === true && row.verb === 'set';
+}
+
+/**
+ * Does a bundle's `viewAt` have a row to date? The stamp dates the `set` rows the writer built on
+ * the step's view and nothing else. On a bundle with no such row it says something no reader can
+ * use, and no writer of ours puts it there, so a door that takes records from outside refuses that
+ * bundle as it refuses any stamp that cannot be one (`readWindow.ts · admitStamps`).
+ */
+export function viewStampFits(
+  placed: Pick<CommitBundle, 'viewAt'>,
+  rows: readonly Pick<TraceEntry, 'verb' | 'builtOnView'>[],
+): boolean {
+  return placed.viewAt === undefined || rows.some(isViewRow);
+}
 
 /**
  * Did this commit REPLACE the value of `key`: a `set` or a `delete` row on the key, or on a container

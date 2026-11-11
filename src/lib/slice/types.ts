@@ -25,7 +25,7 @@
 import type { CausalNode, KeysReadLookup } from '../memory/backtrack.js';
 import type { ValueBasis } from '../memory/commitLogUtils.js';
 import type { RegisteredCode } from '../memory/honesty.js';
-import type { ReadOverlap } from '../memory/readWindow.js';
+import type { SourceOverlap } from '../memory/parentEdges.js';
 import type { CommitBundle, TraceEntry, UntrackedSource } from '../memory/types.js';
 
 // ── Keys ───────────────────────────────────────────────────────────────────
@@ -176,9 +176,9 @@ export interface VariableSlice {
 
 /**
  * How a `fed` edge was attributed — the honesty axis of the FORWARD walk,
- * the mirror of {@link AttributionBasis} for the backward one. The two words
- * are deliberately `causalChain`'s `edgeAttribution` values, because they
- * name the same two mechanisms:
+ * the mirror of {@link AttributionBasis} for the backward one. The first two
+ * words are deliberately `causalChain`'s `edgeAttribution` values, because
+ * they name the same two mechanisms:
  *
  * - `'per-write'` — EXACT. The child's write carries per-write read
  *   provenance (`TraceEntry.readKeys`, recorded under the executor's
@@ -193,13 +193,20 @@ export interface VariableSlice {
  *   real. Never presented as exact: every conservative edge is stamped here
  *   AND summarised once on the slice as a `'conservative-fed-edges'`
  *   {@link HonestyNote}.
+ * - `'built-on-view'` — EXACT, and no read by the step is behind it. The
+ *   child is a `set` row the WRITER built on its step's view
+ *   (`TraceEntry.builtOnView`): the row holds what the view held of this
+ *   key, so the value is in it. WHY ITS OWN WORD: `'per-write'` promises a
+ *   recorded read before the write, and here the step's code read nothing.
+ *   A reader that shows "who read this key" must be able to tell the two
+ *   apart (`ForwardRead.builtOnView` marks the read the same way).
  *
  * Each member is registered, with the one sentence that says what it means,
  * in `memory/honesty.ts · HONESTY_CODES` (served on `foottrace`); the
  * union declares its members through `RegisteredCode`, so a member the
  * registry does not hold does not compile.
  */
-export type FedBasis = RegisteredCode<'per-write' | 'stage'>;
+export type FedBasis = RegisteredCode<'per-write' | 'stage' | 'built-on-view'>;
 
 /**
  * The code of a {@link HonestyNote} — a machine-readable honesty statement about a forward query's
@@ -221,6 +228,8 @@ export type HonestyNoteCode = RegisteredCode<
   | 'truncated'
   | 'redacted'
   | 'from-initial-state'
+  | 'pre-run-view'
+  | 'view-not-placed'
 >;
 
 /** One honesty statement — see {@link HonestyNoteCode}. */
@@ -243,14 +252,34 @@ export interface ForwardRead {
   commitIdx: number;
   /**
    * Present when the key was written inside the reading step's window (`CommitBundle.beganAt` /
-   * `sawUntil`: steps side by side, and the step looked at state again after a sibling committed). The
+   * `sawUntil`: steps side by side, and the step looked at state again after a sibling committed; or
+   * an array that does not show where that window sits, so that a write which could lie in it is
+   * taken to). The
    * step may have read this value or another one written in that time, so it is a possible reader of
    * this value, not a certain one (`memory/readWindow.ts`):
    *   - `'replaced-while-running'`: this value is the one the key held when the step began;
    *   - `'written-while-running'`: this value was written inside the step's window.
-   * Absent on a certain read, which is every read of a step with no window.
+   * A commit that holds the value through its view alone (`builtOnView`) is only a possible reader
+   * for another reason, with a word of its own:
+   *   - `'view-not-placed'`: the array does not show where that view sits, so this value is one of
+   *     those it could have held (`memory/builtOn.ts · ViewOverlap`).
+   * Absent on a certain read, which is every read of a step with no window, and every row built on
+   * a view in a log as its writer wrote it.
    */
-  overlap?: ReadOverlap;
+  overlap?: SourceOverlap;
+  /**
+   * Present (`true`) when no read by the step's code is behind this entry AT THIS COMMIT: the commit
+   * holds a `set` row the WRITER built on the step's view (`TraceEntry.builtOnView`), and that row
+   * holds this value. The value went on into that row and into nothing else the commit wrote (the fed
+   * edge to it says `basis: 'built-on-view'`). Absent where the step's code read this value at this
+   * commit, also when the commit holds such a row too.
+   *
+   * It speaks of the COMMIT, not of the step: a step's own reads belong to its first commit, so a
+   * later commit of a step whose code did read the key is listed with this mark when its row holds
+   * the value. WHY SAID: a list of "who read this key" that counts this entry names a read no code
+   * made.
+   */
+  builtOnView?: true;
 }
 
 /**
@@ -260,7 +289,9 @@ export interface ForwardRead {
  */
 export interface ForwardEdge {
   child: ForwardNode;
-  /** Exact (`'per-write'`) or conservative (`'stage'`) — see {@link FedBasis}. */
+  /**
+   * Exact (`'per-write'`, `'built-on-view'`) or conservative (`'stage'`) — see {@link FedBasis}.
+   */
   basis: FedBasis;
 }
 
@@ -400,8 +431,10 @@ export interface KeyMoment {
    * moment just before it in this timeline, whichever step made it (an
    * earlier commit of the same step included; `memory/builtOn.ts`). A read
    * that saw this write also saw that one, and so on back to a write that
-   * carries neither this field nor `builtOnPreRun`: that one replaced the
-   * value. One number per write: follow it from the write a read names
+   * carries none of the links (this field, `builtOnPreRun`,
+   * `builtOnViewIdx`, `builtOnViewPreRun`): that one replaced the value and
+   * holds nothing older.
+   * One number per write: follow it from the write a read names
    * (`fromWriteIdx`, `orWriteIdxs`).
    */
   builtOnWriteIdx?: number;
@@ -409,9 +442,54 @@ export interface KeyMoment {
    * `'write'` moments only: the write did not replace the value and no
    * commit before it wrote the key, so it was folded onto what the key held
    * before the run, which the log cannot see. The timeline then carries a
-   * `'from-initial-state'` note.
+   * `'from-initial-state'` note that names the commit. It speaks of the FOLD
+   * only: a row the writer built on a view that held no write says so in
+   * `builtOnViewPreRun`.
    */
   builtOnPreRun?: true;
+  /**
+   * `'write'` moments only, and only for a commit with a `set` row the
+   * WRITER built on its step's view (`TraceEntry.builtOnView`): the
+   * `commitIdx` of the write that view held, the last write of the key
+   * before the moment the view was pinned (`CommitBundle.viewAt`). What the
+   * row holds of the key is that write's value with the step's own writes
+   * folded in, so a read that saw this write also saw that one. Absent when
+   * no commit before the view wrote the key (`builtOnViewPreRun` says so).
+   *
+   * It is a link of its own beside `builtOnWriteIdx`, and the two can name
+   * different writes: a commit with such a row INSIDE the key was folded
+   * onto the write just before it, and its row was built on a view that may
+   * have been pinned before that write. Follow both.
+   */
+  builtOnViewIdx?: number;
+  /**
+   * `'write'` moments only, for a commit with such a row: no commit before
+   * the moment its view was pinned wrote the key, so what the row holds of
+   * the key was built on the value from before the run (or on nothing),
+   * which the log cannot see. The timeline then carries a `'pre-run-view'`
+   * note that names the commit. WHY NOT `builtOnPreRun` and its
+   * `'from-initial-state'` note: those say the commit was FOLDED onto the
+   * pre-run value, with no write of the whole value before it, so that the
+   * value there may be partial. A marked `set` of the key is folded onto
+   * nothing (it replaced whatever a sibling had committed) and holds the
+   * whole value, and a marked row inside the key can be folded onto a
+   * commit while its view held none. The two say different things and can
+   * both be there.
+   */
+  builtOnViewPreRun?: true;
+  /**
+   * `'write'` moments only: the OTHER writes the view of such a commit could
+   * have held, ascending. Present only when the reader cannot place the view
+   * at one position of the array it was handed (`windowPlacement.ts` has the
+   * cases: bundles around the commit that say no index, as in a slice or a
+   * log with rows taken out; an array of several logs; a `viewAt` that
+   * cannot be one). The view then held `builtOnViewIdx` (or the value from
+   * before the run, `builtOnViewPreRun`) or one of these, and the record
+   * cannot say which: each is a possible source, none the certain one. The
+   * timeline then carries a `'view-not-placed'` note. Absent for a log as
+   * its writer wrote it, where a view has one source.
+   */
+  orViewIdxs?: number[];
 }
 
 /**
@@ -621,6 +699,8 @@ export interface SliceJSON {
       preRunReads?: { code: RegisteredCode<'pre-run-origin'>; keys: string[] };
       /** Copied from `CausalNode.preRunBase`; absent unless a write of the node was folded onto a pre-run value. */
       preRunBase?: { code: RegisteredCode<'from-initial-state'>; keys: string[] };
+      /** Copied from `CausalNode.preRunView`; absent unless a `set` row the writer built on the node's view held no write of a key. */
+      preRunView?: { code: RegisteredCode<'pre-run-view'>; keys: string[] };
     }
   >;
   /** Id-referenced edges: child (`from`) depends on parent (`to`). */
@@ -633,9 +713,13 @@ export interface SliceJSON {
     /** Copied from `CausalEdge.basis` (9.33.0); absent for an exact edge. */
     basis?: RegisteredCode<'nested-rows'>;
     /** Why this edge is a possible source and not a certain one (`CausalEdge.overlap`). Absent on a certain edge. */
-    overlap?: ReadOverlap;
-    /** An edge no read made: the child's write of `key` kept part of what the parent wrote (`CausalEdge.builtOn`). */
-    builtOn?: RegisteredCode<'partial-write'>;
+    overlap?: SourceOverlap;
+    /**
+     * An edge no read by the child's code made: the child's write of `key` kept part of what the parent
+     * wrote, because it did not replace the value (`'partial-write'`) or because the writer built it on
+     * the step's view (`'built-on-view'`). See `CausalEdge.builtOn`.
+     */
+    builtOn?: RegisteredCode<'partial-write' | 'built-on-view'>;
   }>;
   /** Copied from the root when a budget cut the slice — registered as `'truncated'` in `HONESTY_CODES`. */
   truncated?: { byDepth: boolean; byNodes: boolean };

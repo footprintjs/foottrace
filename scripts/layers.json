@@ -21,6 +21,7 @@
   "src/lib/memory/keyPaths.ts": 0,
   "src/lib/memory/logModel.ts": 3,
   "src/lib/memory/merge.ts": 0,
+  "src/lib/memory/parentEdges.ts": 0,
   "src/lib/memory/pathOps.ts": 0,
   "src/lib/record-paths/codec.ts": 0,
   "src/lib/memory/placeholders.ts": 0,

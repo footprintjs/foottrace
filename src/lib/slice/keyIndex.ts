@@ -37,10 +37,11 @@ import {
   rootOf,
   writesOnlyInside,
 } from '../memory/keyPaths.js';
-import { replacesValue } from '../memory/builtOn.js';
+import { isViewRow, replacesValue } from '../memory/builtOn.js';
 import { logModel } from '../memory/logModel.js';
-import { type ReadOverlap, type ReadWindow, readOfValue } from '../memory/readWindow.js';
-import { windowsOf } from '../memory/windowPlacement.js';
+import type { SourceOverlap } from '../memory/parentEdges.js';
+import { type ReadWindow, readOfValue } from '../memory/readWindow.js';
+import { placesOf } from '../memory/windowPlacement.js';
 import { shownPath } from '../record-paths/codec.js';
 import type { CommitBundle, TraceEntry } from '../memory/types.js';
 import type { HonestyNote } from './types.js';
@@ -75,6 +76,18 @@ export interface KeyIndex {
   /** key → commit ARRAY positions whose stage read it, a path inside it or a container around it, ascending. Memoised. */
   readsOf(key: string): number[];
   /**
+   * key → the commits (ARRAY positions, ascending) that hold a `set` row the WRITER built on its step's
+   * view, on the key, inside it or around it (`TraceEntry.builtOnView`, `memory/builtOn.ts`). Such a
+   * commit holds what the view held of the key. It reads the value for that row, at ITS OWN position (a
+   * later commit of a step has a view of its own), and for nothing else it wrote.
+   *
+   * WHY NOT AMONG `readsOf`: those are the reads the steps' own code made, as the reads provider names
+   * them. Mixed in, a commit of a step that never read the key showed up as a read of it in the
+   * timeline, counted as "reads were recorded" for a log that recorded none, and fed every write of
+   * its bundle. Memoised.
+   */
+  viewReadersOf(key: string): number[];
+  /**
    * The executions whose reads are NOT dated at their own commit (`CommitBundle.beganAt`): first-bundle
    * ARRAY position → when the step looked at state (`readWindow.ts · windowOf`). Empty for a log with no
    * such step, which is every log of a run whose steps go one after another.
@@ -86,6 +99,15 @@ export interface KeyIndex {
    * fan-out stamps every branch, and few of them read any one key).
    */
   windowedReadsOf(key: string): number[];
+  /**
+   * The commits whose view was NOT pinned on the state just before their own commit
+   * (`CommitBundle.viewAt`): ARRAY position → what that view held (`windowPlacement.ts · Places.view`).
+   * Only commits that hold a row built on the view are here. Empty for a log whose steps go one after
+   * another.
+   */
+  readonly views: ReadonlyMap<number, ReadWindow>;
+  /** The commits among `viewReadersOf(key)` that are in {@link views}, ascending. Memoised, as {@link windowedReadsOf}. */
+  datedViewsOf(key: string): number[];
   /** Every key this log knows BY NAME: written paths ∪ recorded read keys — the list an unknown-key note shows. */
   readonly knownKeys: Set<string>;
   /** Does the log know `key` — a write of it (the writer rule), or a read on, inside or around it? */
@@ -109,17 +131,39 @@ export function buildKeyIndex(commitLog: CommitBundle[], lookup: KeysReadLookup)
   const writers = model.index;
   const readsByKey = new Map<string, number[]>();
   const readKeysByRoot = new Map<string, string[]>();
+  const viewsByPath = new Map<string, number[]>();
+  const viewPathsByRoot = new Map<string, string[]>();
+  /** One more position under one name; the first time a name is seen it joins the names of its root. */
+  const note = (byName: Map<string, number[]>, namesByRoot: Map<string, string[]>, name: string, at: number) => {
+    if (!byName.has(name)) {
+      const names = namesByRoot.get(rootOf(name));
+      if (names) names.push(name);
+      else namesByRoot.set(rootOf(name), [name]);
+    }
+    push(byName, name, at);
+  };
   const executions = new Set<string>();
   const windows = new Map<number, ReadWindow>();
-  const windowAt = windowsOf(commitLog);
+  const views = new Map<number, ReadWindow>();
+  const places = placesOf(commitLog);
   for (let i = 0; i < commitLog.length; i++) {
     const bundle = commitLog[i];
     // Reads: one lookup per EXECUTION, at its first bundle (see THE INVERSION above). A later bundle
     // of the same runtimeStageId is a continuation; the stage read before its own commit, and the
     // backward walk dates it there too (`commitLogUtils · buildCommitIndex`).
-    if (executions.has(bundle.runtimeStageId)) continue;
+    const first = !executions.has(bundle.runtimeStageId);
     executions.add(bundle.runtimeStageId);
-    const window = windowAt(i);
+    // Rows the writer built on the view belong to the BUNDLE, first or not (`viewReadersOf`), and so does
+    // the moment that view was pinned: a later commit of a step has a view of its own.
+    const viewed = new Set<string>();
+    for (const row of bundle.trace) if (isViewRow(row)) viewed.add(row.path);
+    for (const path of viewed) note(viewsByPath, viewPathsByRoot, path, i);
+    if (viewed.size > 0) {
+      const view = places.view(i);
+      if (view.start < i) views.set(i, view);
+    }
+    if (!first) continue;
+    const window = places.window(i);
     if (window.start < i) windows.set(i, window);
     // A provider that throws is a consumer bug, not a reason to lose the
     // query — the same error-isolation posture recorder callbacks get.
@@ -129,14 +173,7 @@ export function buildKeyIndex(commitLog: CommitBundle[], lookup: KeysReadLookup)
     } catch {
       /* provider threw — treat this step as "no recorded reads" */
     }
-    for (const k of new Set(keys)) {
-      if (!readsByKey.has(k)) {
-        const names = readKeysByRoot.get(rootOf(k));
-        if (names) names.push(k);
-        else readKeysByRoot.set(rootOf(k), [k]);
-      }
-      push(readsByKey, k, i);
-    }
+    for (const k of new Set(keys)) note(readsByKey, readKeysByRoot, k, i);
   }
 
   const writesOf = (key: string): number[] => model.writersOf(key) as number[];
@@ -149,18 +186,23 @@ export function buildKeyIndex(commitLog: CommitBundle[], lookup: KeysReadLookup)
     }
     return positions;
   };
-  const reads = new Map<string, number[]>();
-  const readsOf = (key: string): number[] => {
-    let positions = reads.get(key);
-    if (positions === undefined) {
-      const names = readKeysByRoot.get(rootOf(key)) ?? [];
-      positions = ascendingUnion(
-        names.filter((name) => relation(name, key) !== undefined).map((name) => readsByKey.get(name) as number[]),
-      );
-      reads.set(key, positions);
-    }
-    return positions;
+  /** key → the positions noted under every name on the key, inside it or around it, ascending. Memoised. */
+  const related = (byName: Map<string, number[]>, namesByRoot: Map<string, string[]>) => {
+    const memo = new Map<string, number[]>();
+    return (key: string): number[] => {
+      let positions = memo.get(key);
+      if (positions === undefined) {
+        const names = namesByRoot.get(rootOf(key)) ?? [];
+        positions = ascendingUnion(
+          names.filter((name) => relation(name, key) !== undefined).map((name) => byName.get(name) as number[]),
+        );
+        memo.set(key, positions);
+      }
+      return positions;
+    };
   };
+  const readsOf = related(readsByKey, readKeysByRoot);
+  const viewReadersOf = related(viewsByPath, viewPathsByRoot);
   const knownKeys = new Set<string>([...pathsWritten(writers), ...readsByKey.keys()]);
   const windowedReads = new Map<string, number[]>();
   const windowedReadsOf = (key: string): number[] => {
@@ -171,20 +213,54 @@ export function buildKeyIndex(commitLog: CommitBundle[], lookup: KeysReadLookup)
     }
     return positions;
   };
+  const datedViews = new Map<string, number[]>();
+  const datedViewsOf = (key: string): number[] => {
+    let positions = datedViews.get(key);
+    if (positions === undefined) {
+      positions = views.size === 0 ? [] : viewReadersOf(key).filter((position) => views.has(position));
+      datedViews.set(key, positions);
+    }
+    return positions;
+  };
 
   const isKnown = (key: string): boolean => writesOf(key).length > 0 || readsOf(key).length > 0;
-  return { writers, writesOf, closingWritesOf, readsByKey, readsOf, windows, windowedReadsOf, knownKeys, isKnown };
-}
-
-/** One step that read a value, and why it is only a possible reader when it is (`readWindow.ts · ReadOverlap`). */
-export interface LifeReader {
-  /** The ARRAY position of the step's first bundle. */
-  readonly position: number;
-  readonly overlap?: ReadOverlap;
+  return {
+    writers,
+    writesOf,
+    closingWritesOf,
+    readsByKey,
+    readsOf,
+    viewReadersOf,
+    windows,
+    windowedReadsOf,
+    views,
+    datedViewsOf,
+    knownKeys,
+    isKnown,
+  };
 }
 
 /**
- * The steps that read the value of `key` written at `writeIdx` (`undefined`: the value from before the
+ * One commit that read a value, and why it is only a possible reader when it is: a read's reason
+ * (`readWindow.ts · ReadOverlap`), or the view's (`builtOn.ts · ViewOverlap`) when the commit holds the
+ * value through a row built on a view alone and the array does not show where that view sits.
+ */
+export interface LifeReader {
+  /** The ARRAY position of the commit: a step's first bundle, or a bundle that holds a row built on the view. */
+  readonly position: number;
+  /** Present when the commit is only a POSSIBLE reader of this value, by every way it read the key. */
+  readonly overlap?: SourceOverlap;
+  /** The step's own code read this value: its recorded reads name the key, dated by its read window. */
+  readonly step: boolean;
+  /** A `set` row of this commit, built by the writer on the step's view, holds this value (`KeyIndex.viewReadersOf`). */
+  readonly view: boolean;
+}
+
+/** How a commit read a value one way: for certain, or only possibly (the mark says why). */
+type Read = true | SourceOverlap;
+
+/**
+ * The commits that read the value of `key` written at `writeIdx` (`undefined`: the value from before the
  * run), whose life ends at `nextWriteIdx` (`undefined`: it lives to the end of the log), ascending — the
  * forward side of the one rule (`memory/readWindow.ts · readOfValue`).
  *
@@ -194,36 +270,80 @@ export interface LifeReader {
  * `beganAt` is not dated at its own commit, so each of those is asked the rule instead: it read the value
  * when one of its looks at state could see it, and it is a possible reader, not a certain one, when the
  * key was written inside its window.
+ *
+ * A commit that holds a `set` row the writer built on its step's view is a reader in a second way, by
+ * the same rule and with a date of its own: the moment that view was pinned (`KeyIndex.views`). The two
+ * ways are asked apart, because their dates differ (a step may have read the key early and pinned the
+ * view of a later commit late), and each reader says which of them saw THIS value (`step`, `view`).
  */
 export function readersOfLife(
-  index: Pick<KeyIndex, 'windows' | 'windowedReadsOf' | 'readsOf' | 'writesOf'>,
+  index: Pick<
+    KeyIndex,
+    'windows' | 'windowedReadsOf' | 'readsOf' | 'views' | 'datedViewsOf' | 'viewReadersOf' | 'writesOf'
+  >,
   key: string,
   writeIdx: number | undefined,
   nextWriteIdx: number | undefined,
 ): LifeReader[] {
-  const inLife = indicesInRange(index.readsOf(key), writeIdx === undefined ? 0 : writeIdx + 1, nextWriteIdx);
-  const stamped = index.windowedReadsOf(key);
-  if (stamped.length === 0) return inLife.map((position) => ({ position }));
-  const readers: LifeReader[] = [];
-  for (const position of inLife) if (!index.windows.has(position)) readers.push({ position });
+  const from = writeIdx === undefined ? 0 : writeIdx + 1;
   const writes = index.writesOf(key);
-  for (const position of stamped) {
-    const window = index.windows.get(position)!;
-    const written = window.start < window.end && indicesInRange(writes, window.start, window.end - 1).length > 0;
-    const read = readOfValue(window, writeIdx ?? -1, nextWriteIdx, written);
-    if (read !== false) readers.push(read === true ? { position } : { position, overlap: read });
+  /** One way of reading: the commits dated at their own commit by range, the dated ones by the rule. */
+  const readersBy = (all: number[], dated: number[], dates: ReadonlyMap<number, ReadWindow>): [number, Read][] => {
+    const found: [number, Read][] = [];
+    for (const position of indicesInRange(all, from, nextWriteIdx))
+      if (!dates.has(position)) found.push([position, true]);
+    for (const position of dated) {
+      const window = dates.get(position)!;
+      // Two halvings, never a copy of the writes in the window: with a wide window on every reader of a
+      // key that is written all along (a fan-out), a copy per reader cost the square of the log.
+      const written = lowerBound(writes, window.start) < lowerBound(writes, window.end);
+      const read = readOfValue(window, writeIdx ?? -1, nextWriteIdx, written);
+      if (read !== false) found.push([position, read]);
+    }
+    return found;
+  };
+  const how = new Map<number, { step?: Read; view?: Read }>();
+  for (const [position, read] of readersBy(index.readsOf(key), index.windowedReadsOf(key), index.windows)) {
+    how.set(position, { step: read });
   }
-  return readers.sort((one, other) => one.position - other.position);
+  // A log with no such row (every log before the mark existed) has the steps' reads alone.
+  const viewers = index.viewReadersOf(key);
+  if (viewers.length > 0) {
+    for (const [position, read] of readersBy(viewers, index.datedViewsOf(key), index.views)) {
+      // The rule answers in a read's words. A view is only possible for one reason, the array's.
+      how.set(position, { ...how.get(position), view: read === true ? true : 'view-not-placed' });
+    }
+  }
+  return [...how]
+    .sort(([one], [other]) => one - other)
+    .map(([position, { step, view }]) => {
+      // Certain when either way is: the commit then holds this value for sure.
+      const overlap = step === true || view === true ? undefined : step ?? view;
+      return {
+        position,
+        ...(overlap !== undefined && { overlap }),
+        step: step !== undefined,
+        view: view !== undefined,
+      };
+    });
 }
 
-/** At least one read a forward answer lists is only possible: the key was written inside the reader's window. */
+/**
+ * At least one read a forward answer lists is only possible: the key was written inside the reader's window.
+ * Two things make a window hold a write, and the sentence names both: the step really looked at state
+ * again after another step committed, or the array does not show where the step's reads sit, so a
+ * write that could lie in the window is taken to (`memory/windowPlacement.ts`). WHY both: the note
+ * named only the first, and for a step that never looked again, in an array with a bundle that says
+ * no index, it stated a second look that did not happen.
+ */
 export function concurrentReadsNote(reads: number): HonestyNote {
   return {
     code: 'concurrent-write',
     detail:
       `${reads} read${reads === 1 ? ' was' : 's were'} made by a step that looked at state again after another ` +
-      'step committed the key (steps side by side). Such a step may have read this value or another one ' +
-      'written in that time, so it is a possible reader, not a certain one.',
+      'step committed the key (steps side by side), or by a step the array handed over does not place among ' +
+      'its commits. Such a step may have read this value or another one written in that time, so it is a ' +
+      'possible reader, not a certain one.',
   };
 }
 
@@ -348,27 +468,29 @@ export function mergedWrites(commitLog: readonly CommitBundle[], key: string, wr
   return writes.filter((i) => !replacesValue(commitLog[i], key) && !writesOnlyInside(commitLog[i], key));
 }
 
-/** A write the answer rests on, or that a value's life crosses, merged into the key or appended to it. */
-export function partialWriteNote(key: string, commits: readonly number[]): HonestyNote {
+/** How many commit positions a note lists before it says "+N more" (a note is one bounded line). */
+export const NESTED_WRITES_LISTED = 5;
+
+/** The commits a note names, as words: `commit 3`, `commits 3, 7`, `commits 0, 1, 2, 3, 4 (+2 more)`. */
+function commitsListed(commits: readonly number[]): string {
   const shown = commits.slice(0, NESTED_WRITES_LISTED);
   const more = commits.length - shown.length;
-  const at = `commit${commits.length === 1 ? '' : 's'} ${shown.join(', ')}${more > 0 ? ` (+${more} more)` : ''}`;
+  return `commit${commits.length === 1 ? '' : 's'} ${shown.join(', ')}${more > 0 ? ` (+${more} more)` : ''}`;
+}
+
+/** A write the answer rests on, or that a value's life crosses, merged into the key or appended to it. */
+export function partialWriteNote(key: string, commits: readonly number[]): HonestyNote {
   return {
     code: 'partial-write',
     detail:
-      `'${shownPath(key)}' was merged into or appended to at ${at} — such a write did not replace the value: ` +
-      'it is made of that write and of the earlier ones, and a reader after it read all of them.',
+      `'${shownPath(key)}' was merged into or appended to at ${commitsListed(commits)} — such a write did not ` +
+      'replace the value: it is made of that write and of the earlier ones, and a reader after it read all of them.',
   };
 }
 
-/** How many commit positions a `'nested-rows'` or a `'partial-write'` note lists before it says "+N more". */
-export const NESTED_WRITES_LISTED = 5;
-
 /** A write the answer rests on reached the key only through paths inside it. */
 export function nestedRowsNote(key: string, commits: readonly number[]): HonestyNote {
-  const shown = commits.slice(0, NESTED_WRITES_LISTED);
-  const more = commits.length - shown.length;
-  const at = `commit${commits.length === 1 ? '' : 's'} ${shown.join(', ')}${more > 0 ? ` (+${more} more)` : ''}`;
+  const at = commitsListed(commits);
   return {
     code: 'nested-rows',
     detail:
@@ -378,15 +500,32 @@ export function nestedRowsNote(key: string, commits: readonly number[]): Honesty
   };
 }
 
+/**
+ * At least one `set` row the writer built on a view is listed with possible sources only, because the
+ * array does not show where that view sits. One sentence for the three queries that can meet it (a
+ * backward slice, a forward slice, a timeline). No count: the three would count different things.
+ */
+export function viewNotPlacedNote(): HonestyNote {
+  return {
+    code: 'view-not-placed',
+    detail:
+      "a set row the writer built on a step's view is listed with possible sources only — the array handed " +
+      'over does not show where that view sits among its commits (bundles around the commit say no index, ' +
+      'the array holds several logs, or the stamp cannot be one), so each write the view could have held is ' +
+      'named and none is certain.',
+  };
+}
+
 /** At least one read a backward slice follows has only possible sources: its key was written inside the reader's window. */
 export function concurrentWriteNote(reads: number): HonestyNote {
   return {
     code: 'concurrent-write',
     detail:
       `${reads} read${reads === 1 ? ' was' : 's were'} made by a step that looked at state again after another ` +
-      'step committed the same key (steps side by side). The record cannot say which value such a read saw, ' +
-      'so every writer shown for that key is a possible source, not a certain one; the real source is among ' +
-      'them, or is the value from before the run when the key is listed as read from there.',
+      'step committed the same key (steps side by side), or by a step the array handed over does not place ' +
+      'among its commits. The record cannot say which value such a read saw, so every writer shown for that ' +
+      'key is a possible source, not a certain one; the real source is among them, or is the value from ' +
+      'before the run when the key is listed as read from there.',
   };
 }
 
@@ -400,13 +539,45 @@ export function redactedValueNote(key: string): HonestyNote {
   };
 }
 
-/** No set or delete of the key, or of a container around it, is in range: the value rests on the pre-run state. */
-export function fromInitialStateNote(key: string): HonestyNote {
+/**
+ * No set or delete of the key, or of a container around it, is under a value: it rests on the pre-run state.
+ *
+ * Said of ONE point, and the two callers have different points. A backward slice says it of the value
+ * it explains (no `at`): nothing in its range wrote the whole value. A timeline says it of one WRITE
+ * (`at`): the first write of the key, which did not replace it. WHY the timeline names the write: its
+ * range goes on after that write, and a later one can replace the key. "No write of its whole value
+ * in range" would then be false of the timeline, though it is true of that write.
+ */
+export function fromInitialStateNote(key: string, at?: number): HonestyNote {
+  const shown = shownPath(key);
   return {
     code: 'from-initial-state',
     detail:
-      `'${shownPath(key)}' has no write of its whole value in range — its value rests on what it held before the ` +
-      'run, which the commit log cannot see, so the writes here may be only part of it.',
+      at === undefined
+        ? `'${shown}' has no write of its whole value in range — its value rests on what it held before the ` +
+          'run, which the commit log cannot see, so the writes here may be only part of it.'
+        : `'${shown}' was first written at commit ${at}, by a write that did not replace it — the value there ` +
+          'rests on what the key held before the run, which the commit log cannot see, so the writes listed ' +
+          'may be only part of it until one replaces the key.',
+  };
+}
+
+/**
+ * A `set` row the writer built on its step's view, when that view held no write of the key
+ * (`KeyMoment.builtOnViewPreRun`). The row can sit on the key, around it, or on a path inside it
+ * (then it holds part of the key): "in whole or in part". WHY NOT the `'from-initial-state'` note:
+ * that one says no write of the whole value is under the value, which may then be partial. Such a
+ * row is a whole write of its path. What the log cannot see is where the part of it came from that
+ * the step did not write.
+ */
+export function preRunViewNote(key: string, commits: readonly number[]): HonestyNote {
+  return {
+    code: 'pre-run-view',
+    detail:
+      `'${shownPath(key)}' at ${commitsListed(commits)} is held, in whole or in part, in a set row the writer ` +
+      "built on its step's view, and that view held no write of the key (or may have held none, where the " +
+      "moment lists other writes it could have held) — what the row holds beyond the step's own writes was " +
+      'absent or came from before the run, which the commit log cannot see.',
   };
 }
 

@@ -26,6 +26,11 @@
  *    commit order (`builtOn.ts`), with an edge marked `builtOn`. No step read anything for this
  *    edge. The rule speaks in commits and a node here is a STEP: when the commit underneath is an
  *    earlier one of the same step, no edge is drawn and the walk passes through it.
+ *    One more case of the same kind: a `set` row the WRITER built on the step's view
+ *    (`TraceEntry.builtOnView`) replaces the value in the fold and still holds what the view held.
+ *    The parent is linked to what that commit's view held (the read rule of step 3, asked with the
+ *    moment the view was pinned, `CommitBundle.viewAt`), with the edge marked
+ *    `builtOn: 'built-on-view'`.
  * 6. Enqueue parent. Repeat until queue empty or limits hit.
  *
  * Output is a graph of steps, not a linked list: a stage reading `creditScore` AND `dti` from
@@ -72,13 +77,14 @@
  * ```
  */
 
-import { builtOnBefore, replacesValue } from './builtOn.js';
+import { builtOnBefore, readFromView, replacesValue, viewOverlapOf } from './builtOn.js';
 import { buildCommitIndex, lastWriterPosition } from './commitLogUtils.js';
 import type { RegisteredCode } from './honesty.js';
 import { queryWork, relation, writesOnlyInside } from './keyPaths.js';
 import { logModel } from './logModel.js';
-import { type LastWriterBefore, overlapOf, type ReadOverlap, readSourcesOf } from './readWindow.js';
-import { windowsOf } from './windowPlacement.js';
+import { type LastWriterBefore, overlapOf, readSourcesOf } from './readWindow.js';
+import { type BuiltOn, type SourceOverlap, takeLink } from './parentEdges.js';
+import { placesOf } from './windowPlacement.js';
 import { shownPath } from '../record-paths/codec.js';
 import type { CommitBundle, TraceEntry, UntrackedSource } from './types.js';
 
@@ -160,8 +166,28 @@ export interface CausalNode {
    * part. The code says so (`'from-initial-state'`, registered in `memory/honesty.ts · HONESTY_CODES`);
    * `keys` are in the order the walk met them. Only for a key the walk came through (a child read it
    * from this node, or it is the key a slice is about). ABSENT otherwise, so a node keeps its shape.
+   * It speaks of the FOLD only: a `set` row the writer built on a view that held no write of the key
+   * is in `preRunView`.
    */
   preRunBase?: { code: RegisteredCode<'from-initial-state'>; keys: string[] };
+  /**
+   * The keys for which this node holds a `set` row the WRITER built on its step's view
+   * (`TraceEntry.builtOnView`; on the key, around it, or on a path inside it) when no commit had
+   * written the key before that view was pinned: what the row holds of the key beyond the step's own
+   * writes was absent or came from the state before the run, which the commit log cannot see, so the
+   * walk has no edge to follow for that part. The code says so (`'pre-run-view'`, registered in
+   * `memory/honesty.ts · HONESTY_CODES`); `keys` are in the order the walk met them. Said too where
+   * the record does not show where the view sits and it only MAY have been pinned that early: the
+   * writes it could have held instead are then edges with `overlap: 'view-not-placed'`. Only for a
+   * key the walk came through. ABSENT otherwise, so a node keeps its shape.
+   *
+   * WHY A FIELD OF ITS OWN. Not `preRunReads`: no code of the step read the key, the same reason the
+   * edge to a write a view held is marked `builtOn: 'built-on-view'`. Not `preRunBase`: that one says
+   * the write was FOLDED onto the pre-run value, with no write of the whole value under it, so the
+   * value there may be partial. A marked `set` of the key replaced the value in the fold and holds
+   * all of it. What the log cannot see here is only where part of it came from.
+   */
+  preRunView?: { code: RegisteredCode<'pre-run-view'>; keys: string[] };
 }
 
 /**
@@ -191,27 +217,44 @@ export interface CausalEdge {
   /**
    * Present only on a `'data'` edge whose `key` was written inside the child's read window
    * (`CommitBundle.beganAt` / `sawUntil`: steps side by side, and the child looked at state again
-   * after a sibling committed). The record cannot say which value the read saw, so EVERY edge of the
+   * after a sibling committed; or an array that does not show where that window sits, so that a write
+   * which could lie in it is taken to). The record cannot say which value the read saw, so EVERY edge of the
    * child for that key carries a mark and is a possible source, not a certain one; the real source is
    * among them (or is the value from before the run, when `preRunReads` lists the key):
    *   - `'replaced-while-running'`: the parent wrote the value the key held when the child began;
    *   - `'written-while-running'`: the parent wrote the key inside the window.
-   * Both are registered in `memory/honesty.ts · HONESTY_CODES`. Absent on a certain edge, so the
+   * An edge a view made (`builtOn: 'built-on-view'`) is only possible for another reason, and says
+   * it in a word of its own:
+   *   - `'view-not-placed'`: the array does not show where the view of the child's row sits, so the
+   *     parent is one of the writes that view could have held (`memory/builtOn.ts · ViewOverlap`).
+   * All are registered in `memory/honesty.ts · HONESTY_CODES`. Absent on a certain edge, so the
    * edge of a step with no window keeps its shape.
    */
-  overlap?: ReadOverlap;
+  overlap?: SourceOverlap;
   /**
-   * Present only on a `'data'` edge that no READ made: the child's own write of `key` did not replace
-   * the value (it merged into it, appended to it, or wrote a path inside it), so what the child left
-   * under `key` still holds part of what the parent had written. The parent is the last commit that
-   * wrote `key` before the child's write, in commit order: a fold applies commits in that order, so
-   * this edge is exact (`memory/builtOn.ts`). Registered as `'partial-write'` in
-   * `memory/honesty.ts · HONESTY_CODES`. Absent on an edge a read made, so such an edge keeps its
-   * shape. When the child ALSO read `key` from this parent, for certain, the read's edge stands
-   * alone and no second one is added; beside a read that is only a possible source (`overlap`), both
-   * edges are there, because this one is certain.
+   * Present only on a `'data'` edge that no READ by the child's code made: what the child left under
+   * `key` still holds part of what the parent had written, and the record's rows say why
+   * (`memory/builtOn.ts`):
+   *   - `'partial-write'`: the child's own write of `key` did not replace the value (it merged into
+   *     it, appended to it, or wrote a path inside it). The parent is the last commit that wrote
+   *     `key` before the child's write, in commit order: a fold applies commits in that order, so
+   *     this edge is exact;
+   *   - `'built-on-view'`: the child's write is a `set` row the WRITER built on the step's view
+   *     (`TraceEntry.builtOnView`). The parent is the write that view held, found by the moment the
+   *     view was pinned (`CommitBundle.viewAt`): one write, for certain. Only where the reader
+   *     cannot place that moment at one position of the array it was handed (`windowPlacement.ts`
+   *     has the cases; bundles that say no index are the usual one) does the edge carry `overlap`,
+   *     with the view's own word (`'view-not-placed'`): the parent is then one of the writes the
+   *     view could have held.
+   * Both are registered in `memory/honesty.ts · HONESTY_CODES`. Absent on an edge a read made, so
+   * such an edge keeps its shape. When the child ALSO read `key` from this parent, for certain, the
+   * read's edge stands alone and no second one is added; beside a read that is only a possible
+   * source (`overlap`), both edges are there when this one is certain. Where both reasons name one
+   * parent for certain there is one edge, and it says `'partial-write'`. One that is only possible
+   * is dropped as soon as any certain edge names that parent. The rule is `parentEdges.ts`, and it
+   * does not depend on the order the walk meets the links in.
    */
-  builtOn?: RegisteredCode<'partial-write'>;
+  builtOn?: BuiltOn;
 }
 
 /**
@@ -474,7 +517,8 @@ function buildCausalChain(
   // Pick writer lookup strategy based on log size
   const findWriter = createWriterLookup(commitLog);
   // When each step looked at state (`readWindow.ts`): one pass over the log for the whole walk.
-  const windowAt = windowsOf(commitLog);
+  const places = placesOf(commitLog);
+  const windowAt = places.window;
 
   // Node dedup map: runtimeStageId → CausalNode (ensures DAG, not tree)
   const nodeMap = new Map<string, CausalNode>();
@@ -527,17 +571,24 @@ function buildCausalChain(
   // ── Writes that did not replace a value (`builtOn.ts`) ─────────────────
   // A node the walk came to through key `k`, at the bundle that wrote `k`, owes one more link when
   // that write was partial: to the commit it was built on. Each (node, key, bundle) is followed once.
-  type Partial = readonly [key: string, at: number];
+  // What is under the write: the commit it was folded onto (`'fold'`: it did not replace the value),
+  // or what its step's view held (`'view'`: the writer built a `set` row on the view, on the key,
+  // around it or inside it). A commit with such a row INSIDE the key owes both.
+  type Partial = readonly [key: string, at: number, from: 'fold' | 'view'];
   const followed = new Set<string>();
   const bundleAt = (position: number): CommitBundle => commitLog[position];
-  /** The partial write of `key` at `at` by `id`, when it has not been followed yet. */
+  /** What the write of `key` at `at` by `id` still owes the walk, less what has been followed already. */
   function partialWrite(id: string, key: string, at: number): Partial[] {
-    queryWork.units += 1 + commitLog[at].trace.length;
-    if (replacesValue(commitLog[at], key)) return [];
-    const mark = `${at}\u0000${key}\u0000${id}`;
-    if (followed.has(mark)) return [];
-    followed.add(mark);
-    return [[key, at]];
+    queryWork.units += 1 + 2 * commitLog[at].trace.length;
+    const owed: Partial[] = [];
+    if (!replacesValue(commitLog[at], key)) owed.push([key, at, 'fold']);
+    if (readFromView(commitLog[at], key)) owed.push([key, at, 'view']);
+    return owed.filter(([, , from]) => {
+      const mark = `${at}\u0000${key}\u0000${id}\u0000${from}`;
+      if (followed.has(mark)) return false;
+      followed.add(mark);
+      return true;
+    });
   }
 
   // BFS/worklist queue: [node, commitIdx, depth, keysToExpand, partial writes to follow]
@@ -569,8 +620,8 @@ function buildCausalChain(
     kind: 'data' | 'control',
     key: string | undefined,
     depth: number,
-    overlap?: ReadOverlap,
-    builtOn = false,
+    overlap?: SourceOverlap,
+    builtOn?: BuiltOn,
   ): void {
     const parentCommit = commitLog[parentPos];
     const parentId = parentCommit.runtimeStageId;
@@ -645,26 +696,12 @@ function buildCausalChain(
     if (!node.parents.some((p) => p.runtimeStageId === parentId)) {
       node.parents.push(parentNode);
     }
-    // One edge per distinct (parent, kind, key) link. The weigher (D4)
-    // stamps the weight at creation; `undefined` → 1.0 — the engine never
-    // computes weights itself.
-    // An edge a READ made is one per (parent, kind, key, overlap), as it always was. Beside that, at
-    // most ONE edge says the child certainly rests on this parent for this key: a certain read's edge,
-    // or else a `builtOn` edge. So a `builtOn` link adds nothing beside a certain read of the key from
-    // the same parent (the read already says it, and a record whose walk was right keeps its bytes),
-    // and a certain read that arrives after a `builtOn` edge takes its place: the order the walk
-    // met them in must not decide the answer. A read that is only a possible source (`overlap`) says
-    // less than `builtOn` does, so beside one of those both edges stand.
+    // Which edges the child keeps to this parent for this key is one rule, the same whatever order
+    // the walk meets the links in (`parentEdges.ts · takeLink`). The weigher (D4) stamps the weight
+    // when an edge is made; `undefined` → 1.0 — the engine never computes weights itself.
     const sameLink = (e: CausalEdge): boolean =>
       e.parent.runtimeStageId === parentId && e.kind === kind && e.key === key;
-    const certain = node.parentEdges.find((e) => sameLink(e) && e.overlap === undefined);
-    let known: boolean;
-    if (builtOn) known = certain !== undefined;
-    else if (overlap === undefined && certain?.builtOn !== undefined) {
-      delete certain.builtOn;
-      known = true;
-    } else known = node.parentEdges.some((e) => sameLink(e) && e.overlap === overlap && e.builtOn === undefined);
-    if (!known) {
+    if (takeLink(node.parentEdges, sameLink, { overlap, builtOn })) {
       // Error isolation (review finding): a consumer weigher that throws
       // must degrade to the default weight, never crash the slice — the
       // same contract every other consumer callback in the library gets.
@@ -684,7 +721,7 @@ function buildCausalChain(
         weight,
         ...(nested && { basis: 'nested-rows' as const }),
         ...(overlap && { overlap }),
-        ...(builtOn && { builtOn: 'partial-write' as const }),
+        ...(builtOn !== undefined && { builtOn }),
       });
     }
   }
@@ -732,19 +769,43 @@ function buildCausalChain(
     // through it to what THAT commit was folded onto, or ends there when it replaced the value. Each
     // (step, key, commit) is followed once (`partialWrite`), so a step that committed many times costs
     // one lookup per commit, however often the walk comes to it.
+    //
+    // A `'view'` item is dated differently: the row holds what the step's VIEW held, so its sources
+    // are the read rule's, asked with the view of the commit that carries the row (`CommitBundle.
+    // viewAt`; a later commit of a step has a view of its own). That is one write, for certain. Only
+    // where the view cannot be placed at one position of the array (`windowPlacement.ts`) is there
+    // more than one, and then each is a possible source and its edge says so (`overlap`).
     const pending = [...partials];
     while (pending.length > 0) {
-      const [key, at] = pending.pop()!;
-      const under = builtOnBefore(key, at, bundleAt, findWriter);
-      if (under === undefined) continue; // not for a write `partialWrite` handed out; kept for the type
-      if (under < 0) {
-        // Folded onto what the key held before the run: say why there is no edge.
-        node.preRunBase ??= { code: 'from-initial-state', keys: [] };
-        if (!node.preRunBase.keys.includes(key)) node.preRunBase.keys.push(key);
-      } else if (commitLog[under].runtimeStageId === node.runtimeStageId) {
-        pending.push(...partialWrite(node.runtimeStageId, key, under));
+      const [key, at, from] = pending.pop()!;
+      const under: Array<[position: number, overlap: SourceOverlap | undefined]> = [];
+      if (from === 'fold') {
+        const position = builtOnBefore(key, at, bundleAt, findWriter);
+        if (position === undefined) continue; // not for a write `partialWrite` handed out; kept for the type
+        under.push([position, undefined]);
       } else {
-        linkParent(node, under, 'data', key, depth, undefined, true);
+        const seen = readSourcesOf(key, places.view(at), findWriter);
+        // One word for every write an unplaced view could have held: the reason is the array's, not a
+        // running step's, and it is the same for the write before the range and for those inside it.
+        const possible = viewOverlapOf(seen);
+        under.push([seen.before, possible]);
+        for (const position of seen.during) under.push([position, possible]);
+      }
+      for (const [position, overlap] of under) {
+        if (position < 0) {
+          // Nothing in the log is under this link: say why there is no edge, in the field of the link.
+          // Folded onto what the key held before the run, or built on a view that held it, are two
+          // statements (`CausalNode.preRunBase`, `preRunView`): only the first leaves the value partial.
+          const keys =
+            from === 'fold'
+              ? (node.preRunBase ??= { code: 'from-initial-state', keys: [] }).keys
+              : (node.preRunView ??= { code: 'pre-run-view', keys: [] }).keys;
+          if (!keys.includes(key)) keys.push(key);
+        } else if (commitLog[position].runtimeStageId === node.runtimeStageId) {
+          pending.push(...partialWrite(node.runtimeStageId, key, position));
+        } else {
+          linkParent(node, position, 'data', key, depth, overlap, from === 'fold' ? 'partial-write' : 'built-on-view');
+        }
       }
     }
 
@@ -818,7 +879,8 @@ export function flattenCausalDAG(root: CausalNode): CausalNode[] {
  * the one shown.
  *
  * An edge no read made (`CausalEdge.builtOn`: the child's write of the key did not replace the value,
- * so it kept part of what the parent had written) renders as `← built on <key>`.
+ * or the writer built it on the step's view, so it kept part of what the parent had written) renders
+ * as `← built on <key>`.
  *
  * RFC-003 D4: edge weights from the `weigh` hook render as a suffix —
  * `← via systemPrompt (0.18)` — only when ≠ 1.0, so unweighted output is
@@ -826,9 +888,10 @@ export function flattenCausalDAG(root: CausalNode): CausalNode[] {
  * `⚠ slice truncated …` line.
  */
 /** How a tree line says each mark. Short on purpose: the full sentence is the registry's. */
-const OVERLAP_WORDS: Record<ReadOverlap, string> = {
+const OVERLAP_WORDS: Record<SourceOverlap, string> = {
   'replaced-while-running': 'as the reader began; written again while it ran',
   'written-while-running': 'written while the reader ran',
+  'view-not-placed': 'possibly: the array does not show where the view sits',
 };
 
 export function formatCausalChain(root: CausalNode): string {
@@ -839,7 +902,7 @@ export function formatCausalChain(root: CausalNode): string {
     edge !== undefined && edge.weight !== 1 ? ` (${edge.weight})` : '';
   // The keys this parent is only a possible source of, said per mark (`CausalEdge.overlap`).
   const overlapSuffix = (edges: CausalEdge[] | undefined, shown: CausalEdge): string =>
-    (Object.keys(OVERLAP_WORDS) as ReadOverlap[])
+    (Object.keys(OVERLAP_WORDS) as SourceOverlap[])
       .map((mark) => {
         const keys = [...new Set((edges ?? []).filter((e) => e.overlap === mark && e.key).map((e) => e.key as string))];
         if (keys.length === 0) return '';

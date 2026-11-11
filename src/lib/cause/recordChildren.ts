@@ -1,7 +1,7 @@
 import { sourceChildrenCollected, sourceDataChildren } from './recordSourceEdges.js';
 import { forwardSliceForKey } from '../slice/forwardSliceForKey.js';
 import type { ForwardNode } from '../slice/types.js';
-import { builtOnChild } from './recordBuiltOn.js';
+import { builtOnChildren } from './recordBuiltOn.js';
 import { appendControlChildren } from './recordControl.js';
 import { allStageReadsCollected, writtenKeysForNode } from './recordCoverage.js';
 import { nodeIdFor } from './recordIdentity.js';
@@ -18,6 +18,10 @@ function appendFedChildren(
 ): boolean {
   let complete = true;
   for (const edge of root.fedEdges) {
+    // A row the writer built on its step's view: no read is behind this edge. The graph asks its own
+    // rule for it, commit by commit and as the exact inverse of the parent side (`recordBuiltOn.ts`),
+    // so it is added there, once, as a `'recorded-write'` edge.
+    if (edge.basis === 'built-on-view') continue;
     const child = edge.child;
     if (child.commitIdx === undefined || !child.runtimeStageId) {
       complete = false;
@@ -88,12 +92,16 @@ function appendDataChildren(
     }
     complete = appendFedChildren(scope, forward.root, maximumEdges, edges) && complete;
     complete = appendReadOnlyChildren(scope, forward.root, key, maximumEdges, edges) && complete;
-    // The write that was folded onto this one (the next write of the key, when it was a merge, an
-    // append or a row inside the key): no read made it a child, the record's rows do (`recordBuiltOn.ts`).
-    const over = builtOnChild(scope, key, commitIndex);
-    if (over !== undefined && !edges.some((existing) => existing.nodeId === over.nodeId)) {
-      if (edges.length >= maximumEdges) complete = false;
-      else edges.push(over);
+    // The writes that still hold this one with no read of their step saying so: the next write of the
+    // key when it was folded onto this one, and a later `set` row the writer built on a view that
+    // could see it. The record's rows make them children (`recordBuiltOn.ts`).
+    for (const over of builtOnChildren(scope, key, commitIndex, maximumEdges + 1)) {
+      if (edges.some((existing) => existing.nodeId === over.nodeId)) continue;
+      if (edges.length >= maximumEdges) {
+        complete = false;
+        break;
+      }
+      edges.push(over);
     }
   }
   return complete;

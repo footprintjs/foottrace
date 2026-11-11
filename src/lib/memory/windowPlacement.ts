@@ -74,8 +74,10 @@
  *     the log before it, and when a later index of the second log still rises past that reading
  *     (bundles were taken out of it), the join is never seen. A step of the second log is then
  *     dated in the first, and can be given a writer of the first as its one certain source;
- *   - the stamps sit on a step's FIRST bundle. An array without that bundle has lost them, and the
- *     step's later bundles are read as any bundle with no stamp.
+ *   - the stamps that date a step's READS sit on its FIRST bundle. An array without that bundle has
+ *     lost them, and the step's later bundles are read as any bundle with no stamp. (A later bundle
+ *     can carry `viewAt`, for a row the writer built on the view of that commit: `builtOn.ts ·
+ *     readFromView`. It dates that row, never the step's reads.)
  *
  * WHY A DOOR READS STRICTER THAN THIS FILE. An array of typed bundles may be several logs one after
  * another (the legs of a paused run), so here an index that does not rise starts a new stretch, and a
@@ -208,11 +210,31 @@ function firstFrom(readings: readonly number[], low: number, first: number, inde
  * such a bundle instead: `readWindow.ts · admitStamps`.)
  */
 export function windowsOf(log: readonly CommitBundle[]): (first: number) => ReadWindow {
+  return placesOf(log).window;
+}
+
+/** The two questions a reader asks of one log about when a bundle's step looked at state. */
+export interface Places {
+  /** When the step whose FIRST bundle is at `first` read state (`beganAt` / `sawUntil`). */
+  window(first: number): ReadWindow;
+  /**
+   * What the view held that a row of the bundle at `position` was built on (`CommitBundle.viewAt`,
+   * for a `set` row marked `TraceEntry.builtOnView`): every commit before `start`. `start === end`
+   * in an unbroken array, so such a row has ONE source. A bundle that says no `viewAt` pinned its
+   * view on the state just before its own commit. The place is found exactly as a read's is (the
+   * file header), so where bundles around it say no index it is a range, and a write inside that
+   * range is a possible source, never a certain one and never left out.
+   */
+  view(position: number): ReadWindow;
+}
+
+/**
+ * Both questions over one log, sharing the one pass ({@link windowsOf} says what a stamp that cannot
+ * be one opens; the same holds for `viewAt`).
+ */
+export function placesOf(log: readonly CommitBundle[]): Places {
   let known: Layout | undefined;
-  return (first) => {
-    const bundle = log[first];
-    const beganAt = bundle?.beganAt;
-    const sawUntil = bundle?.sawUntil;
+  const place = (first: number, beganAt: unknown, sawUntil: unknown): ReadWindow => {
     if (beganAt === undefined && sawUntil === undefined) return { start: first, end: first };
     const { starts, earliest, latest } = (known ??= layoutOf(log));
     const low = stretchOf(starts, first);
@@ -232,6 +254,11 @@ export function windowsOf(log: readonly CommitBundle[]): (first: number) => Read
     if (sawUntil === undefined) return { start, end: earliest === latest ? start : surelyFrom(beganAt) };
     if (!isCount(sawUntil) || sawUntil <= beganAt || sawUntil > own) return { start, end: first };
     return { start, end: surelyFrom(sawUntil) };
+  };
+  return {
+    window: (first) => place(first, log[first]?.beganAt, log[first]?.sawUntil),
+    // A view is one moment: dated like a step that looked once, at `viewAt`, and never again.
+    view: (position) => place(position, log[position]?.viewAt, undefined),
   };
 }
 

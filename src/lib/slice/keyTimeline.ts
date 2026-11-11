@@ -32,13 +32,32 @@
  * a list that was appended to N times saw N writes, and a list on every read
  * grows with the square of a loop that appends and reads. The link is one
  * number per write, found with one look at one bundle; a reader follows it
- * from the write a read names.
+ * from the write a read names. One more link, with fields of its own: a `set`
+ * row the WRITER built on the step's view (`TraceEntry.builtOnView`) holds
+ * what the view held, as of the moment the view was pinned
+ * (`CommitBundle.viewAt`). That is one write (`builtOnViewIdx`), and it need
+ * not be the write the commit was folded onto: a commit with such a row
+ * INSIDE the key has both links. A view that held no write of the key says
+ * so in its own field too (`builtOnViewPreRun`). Only where the reader
+ * cannot place the view at one position of the array could it have held
+ * other writes (`orViewIdxs`).
+ *
+ * ### LAW — one note per link, each in its own words
+ *
+ * "The value from before the run is under this write" is two statements.
+ * FOLDED onto it (`builtOnPreRun`): no write of the whole value is under
+ * the write, so the value there may be partial. The note is
+ * `'from-initial-state'`, and it names the write, because a later write in
+ * the same timeline can replace the key. BUILT on a view of it
+ * (`builtOnViewPreRun`): the row is a whole write of its path, and only
+ * where part of it came from is outside the log. The note is
+ * `'pre-run-view'`. Neither borrows the other's words (`keyIndex.ts`).
  *
  * DAG position: memory ← slice. Imports memory/ only (see README.md).
  */
 
 import type { KeysReadLookup } from '../memory/backtrack.js';
-import { builtOnBefore } from '../memory/builtOn.js';
+import { builtOnBefore, readFromView } from '../memory/builtOn.js';
 import { readSourcesOf } from '../memory/readWindow.js';
 import type { CommitBundle } from '../memory/types.js';
 import {
@@ -52,6 +71,8 @@ import {
   nestedRowsNote,
   partialWriteNote,
   preRunOriginNote,
+  preRunViewNote,
+  viewNotPlacedNote,
   readsNotRecordedNote,
   unknownKeyNote,
   writeEntry,
@@ -125,7 +146,10 @@ export function keyTimeline(
   let r = 0;
   let sawPreRunRead = false;
   let concurrentReads = 0;
-  let restsOnPreRun = false;
+  // The writes that rest on what the key held before the run, by the link that says so (`KeyMoment`).
+  let foldedOnPreRun: number | undefined; // at most one: only the first write of a key has nothing before it
+  const viewsOfPreRun: number[] = [];
+  let viewNotPlaced = false;
   const bundleAt = (position: number): CommitBundle => commitLog[position];
   const writeBefore = (_key: string, before: number): number => lastIndexBefore(allWrites, before) ?? -1;
   while (w < writes.length || r < reads.length) {
@@ -156,7 +180,21 @@ export function keyTimeline(
       // names the write it saw, and a reader of the timeline follows the links from there. (A list on
       // every read would grow with the square of a key that is appended to and read in a loop.)
       const under = builtOnBefore(normalisedKey, idx, bundleAt, writeBefore);
-      if (under === -1) restsOnPreRun = true;
+      // A `set` row the WRITER built on the step's view still holds what the view held, as of the
+      // moment the view was pinned (`CommitBundle.viewAt`, `memory/builtOn.ts · readFromView`). That
+      // is a second link with fields of its own, because it can name another write than the fold does:
+      // the fold names the write just before this commit, and the view may have been pinned before
+      // that one. `during` is empty unless the array does not show where the view sits.
+      const seen = readFromView(bundle, normalisedKey)
+        ? readSourcesOf(normalisedKey, index.views.get(idx) ?? { start: idx, end: idx }, writeBefore)
+        : undefined;
+      // Each link has its own way to say "nothing in the log is under it": the two can differ (a row
+      // inside the key, folded onto an earlier commit, whose view was pinned before any write).
+      const foldPreRun = under === -1;
+      const viewPreRun = seen !== undefined && seen.before < 0;
+      if (foldPreRun) foldedOnPreRun = idx;
+      if (viewPreRun) viewsOfPreRun.push(idx);
+      if (seen !== undefined && seen.during.length > 0) viewNotPlaced = true;
       moments.push({
         kind: 'write',
         commitIdx: idx,
@@ -164,7 +202,11 @@ export function keyTimeline(
         stageId: bundle.stageId,
         stageName: bundle.stage,
         ...(entry !== undefined && { verb: entry.verb }),
-        ...(under !== undefined && (under < 0 ? { builtOnPreRun: true as const } : { builtOnWriteIdx: under })),
+        ...(under !== undefined && under >= 0 && { builtOnWriteIdx: under }),
+        ...(foldPreRun && { builtOnPreRun: true as const }),
+        ...(seen !== undefined && seen.before >= 0 && { builtOnViewIdx: seen.before }),
+        ...(viewPreRun && { builtOnViewPreRun: true as const }),
+        ...(seen !== undefined && seen.during.length > 0 && { orViewIdxs: [...seen.during] }),
       });
     }
   }
@@ -174,7 +216,11 @@ export function keyTimeline(
   if (nested.length > 0) notes.push(nestedRowsNote(normalisedKey, nested));
   const merged = mergedWrites(commitLog, normalisedKey, writes);
   if (merged.length > 0) notes.push(partialWriteNote(normalisedKey, merged));
-  if (restsOnPreRun) notes.push(fromInitialStateNote(normalisedKey));
+  // One note per link, each in its own words: a fold onto the pre-run value says the value may be
+  // partial; a row built on a view of it is a whole write whose origin the log cannot see.
+  if (foldedOnPreRun !== undefined) notes.push(fromInitialStateNote(normalisedKey, foldedOnPreRun));
+  if (viewsOfPreRun.length > 0) notes.push(preRunViewNote(normalisedKey, viewsOfPreRun));
+  if (viewNotPlaced) notes.push(viewNotPlacedNote());
   if (concurrentReads > 0) notes.push(concurrentReadsNote(concurrentReads));
   return { ...base, moments, notes };
 }

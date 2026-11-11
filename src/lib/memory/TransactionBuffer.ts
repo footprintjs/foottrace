@@ -66,7 +66,7 @@
 import { putOwn } from '../capture/ownData.js';
 import { type Family, type Lossy, type Member, type Rows, addressDepthOf, lossyFamilies } from './admission.js';
 import { type OpVerb, type Survivor, emitInFamilyOrder, groupIntoFamilies, pushValueRow } from './deltaEncoding.js';
-import { hardWriteCovers } from './hardWriteCoverage.js';
+import { hardWriteCovers, viewMark } from './hardWriteCoverage.js';
 import { relation } from './keyPaths.js';
 import {
   adopt,
@@ -813,8 +813,9 @@ export class TransactionBuffer {
       const { path, segments, verbs, before } = s;
       const prov = provenance(s.readKeys, s.readAttempts, s.readAttemptsOmitted);
       if ((byRoot.get(rootOf.get(path) as string) as Survivor[]).length > 1) {
-        // Rule 3 — one coherent tree: every member a set of its value.
-        trace.push({ path, verb: 'set', ...prov });
+        // Rule 3 — one coherent tree: every member a set of its value. A member no hard write owns
+        // still holds what was there, and its row says so (`TraceEntry.builtOnView`).
+        trace.push({ path, verb: 'set', ...prov, ...viewMark(this.hardWriteKeys, segments) });
         _set(overwrite, segments, structuredClone(fullValueAt(segments)));
         return;
       }
@@ -897,8 +898,14 @@ export class TransactionBuffer {
         root = m;
         continue;
       }
-      if (!this.changedSinceBase(m.path.split(DELIM))) continue;
-      rows.trace.push({ path: m.path, verb: 'set', ...provenance(m.readKeys, m.readAttempts, m.readAttemptsOmitted) });
+      const segments = m.path.split(DELIM);
+      if (!this.changedSinceBase(segments)) continue;
+      rows.trace.push({
+        path: m.path,
+        verb: 'set',
+        ...provenance(m.readKeys, m.readAttempts, m.readAttemptsOmitted),
+        ...viewMark(this.hardWriteKeys, segments),
+      });
       changed++;
     }
     const after = _get(this.workingCopy, family.rootSegments);
@@ -912,6 +919,7 @@ export class TransactionBuffer {
         after,
         provenance(root.readKeys, root.readAttempts, root.readAttemptsOmitted),
         this.markedBelow(family.root),
+        viewMark(this.hardWriteKeys, family.rootSegments),
       );
       return;
     }
@@ -919,6 +927,7 @@ export class TransactionBuffer {
       path: family.root,
       verb: 'set',
       ...provenance(root.readKeys, root.readAttempts, root.readAttemptsOmitted),
+      ...viewMark(this.hardWriteKeys, family.rootSegments),
     });
     // The clone the check took (`admission.ts · foldsBack`), when it took one.
     _set(rows.overwrite, family.rootSegments, family.held !== undefined ? family.held.value : structuredClone(after));

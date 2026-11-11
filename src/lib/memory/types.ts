@@ -61,6 +61,26 @@ export interface TraceEntry {
    * log may contain delta-mode bundles.
    */
   verb: 'set' | 'merge' | 'append' | 'delete';
+  /**
+   * Present (`true`) only on a `set` row that the WRITER made out of writes that only ADDED to the
+   * path. The step merged into the path or wrote paths inside it, and the row holds the whole value
+   * because compact rows could not: the `'delta'` encoding does it when rows of one commit overlap,
+   * and either encoding does it for rows that would not fold back to what the step read. The value is
+   * what the path held in the step's VIEW (the state it pinned at its first touch) with the step's
+   * own writes folded in.
+   *
+   * WHY IT IS SAID. The row says `set`, and a `set` replaces: a reader that takes it at its word ends
+   * its walk here, and the steps whose writes are still in the value are left out with no note. The
+   * writer is the only one who knows the value was built on what was there, so it says so, and the
+   * commit counts as having READ this path from its view: a reader follows that read like any other
+   * (`memory/builtOn.ts · readFromView`), dated by the moment the view was pinned
+   * (`CommitBundle.viewAt` of the commit that carries the row).
+   *
+   * ABSENT on a `set` the step made itself (it set or deleted the path, or a container around it),
+   * so such a row keeps its bytes. Never on another verb: a `merge`, an `append` and a row inside a
+   * key say by themselves that they added.
+   */
+  builtOnView?: true;
 }
 
 /**
@@ -167,6 +187,25 @@ export interface CommitBundle {
    * ABSENT with `beganAt` present: every read of the step saw state as it stood at `beganAt`.
    */
   sawUntil?: number;
+  /**
+   * How many commits the log held when the step's VIEW of state was pinned — stamped by the writer
+   * (`RecordFrame`) on a bundle that holds a `set` row it built on that view
+   * (`TraceEntry.builtOnView`), and only when another step committed between that moment and this
+   * commit. It DATES THOSE ROWS: what such a row holds of its path is state as it stood at `viewAt`,
+   * with the step's own writes folded in. ABSENT on a bundle with such a row: nothing was committed
+   * since the view was pinned, so the view was the state just before this commit. Never on a bundle
+   * without such a row.
+   *
+   * WHY A STAMP OF ITS OWN, beside `beganAt` / `sawUntil`. Those two date the READS of the step's
+   * code, and they sit on its first bundle. The view is pinned by the frame's first touch of state,
+   * which may be a write, and every commit of a step has a view of its own. The first form of this
+   * field folded the pin into the read window. Two things went wrong: a read the step made later was
+   * dated as if it could have seen older writes (a certain source became a possible one), and a
+   * row's own source was only "possible" whenever the step had looked at state twice. Said on its
+   * own, a row has one exact source and the stamps of the reads are what they were. (Found by the
+   * second reader of this change.)
+   */
+  viewAt?: number;
 }
 
 /** The continuation a bundle records — see {@link CommitBundle.phase}. */

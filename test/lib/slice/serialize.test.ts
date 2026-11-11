@@ -33,6 +33,7 @@ import {
   sliceForKey,
   sliceToJSON,
 } from '../../../src/lib/slice/index.js';
+import type { KeyMoment } from '../../../src/lib/slice/types.js';
 
 function commit(stageId: string, runtimeStageId: string, keysWritten: string[], idx: number): CommitBundle {
   return {
@@ -394,5 +395,64 @@ describe('formatTimeline', () => {
   it('the timeline is plain JSON by construction — stringify is safe and lossless', () => {
     const timeline = keyTimeline(log, 'k', reads);
     expect(JSON.parse(JSON.stringify(timeline))).toEqual(timeline);
+  });
+
+  // A write moment can carry two links, and each has its own fields (`KeyMoment`): the FOLD
+  // (`builtOnWriteIdx`, or `builtOnPreRun`) and the VIEW of a row the writer built on it
+  // (`builtOnViewIdx`, `builtOnViewPreRun`, and `orViewIdxs` where the view cannot be placed). The line
+  // says each link in its own words, so a reader of the text can tell "added to" from "built on".
+  // Every row is a hand-made moment: the text is a function of the fields and of nothing else.
+  it.each<[string, Partial<KeyMoment>, string]>([
+    ['no link: the write replaced the value', {}, ''],
+    ['a fold onto a commit', { builtOnWriteIdx: 3 }, ' (added to the value of commit 3)'],
+    ['a fold onto the value from before the run', { builtOnPreRun: true }, ' (added to the value from BEFORE the run)'],
+    ['a view that held a commit', { builtOnViewIdx: 2 }, " (built on the value its step's view held: commit 2)"],
+    [
+      'a view that held no write',
+      { builtOnViewPreRun: true },
+      " (built on the value its step's view held: the value from BEFORE the run)",
+    ],
+    [
+      'a view that cannot be placed: the write before it, or one of two others',
+      { builtOnViewIdx: 0, orViewIdxs: [1, 2] },
+      " (built on the value its step's view held: commit 0 or commit 1 or commit 2)",
+    ],
+    [
+      'a view that cannot be placed, with no write before it',
+      { builtOnViewPreRun: true, orViewIdxs: [0, 1] },
+      " (built on the value its step's view held: the value from BEFORE the run or commit 0 or commit 1)",
+    ],
+    [
+      'a fold onto a commit and a view that held another',
+      { builtOnWriteIdx: 3, builtOnViewIdx: 1 },
+      " (added to the value of commit 3; built on the value its step's view held: commit 1)",
+    ],
+    [
+      'a fold onto a commit and a view that held no write',
+      { builtOnWriteIdx: 3, builtOnViewPreRun: true },
+      " (added to the value of commit 3; built on the value its step's view held: the value from BEFORE the run)",
+    ],
+    [
+      'a fold onto a commit and a view that cannot be placed',
+      { builtOnWriteIdx: 3, builtOnViewIdx: 0, orViewIdxs: [1, 2] },
+      " (added to the value of commit 3; built on the value its step's view held: commit 0 or commit 1 or commit 2)",
+    ],
+    [
+      'a fold onto the value from before the run and a view that held no write',
+      { builtOnPreRun: true, builtOnViewPreRun: true },
+      " (added to the value from BEFORE the run; built on the value its step's view held: the value from BEFORE the run)",
+    ],
+  ])('the words for what a write was built on: %s', (_name, links, words) => {
+    const moment: KeyMoment = {
+      kind: 'write',
+      commitIdx: 4,
+      runtimeStageId: 'fill#4',
+      stageId: 'fill',
+      stageName: 'fill',
+      verb: 'set',
+      ...links,
+    };
+    const out = formatTimeline({ key: 'a', moments: [moment], keysReadKind: 'test', notes: [] });
+    expect(out.split('\n')[1]).toBe(`@4 write set — fill (fill#4)${words}`);
   });
 });

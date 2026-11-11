@@ -227,6 +227,7 @@ const SHIPPED_1_0_3: Record<Exclude<keyof typeof entries, './cause' | './prov' |
     'ValueBasisOptions',
     'ValueWithBasis',
     'VariableSlice',
+    'ViewOverlap',
     'WriterBasis',
     'WriterWithBasis',
     'applySmartMerge',

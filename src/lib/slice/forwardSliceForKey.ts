@@ -47,6 +47,18 @@
  * `basis: 'stage'` and the slice carries a `'conservative-fed-edges'` note.
  * A conservative edge is never presented as an exact one.
  *
+ * ### LAW — a row built on the view is a reader for itself alone
+ *
+ * A `set` row the WRITER built on its step's view (`TraceEntry.builtOnView`,
+ * `memory/builtOn.ts`) holds what the view held of the key. Its commit is a
+ * reader of that value, dated by the moment its view was pinned
+ * (`CommitBundle.viewAt`), and the one write it feeds is that row
+ * (`basis: 'built-on-view'`, exact: the row says it). No read by the step's
+ * code is behind it at this commit, so the read is marked
+ * (`ForwardRead.builtOnView`) and nothing else the commit wrote is fed by
+ * it. Where the step's code ALSO read this value at this commit, that read
+ * keeps the edge and the basis it always had.
+ *
  * Budgets mirror `causalChain`'s (maxDepth 20, maxNodes 100) and a cut is
  * STATED — `root.truncated` plus a `'truncated'` note.
  *
@@ -54,6 +66,7 @@
  */
 
 import type { KeysReadLookup } from '../memory/backtrack.js';
+import { isViewRow } from '../memory/builtOn.js';
 import { relation } from '../memory/keyPaths.js';
 import type { CommitBundle } from '../memory/types.js';
 import { DELIM } from '../memory/utils.js';
@@ -75,6 +88,7 @@ import {
   readsNotRecordedNote,
   truncatedNote,
   unknownKeyNote,
+  viewNotPlacedNote,
   writeEntry,
   writtenPaths,
 } from './keyIndex.js';
@@ -210,6 +224,7 @@ export function forwardSliceForKey(
   let truncatedByNodes = false;
   let anyConservative = false;
   let concurrentReads = 0;
+  let viewNotPlaced = false;
 
   const anchorIdx = lastIndexBefore(index.writesOf(normalisedKey), options?.before);
   const root = makeNode(commitLog, index, normalisedKey, anchorIdx, 0);
@@ -229,31 +244,40 @@ export function forwardSliceForKey(
       continue;
     }
 
-    for (const { position: readerIdx, overlap } of readers) {
+    for (const { position: readerIdx, overlap, step, view } of readers) {
       const bundle = commitLog[readerIdx];
-      if (overlap) concurrentReads++;
+      // A commit that holds the value through its view alone is no read by a step: said apart.
+      if (overlap === 'view-not-placed') viewNotPlaced = true;
+      else if (overlap) concurrentReads++;
       node.reads.push({
         runtimeStageId: bundle.runtimeStageId,
         stageId: bundle.stageId,
         stageName: bundle.stage,
         commitIdx: readerIdx,
         ...(overlap && { overlap }),
+        ...(!step && { builtOnView: true as const }),
       });
+      const onKey = (name: string): boolean => relation(name, node.key) !== undefined;
+      // The rows of this commit that the writer built on the view (see LAW — a row built on the view).
+      const viewRows = view ? new Set(bundle.trace.filter(isViewRow).map((row) => row.path)) : undefined;
 
       // The reader IS the writer of everything it committed — each written
       // path is a candidate `fed` edge.
       for (const path of writtenPaths(bundle)) {
         const entry = lastTraceEntry(bundle, path);
-        let basis: FedBasis;
-        if (entry?.readKeys !== undefined) {
-          // EXACT both ways: recorded provenance can include or EXCLUDE. A read
-          // on the key, inside it or around it is a read of its value.
-          if (!entry.readKeys.some((read) => relation(read, node.key) !== undefined)) continue;
-          basis = 'per-write';
-        } else {
-          basis = 'stage';
-          anyConservative = true;
-        }
+        // A read by the step's own code comes first and keeps the basis it always had. EXACT both
+        // ways: recorded provenance can include or EXCLUDE. A read on the key, inside it or around it
+        // is a read of its value.
+        const byRead: FedBasis | undefined = !step
+          ? undefined
+          : entry?.readKeys === undefined
+          ? 'stage'
+          : entry.readKeys.some(onKey)
+          ? 'per-write'
+          : undefined;
+        const basis = byRead ?? (viewRows?.has(path) && onKey(path) ? 'built-on-view' : undefined);
+        if (basis === undefined) continue;
+        if (basis === 'stage') anyConservative = true;
 
         const id = nodeKey(readerIdx, path);
         let child = nodes.get(id);
@@ -299,6 +323,7 @@ export function forwardSliceForKey(
   for (const [key, commits] of merged) notes.push(partialWriteNote(key, ascending(commits)));
   if (anyConservative) notes.push(conservativeEdgesNote(normalisedKey));
   if (concurrentReads > 0) notes.push(concurrentReadsNote(concurrentReads));
+  if (viewNotPlaced) notes.push(viewNotPlacedNote());
   if (truncatedByDepth || truncatedByNodes) {
     root.truncated = { byDepth: truncatedByDepth, byNodes: truncatedByNodes };
     notes.push(truncatedNote(truncatedByDepth, truncatedByNodes));

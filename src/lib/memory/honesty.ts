@@ -68,7 +68,7 @@ export const HONESTY_CODES = /* @__PURE__ */ Object.freeze({
   'pre-run-origin':
     'The value being followed was absent or already there before the first write this log can see (initial state, frozen run input or a closure), so who put it there is outside the commit log.',
   'concurrent-write':
-    'A step read a key that another step committed while it was running, and it looked at state again after that commit (steps side by side), so the record cannot say which value the read saw: each writer shown for the key is a possible source, not a certain one, and the real source is among them or is the value from before the run when the key is listed as read from there.',
+    "A step read a key that another step committed while it was running, and it looked at state again after that commit (steps side by side), or the array handed over does not show where the step's reads sit among its commits, so the record cannot say which value the read saw: each writer shown for the key is a possible source, not a certain one, and the real source is among them or is the value from before the run when the key is listed as read from there.",
   'reads-not-recorded':
     "This log carries no recorded read at all (the readTracking: 'off' signature), so 'nothing read this value' is unknowable here, not true.",
   'unknown-key':
@@ -89,12 +89,21 @@ export const HONESTY_CODES = /* @__PURE__ */ Object.freeze({
     'This fed edge is conservative: the downstream write carries no per-write read provenance (the writeProvenance dial was off, or the log is mixed), so all that is known is that its stage read this key and wrote that path in some order, and the edge may not be real.',
   // ── why a source of a read is only possible — `CausalEdge.overlap`, `ForwardRead.overlap` (readWindow.ts: ReadOverlap) ─
   'replaced-while-running':
-    'This write is the value the key held when the reading step began, and another step committed the key, in whole or in part, before the reading step last looked at state, so the step may have read that later value instead: this is a possible source, not a certain one.',
+    'This write is the value the key held when the reading step began, and another step committed the key, in whole or in part, before the reading step last looked at state (or the array handed over does not show whether one did), so the step may have read that later value instead: this is a possible source, not a certain one.',
   'written-while-running':
-    'This write was committed while the reading step was running and before the step last looked at state, so the step may have read the key before or after it: this is a possible source, not a certain one.',
+    'This write was committed while the reading step was running and before the step last looked at state (or the array handed over does not show whether it was), so the step may have read the key before or after it: this is a possible source, not a certain one.',
+  // ── why a source of a set row built on a view is only possible — `CausalEdge.overlap`, `ForwardRead.overlap`, a slice note (builtOn.ts: ViewOverlap) ─
+  'view-not-placed':
+    "The array handed to the reader does not show where the view of a set row the writer built on it (TraceEntry.builtOnView) sits among its commits (bundles around that commit say no index, the array holds several logs, or the bundle's viewAt cannot be one), so each write the view could have held is named as a possible source of the row, not a certain one: the real one is among them, or is the value from before the run where that is said.",
   // ── a write that did not replace a value — a slice note, and `CausalEdge.builtOn` (builtOn.ts) ─
   'partial-write':
     "A write this answer rests on did not replace the key's value but merged into it or appended to it, so the value is made of that write and of what the earlier writes had left: a walk back goes on to the commit that wrote the key before it (an edge marked builtOn, which no read by the step is behind), and a reader after it read all of them.",
+  // ── a set row the writer built on its step's view — `ForwardEdge.basis`, `ForwardRead.builtOnView`, `CausalEdge.builtOn` (builtOn.ts) ─
+  'built-on-view':
+    "No read by the step's code is behind this link, and the record's own row says it: the write is a set row the writer built on its step's view (TraceEntry.builtOnView), so it holds what the view held of the key with the step's own writes folded in, and the write the view held is under it (one of the writes it could have held, where the record does not show where that view sits).",
+  // ── such a row, when its view held no write of the key — a timeline note, and `CausalNode.preRunView` (builtOn.ts) ─
+  'pre-run-view':
+    "A set row the writer built on its step's view (TraceEntry.builtOnView) holds the key, in whole or in part, as that view held it, and no commit had written the key before the view was pinned (or before the earliest moment it could have been pinned, where the record does not show the moment), so what the row holds beyond the step's own writes was absent or came from the state before the run: who put it there is outside the commit log, and no read by the step's code is behind it.",
   // ── how an element's birth was attributed — `ElementBirth.basis` (slice/: AttributionBasis) ─
   'append-verb':
     "The engine recorded the element in an append row's tail (how commitValues: 'delta' records an array's growth), so the commit that added it is known exactly, not inferred.",
@@ -123,7 +132,7 @@ export const HONESTY_CODES = /* @__PURE__ */ Object.freeze({
   deleted:
     "The key's last write in the range asked about left it absent (a delete of the key or of a container around it, or a set of a container that no longer holds it), so the answer is undefined because the record says the key was gone at that point, not because nothing was recorded.",
   'from-initial-state':
-    "No set or delete of the key, or of a container around it, is in the range asked about, so the answer rests on the value the key had before the run: folded from the initialState passed in when there was one, and otherwise only what the log's merges, appends and nested writes added to it (or nothing), which is partial for a key seeded before the run.",
+    "No set or delete of the key, or of a container around it, comes before the point this is said of (the end of the range asked about, or the write a note or a node names), so the value there rests on the value the key had before the run: folded from the initialState passed in when there was one, and otherwise only what the log's merges, appends and nested writes added to it (or nothing), which is partial for a key seeded before the run.",
 } satisfies Record<string, string>);
 
 /** Any code in {@link HONESTY_CODES} — the key a reader looks an explanation up by. */

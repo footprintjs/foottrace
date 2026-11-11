@@ -1,3 +1,4 @@
+import { viewStampFits } from '../memory/builtOn.js';
 import { admitStamps } from '../memory/readWindow.js';
 import { readAttemptWindow } from '../evidence/readAttempts.js';
 import { parseAttemptId } from '../ids/attemptId.js';
@@ -117,12 +118,18 @@ export function bundleOf(value: unknown, after: number, budget: { left: number }
     const readAttemptsOmitted = window.omitted;
     const readAttempts = rawAttempts === undefined ? undefined : names(rawAttempts, 128, true, window.expectedLength);
     if (readAttempts?.some((id) => !parseAttemptId(id))) throw new RecordRefusal();
+    // The writer's mark on a `set` row it built on the step's view. Kept, never dropped: without it the
+    // row reads as a replacement and the walk leaves out every step whose write is still in the value.
+    // A value that cannot be the mark, or the mark on another verb, refuses the bundle.
+    const builtOnView = recordOwn(t, 'builtOnView');
+    if (builtOnView !== undefined && (builtOnView !== true || verb !== 'set')) throw new RecordRefusal();
     return {
       path,
       verb: verb as 'set',
       ...(readKeys === undefined ? {} : { readKeys: names(readKeys, 128, true) }),
       ...(readAttempts?.length ? { readAttempts } : {}),
       ...(readAttemptsOmitted === undefined ? {} : { readAttemptsOmitted }),
+      ...(builtOnView === true ? { builtOnView: true as const } : {}),
     };
   });
   spend(
@@ -144,9 +151,17 @@ export function bundleOf(value: unknown, after: number, budget: { left: number }
   const untracked = recordOwn(value, 'untrackedSources'),
     phase = recordOwn(value, 'phase');
   // The walk dates this step's reads by its stamps, read against each bundle's own `idx`. So the copy keeps
-  // both, and stamps that cannot be stamps refuse the record (`memory/readWindow.ts · admitStamps`).
-  const placed = admitStamps(recordOwn(value, 'beganAt'), recordOwn(value, 'sawUntil'), recordOwn(value, 'idx'), after);
-  if (!placed) throw new RecordRefusal();
+  // both, and stamps that cannot be stamps refuse the record (`memory/readWindow.ts · admitStamps`). The
+  // same for `viewAt`, which dates the rows the writer built on the step's view: it must fit the index,
+  // and the bundle must hold such a row.
+  const placed = admitStamps(
+    recordOwn(value, 'beganAt'),
+    recordOwn(value, 'sawUntil'),
+    recordOwn(value, 'idx'),
+    after,
+    recordOwn(value, 'viewAt'),
+  );
+  if (!placed || !viewStampFits(placed, trace)) throw new RecordRefusal();
   spend(budget, redactedPaths.length + (untracked === undefined ? 0 : recordList(untracked, 128).length));
   return {
     ...placed,

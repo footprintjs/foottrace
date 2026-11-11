@@ -1,7 +1,7 @@
 /**
  * honesty.ts — the ONE vocabulary for what a reader cannot see (F4a).
  *
- *   unit      the registry is frozen and closed, holds exactly the twenty-six codes, and every explanation is
+ *   unit      the registry is frozen and closed, holds exactly the twenty-nine codes, and every explanation is
  *             ONE sentence
  *   boundary  the TYPES, asked of the real compiler: a code the registry does not hold FAILS TO COMPILE; the
  *             six public unions are exactly the members they were (they did not widen); the sentences are
@@ -40,6 +40,23 @@
  * 1.1.0 added ONE code, `'unread-entry'` — a codeless signal, like `'log-gap'`: an entry a sink stored that
  * `readStoredRecord` could not read (`StoredRecord.unread`). The registry holds TWENTY-TWO; no union widened and
  * no runtime string the readers wrote before changed.
+ *
+ * A `set` row the writer built on its step's view added THREE codes, one for each thing a reader can say of the
+ * view. `'built-on-view'` (`FedBasis`, and the mark of a causal edge): the write the view held is under the row.
+ * `'pre-run-view'` (a slice note, and the code of `CausalNode.preRunView`): the view held no write of the key,
+ * so that part of the row came from before the run. `'view-not-placed'` (`ViewOverlap`: a causal edge's and a
+ * forward read's `overlap`, and a slice note): the array does not show where the view sits, so each write it
+ * could have held is a possible source. WHY that last one does not borrow a read's two overlap codes: they say
+ * a step was running while the key was written, and no step read the key here.
+ * The registry holds TWENTY-NINE codes (nine slice notes) and `Today` gains both notes. The three sentences of
+ * the read window (`'concurrent-write'` and the two marks) name a second reason beside steps side by side: an
+ * array that does not show where the step's reads sit, where a step that looked at state ONCE has possible
+ * sources too. ONE more earlier
+ * sentence was reworded, on purpose: `'from-initial-state'` is said of a point (the end of a range, or one
+ * write), because a timeline that names a write folded onto the pre-run value can hold a later `set`, and "no
+ * set in the range asked about" was then false of it. WHY the view has a code of its own and does not borrow
+ * that one: the fold's code says the value may be partial; a marked `set` is a whole write of its path, and only
+ * where part of it came from is outside the log.
  */
 import { join, resolve } from 'path';
 import ts from 'typescript';
@@ -49,12 +66,17 @@ import { HONESTY_CODES } from '../../../src/lib/memory/honesty';
 import { LOG_PLACEHOLDER } from '../../../src/lib/memory/placeholders';
 import type { CommitBundle } from '../../../src/lib/memory/types';
 import {
+  concurrentReadsNote,
+  concurrentWriteNote,
   conservativeEdgesNote,
+  fromInitialStateNote,
   nestedRowsNote,
   preRunOriginNote,
+  preRunViewNote,
   readsNotRecordedNote,
   truncatedNote,
   unknownKeyNote,
+  viewNotPlacedNote,
 } from '../../../src/lib/slice/keyIndex';
 import {
   arrayProvenance,
@@ -71,16 +93,22 @@ const REPO = resolve(__dirname, '../../..');
 /** The codes each declared vocabulary speaks, and the signals that carry no code field of their own. */
 /** The five slice notes the library built at 9.31.0 — the bytes pinned below. */
 const SLICE_CODES_9_31 = ['conservative-fed-edges', 'pre-run-origin', 'reads-not-recorded', 'unknown-key', 'truncated'];
-/** Every slice note today: the five, F3's `'nested-rows'`, the read window's `'concurrent-write'`, and the built-on rule's `'partial-write'`. */
-const SLICE_CODES = [...SLICE_CODES_9_31, 'nested-rows', 'concurrent-write', 'partial-write'];
+/**
+ * Every slice note today: the five, F3's `'nested-rows'`, the read window's `'concurrent-write'`, the built-on
+ * rule's `'partial-write'`, and `'pre-run-view'` for a row the writer built on a view that held no write.
+ */
+const SLICE_CODES = [...SLICE_CODES_9_31, 'nested-rows', 'concurrent-write', 'partial-write', 'pre-run-view'];
 const MISSING_REASONS = ['empty-log', 'never-written', 'not-an-array'];
-const FED_BASES = ['per-write', 'stage'];
+/** The two a read gives, and the one a `set` row the writer built on its step's view gives (`TraceEntry.builtOnView`). */
+const FED_BASES = ['per-write', 'stage', 'built-on-view'];
 const ATTRIBUTION_BASES = ['append-verb', 'prefix-inference', 'whole-value'];
 const FOLD_BASES = ['initial+log', 'log-only'];
 /** F4b (9.33.0): the two codes only a key's value basis speaks (`ValueBasis` — the rest of it is shared). */
 const VALUE_BASES = ['deleted', 'from-initial-state'];
 /** The read window: why a source of a read is only possible (`readWindow.ts · ReadOverlap`). */
 const READ_OVERLAPS = ['replaced-while-running', 'written-while-running'];
+/** Why a source of a `set` row built on a view is only possible (`builtOn.ts · ViewOverlap`). Also a slice note. */
+const VIEW_OVERLAPS = ['view-not-placed'];
 const SIGNALS_WITHOUT_A_CODE_FIELD = ['log-gap', 'incomplete-sources', 'redacted', 'unread-entry'];
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -103,7 +131,7 @@ describe('HONESTY_CODES — unit', () => {
     }).toThrow(TypeError);
   });
 
-  it('holds exactly twenty-six codes — eight slice notes, three missing reasons, two fed-edge and three birth bases, two fold bases, two value bases, two read overlaps, four codeless signals', () => {
+  it('holds exactly twenty-nine codes — nine slice notes, three missing reasons, three fed-edge and three birth bases, two fold bases, two value bases, two read overlaps, one view overlap, four codeless signals', () => {
     const all = [
       ...SLICE_CODES,
       ...MISSING_REASONS,
@@ -112,9 +140,10 @@ describe('HONESTY_CODES — unit', () => {
       ...FOLD_BASES,
       ...VALUE_BASES,
       ...READ_OVERLAPS,
+      ...VIEW_OVERLAPS,
       ...SIGNALS_WITHOUT_A_CODE_FIELD,
     ];
-    expect(all).toHaveLength(26);
+    expect(all).toHaveLength(29);
     expect(Object.keys(HONESTY_CODES).sort()).toEqual(all.sort());
   });
 
@@ -153,18 +182,20 @@ const HEADER = [
   "import { HONESTY_CODES } from './honesty.js';",
   "import type { HonestyCode, RegisteredCode } from './honesty.js';",
   "import type { ReadOverlap } from './readWindow.js';",
-  "type Today = 'conservative-fed-edges' | 'concurrent-write' | 'nested-rows' | 'partial-write' | 'pre-run-origin' | 'reads-not-recorded' | 'unknown-key' | 'truncated' | 'redacted' | 'from-initial-state';",
+  "import type { ViewOverlap } from './builtOn.js';",
+  "type Today = 'conservative-fed-edges' | 'concurrent-write' | 'nested-rows' | 'partial-write' | 'pre-run-origin' | 'reads-not-recorded' | 'unknown-key' | 'truncated' | 'redacted' | 'from-initial-state' | 'pre-run-view' | 'view-not-placed';",
   "type TodayBasis = 'initial+log' | 'log-only';",
   "type TodayMissing = 'empty-log' | 'never-written';",
   "type TodayProvenance = 'empty-log' | 'never-written' | 'not-an-array';",
-  "type TodayFed = 'per-write' | 'stage';",
+  "type TodayFed = 'per-write' | 'stage' | 'built-on-view';",
   "type TodayAttribution = 'append-verb' | 'prefix-inference' | 'whole-value';",
   "type TodayValue = 'never-written' | 'deleted' | 'nested-rows' | 'from-initial-state' | 'redacted';",
   "type TodayWriter = 'never-written' | 'nested-rows' | 'redacted';",
   "type TodayOverlap = 'replaced-while-running' | 'written-while-running';",
+  "type TodayViewOverlap = 'view-not-placed';",
   // every declared vocabulary, plus the four codes a field carries instead of a `code` value
   'type Declared = HonestyNoteCode | MissingSliceReason | MissingProvenanceReason | FedBasis | AttributionBasis | FoldBasis | ' +
-    'ValueBasis | WriterBasis | ReadOverlap | ' +
+    'ValueBasis | WriterBasis | ReadOverlap | ViewOverlap | ' +
     "'log-gap' | 'incomplete-sources' | 'redacted' | 'unread-entry';",
 ];
 
@@ -197,6 +228,8 @@ const CASES: Record<string, string> = {
     'const e6: TodayWriter = null as unknown as WriterBasis; const f6: WriterBasis = null as unknown as TodayWriter;',
   overlapUnionIsToday:
     'const e7: TodayOverlap = null as unknown as ReadOverlap; const f7: ReadOverlap = null as unknown as TodayOverlap;',
+  viewOverlapUnionIsToday:
+    'const e8: TodayViewOverlap = null as unknown as ViewOverlap; const f8: ViewOverlap = null as unknown as TodayViewOverlap;',
   // … and did NOT widen to every registered code
   sliceUnionRefusesALogGap: "const g: HonestyNoteCode = 'log-gap';",
   sliceUnionRefusesABasis: "const h: HonestyNoteCode = 'log-only';",
@@ -277,11 +310,12 @@ describe('the types — asked of the real compiler', () => {
     expect(byCase.get('lookupByAnUnregisteredCodeFails')).toEqual(['TS7053']);
   });
 
-  it("the nine public unions are exactly today's members: mutually assignable with the literal unions, and not widened", () => {
+  it("the ten public unions are exactly today's members: mutually assignable with the literal unions, and not widened", () => {
     for (const name of [
       'valueUnionIsToday',
       'writerUnionIsToday',
       'overlapUnionIsToday',
+      'viewOverlapUnionIsToday',
       'sliceUnionIsToday',
       'foldUnionIsToday',
       'missingUnionIsToday',
@@ -394,6 +428,68 @@ describe('the five slice notes — the bytes the library built at 9.31.0', () =>
   });
 });
 
+describe("the two notes of a write that rests on the value from before the run — 'from-initial-state' and 'pre-run-view'", () => {
+  it('a backward slice says the fold of the VALUE at its point; a timeline names the ONE write it is said of', () => {
+    expect(fromInitialStateNote('cfg')).toEqual({
+      code: 'from-initial-state',
+      detail:
+        "'cfg' has no write of its whole value in range — its value rests on what it held before the run, which the commit log cannot see, so the writes here may be only part of it.",
+    });
+    expect(fromInitialStateNote(['cfg', 'inner'].join('\u001F'), 3)).toEqual({
+      code: 'from-initial-state',
+      detail:
+        "'cfg › inner' was first written at commit 3, by a write that did not replace it — the value there rests on what the key held before the run, which the commit log cannot see, so the writes listed may be only part of it until one replaces the key.",
+    });
+  });
+
+  it('a row built on a view that held no write has a note of its own: the commits, the overflow, and no word of a fold', () => {
+    const one = preRunViewNote('cfg', [4]);
+    expect(one.code).toBe('pre-run-view');
+    expect(Object.keys(HONESTY_CODES)).toContain(one.code);
+    expect(one.detail).toBe(
+      "'cfg' at commit 4 is held, in whole or in part, in a set row the writer built on its step's view, and that view held no write of the key (or may have held none, where the moment lists other writes it could have held) — what the row holds beyond the step's own writes was absent or came from before the run, which the commit log cannot see.",
+    );
+    const many = preRunViewNote('cfg', [1, 2, 3, 4, 5, 6, 7]);
+    expect(many.detail.startsWith("'cfg' at commits 1, 2, 3, 4, 5 (+2 more) is held, in whole or in part, in ")).toBe(
+      true,
+    );
+    // The two notes never share words: the fold's says the value may be only part of what the key
+    // held, and that no write of the whole value is under it. The view's says neither.
+    expect(one.detail).not.toMatch(/no write of its whole value|only part of it/);
+  });
+});
+
+describe("the read window's note — 'concurrent-write', from a forward answer and from a backward slice", () => {
+  it('names both reasons a read has only possible sources: a second look, or an array that does not place the step', () => {
+    expect(concurrentReadsNote(1)).toEqual({
+      code: 'concurrent-write',
+      detail:
+        '1 read was made by a step that looked at state again after another step committed the key (steps side by side), or by a step the array handed over does not place among its commits. Such a step may have read this value or another one written in that time, so it is a possible reader, not a certain one.',
+    });
+    expect(concurrentWriteNote(2)).toEqual({
+      code: 'concurrent-write',
+      detail:
+        '2 reads were made by a step that looked at state again after another step committed the same key (steps side by side), or by a step the array handed over does not place among its commits. The record cannot say which value such a read saw, so every writer shown for that key is a possible source, not a certain one; the real source is among them, or is the value from before the run when the key is listed as read from there.',
+    });
+  });
+});
+
+describe("a view the array does not place — 'view-not-placed'", () => {
+  it('its note is one sentence for all three queries, with no count and no word of a step that ran', () => {
+    const note = viewNotPlacedNote();
+    expect(note).toEqual({
+      code: 'view-not-placed',
+      detail:
+        "a set row the writer built on a step's view is listed with possible sources only — the array handed over does not show where that view sits among its commits (bundles around the commit say no index, the array holds several logs, or the stamp cannot be one), so each write the view could have held is named and none is certain.",
+    });
+    expect(Object.keys(HONESTY_CODES)).toContain(note.code);
+    // A read's words say a step was running while the key was written. No step read the key here.
+    for (const words of [note.detail, HONESTY_CODES['view-not-placed']]) {
+      expect(words).not.toMatch(/looked at state again|while it ran|was running|reading step|side by side/);
+    }
+  });
+});
+
 describe("F3's slice note — 'nested-rows'", () => {
   it('its builder speaks a registered code and names the key by its segments, the commits and the overflow', () => {
     const one = nestedRowsNote('cfg', [1]);
@@ -489,15 +585,23 @@ describe('every code the slice queries and the fold emit is on the registry — 
     for (const reason of emitted) expect(Object.keys(HONESTY_CODES)).toContain(reason);
   });
 
-  it("a fed edge says how it was attributed — 'per-write' with recorded provenance, 'stage' without; both registered", () => {
+  it("a fed edge says how it was attributed — 'per-write' with recorded provenance, 'stage' without, 'built-on-view' for a row the writer built on its step's view; all registered", () => {
     const log = [
       bundle(0),
       bundle(1, { trace: [{ path: 'k1', verb: 'set', readKeys: ['k0'] }] }),
       bundle(2, { trace: [{ path: 'k2', verb: 'set' }] }),
+      // No code of this step read k0. The writer built its `set` of k0 on the step's view, which held k0.
+      bundle(3, { trace: [{ path: 'k0', verb: 'set', builtOnView: true }], overwrite: { k0: 3 } }),
     ];
-    const reads = (id: string) => (id === 's0#0' ? [] : ['k0']);
-    const bases = forwardSliceForKey(log, 'k0', reads).root!.fedEdges.map((edge) => edge.basis);
-    expect(bases).toEqual(['per-write', 'stage']);
+    const reads = (id: string) => (id === 's0#0' || id === 's3#3' ? [] : ['k0']);
+    const root = forwardSliceForKey(log, 'k0', reads, { before: 1 }).root!;
+    const bases = root.fedEdges.map((edge) => edge.basis);
+    expect(bases).toEqual(['per-write', 'stage', 'built-on-view']);
+    expect(root.reads.map((read) => [read.commitIdx, read.builtOnView])).toEqual([
+      [1, undefined],
+      [2, undefined],
+      [3, true],
+    ]);
     for (const basis of bases) expect(Object.keys(HONESTY_CODES)).toContain(basis);
   });
 
