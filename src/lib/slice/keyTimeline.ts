@@ -51,7 +51,7 @@
  * the same timeline can replace the key. BUILT on a view of it
  * (`builtOnViewPreRun`): the row is a whole write of its path, and only
  * where part of it came from is outside the log. The note is
- * `'pre-run-view'`. Neither borrows the other's words (`keyIndex.ts`).
+ * `'pre-run-view'`. Neither borrows the other's words (`notes.ts`).
  *
  * DAG position: memory ← slice. Imports memory/ only (see README.md).
  */
@@ -62,12 +62,15 @@ import { readSourcesOf } from '../memory/readWindow.js';
 import type { CommitBundle } from '../memory/types.js';
 import {
   buildKeyIndex,
-  concurrentReadsNote,
-  fromInitialStateNote,
   hasRecordedReads,
   lastIndexBefore,
   mergedWrites,
   nestedOnlyWrites,
+  writeEntry,
+} from './keyIndex.js';
+import {
+  concurrentReadsNote,
+  fromInitialStateNote,
   nestedRowsNote,
   partialWriteNote,
   preRunOriginNote,
@@ -75,8 +78,7 @@ import {
   viewNotPlacedNote,
   readsNotRecordedNote,
   unknownKeyNote,
-  writeEntry,
-} from './keyIndex.js';
+} from './notes.js';
 import { resolveKeysReadSource } from './keysReadSources.js';
 import { normaliseStateKey } from '../record-paths/codec.js';
 import type { HonestyNote, KeyMoment, KeysReadSource, KeyTimeline, StateKey } from './types.js';

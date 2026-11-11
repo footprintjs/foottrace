@@ -4,8 +4,8 @@
  * `TransactionBuffer` since 9.30.0: the overlap families of rule 3 and the
  * order rows are emitted in (which now also places the admitted record's
  * re-encoded families), the append detection, and the row that carries a
- * value. The verb CHOICE stays in `TransactionBuffer · deltaRows`; nothing
- * here replays the verb law.
+ * value. The verb CHOICE is `deltaRows.ts · deltaRows`; nothing here replays
+ * the verb law.
  */
 
 import type { Rows } from './admission.js';
@@ -21,7 +21,7 @@ export type OpVerb = 'set' | 'merge' | 'delete';
 
 /** A path that passed the net-change filter, with everything the delta
  *  encoder needs to decide its verb — resolved once, then reused by the
- *  overlap-family grouping (`toDeltaPayload` rule 3). */
+ *  overlap-family grouping (`deltaRows` rule 3). */
 export type Survivor = {
   path: string;
   segments: string[];
@@ -74,7 +74,7 @@ export function pushValueRow(
 }
 
 /**
- * Group survivors into OVERLAP FAMILIES (`toDeltaPayload` rule 3): each path's
+ * Group survivors into OVERLAP FAMILIES (`deltaRows` rule 3): each path's
  * family is keyed by its SHALLOWEST surviving ancestor — walking prefixes
  * shallow first means the first hit is that root, and a depth-1 path (the
  * common case) never enters the loop at all. Any two paths sharing a root

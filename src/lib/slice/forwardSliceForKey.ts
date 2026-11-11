@@ -72,8 +72,6 @@ import type { CommitBundle } from '../memory/types.js';
 import { DELIM } from '../memory/utils.js';
 import {
   buildKeyIndex,
-  concurrentReadsNote,
-  conservativeEdgesNote,
   firstIndexAfter,
   hasRecordedReads,
   type KeyIndex,
@@ -81,17 +79,21 @@ import {
   lastTraceEntry,
   mergedWrites,
   nestedOnlyWrites,
+  readersOfLife,
+  writeEntry,
+  writtenPaths,
+} from './keyIndex.js';
+import {
+  concurrentReadsNote,
+  conservativeEdgesNote,
   nestedRowsNote,
   partialWriteNote,
   preRunOriginNote,
-  readersOfLife,
   readsNotRecordedNote,
   truncatedNote,
   unknownKeyNote,
   viewNotPlacedNote,
-  writeEntry,
-  writtenPaths,
-} from './keyIndex.js';
+} from './notes.js';
 import { resolveKeysReadSource } from './keysReadSources.js';
 import { normaliseStateKey } from '../record-paths/codec.js';
 import type { FedBasis, ForwardNode, ForwardSlice, HonestyNote, KeysReadSource, StateKey } from './types.js';
