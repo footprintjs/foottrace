@@ -328,14 +328,22 @@ export function readersOfLife(
     });
 }
 
-/** At least one read a forward answer lists is only possible: the key was written inside the reader's window. */
+/**
+ * At least one read a forward answer lists is only possible: the key was written inside the reader's window.
+ * Two things make a window hold a write, and the sentence names both: the step really looked at state
+ * again after another step committed, or the array does not show where the step's reads sit, so a
+ * write that could lie in the window is taken to (`memory/windowPlacement.ts`). WHY both: the note
+ * named only the first, and for a step that never looked again, in an array with a bundle that says
+ * no index, it stated a second look that did not happen.
+ */
 export function concurrentReadsNote(reads: number): HonestyNote {
   return {
     code: 'concurrent-write',
     detail:
       `${reads} read${reads === 1 ? ' was' : 's were'} made by a step that looked at state again after another ` +
-      'step committed the key (steps side by side). Such a step may have read this value or another one ' +
-      'written in that time, so it is a possible reader, not a certain one.',
+      'step committed the key (steps side by side), or by a step the array handed over does not place among ' +
+      'its commits. Such a step may have read this value or another one written in that time, so it is a ' +
+      'possible reader, not a certain one.',
   };
 }
 
@@ -514,9 +522,10 @@ export function concurrentWriteNote(reads: number): HonestyNote {
     code: 'concurrent-write',
     detail:
       `${reads} read${reads === 1 ? ' was' : 's were'} made by a step that looked at state again after another ` +
-      'step committed the same key (steps side by side). The record cannot say which value such a read saw, ' +
-      'so every writer shown for that key is a possible source, not a certain one; the real source is among ' +
-      'them, or is the value from before the run when the key is listed as read from there.',
+      'step committed the same key (steps side by side), or by a step the array handed over does not place ' +
+      'among its commits. The record cannot say which value such a read saw, so every writer shown for that ' +
+      'key is a possible source, not a certain one; the real source is among them, or is the value from ' +
+      'before the run when the key is listed as read from there.',
   };
 }
 

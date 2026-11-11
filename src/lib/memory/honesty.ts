@@ -68,7 +68,7 @@ export const HONESTY_CODES = /* @__PURE__ */ Object.freeze({
   'pre-run-origin':
     'The value being followed was absent or already there before the first write this log can see (initial state, frozen run input or a closure), so who put it there is outside the commit log.',
   'concurrent-write':
-    'A step read a key that another step committed while it was running, and it looked at state again after that commit (steps side by side), so the record cannot say which value the read saw: each writer shown for the key is a possible source, not a certain one, and the real source is among them or is the value from before the run when the key is listed as read from there.',
+    "A step read a key that another step committed while it was running, and it looked at state again after that commit (steps side by side), or the array handed over does not show where the step's reads sit among its commits, so the record cannot say which value the read saw: each writer shown for the key is a possible source, not a certain one, and the real source is among them or is the value from before the run when the key is listed as read from there.",
   'reads-not-recorded':
     "This log carries no recorded read at all (the readTracking: 'off' signature), so 'nothing read this value' is unknowable here, not true.",
   'unknown-key':
@@ -89,9 +89,9 @@ export const HONESTY_CODES = /* @__PURE__ */ Object.freeze({
     'This fed edge is conservative: the downstream write carries no per-write read provenance (the writeProvenance dial was off, or the log is mixed), so all that is known is that its stage read this key and wrote that path in some order, and the edge may not be real.',
   // ── why a source of a read is only possible — `CausalEdge.overlap`, `ForwardRead.overlap` (readWindow.ts: ReadOverlap) ─
   'replaced-while-running':
-    'This write is the value the key held when the reading step began, and another step committed the key, in whole or in part, before the reading step last looked at state, so the step may have read that later value instead: this is a possible source, not a certain one.',
+    'This write is the value the key held when the reading step began, and another step committed the key, in whole or in part, before the reading step last looked at state (or the array handed over does not show whether one did), so the step may have read that later value instead: this is a possible source, not a certain one.',
   'written-while-running':
-    'This write was committed while the reading step was running and before the step last looked at state, so the step may have read the key before or after it: this is a possible source, not a certain one.',
+    'This write was committed while the reading step was running and before the step last looked at state (or the array handed over does not show whether it was), so the step may have read the key before or after it: this is a possible source, not a certain one.',
   // ── why a source of a set row built on a view is only possible — `CausalEdge.overlap`, `ForwardRead.overlap`, a slice note (builtOn.ts: ViewOverlap) ─
   'view-not-placed':
     "The array handed to the reader does not show where the view of a set row the writer built on it (TraceEntry.builtOnView) sits among its commits (bundles around that commit say no index, the array holds several logs, or the bundle's viewAt cannot be one), so each write the view could have held is named as a possible source of the row, not a certain one: the real one is among them, or is the value from before the run where that is said.",

@@ -48,7 +48,10 @@
  * forward read's `overlap`, and a slice note): the array does not show where the view sits, so each write it
  * could have held is a possible source. WHY that last one does not borrow a read's two overlap codes: they say
  * a step was running while the key was written, and no step read the key here.
- * The registry holds TWENTY-NINE codes (nine slice notes) and `Today` gains both notes. ONE earlier
+ * The registry holds TWENTY-NINE codes (nine slice notes) and `Today` gains both notes. The three sentences of
+ * the read window (`'concurrent-write'` and the two marks) name a second reason beside steps side by side: an
+ * array that does not show where the step's reads sit, where a step that looked at state ONCE has possible
+ * sources too. ONE more earlier
  * sentence was reworded, on purpose: `'from-initial-state'` is said of a point (the end of a range, or one
  * write), because a timeline that names a write folded onto the pre-run value can hold a later `set`, and "no
  * set in the range asked about" was then false of it. WHY the view has a code of its own and does not borrow
@@ -63,6 +66,8 @@ import { HONESTY_CODES } from '../../../src/lib/memory/honesty';
 import { LOG_PLACEHOLDER } from '../../../src/lib/memory/placeholders';
 import type { CommitBundle } from '../../../src/lib/memory/types';
 import {
+  concurrentReadsNote,
+  concurrentWriteNote,
   conservativeEdgesNote,
   fromInitialStateNote,
   nestedRowsNote,
@@ -451,6 +456,21 @@ describe("the two notes of a write that rests on the value from before the run â
     // The two notes never share words: the fold's says the value may be only part of what the key
     // held, and that no write of the whole value is under it. The view's says neither.
     expect(one.detail).not.toMatch(/no write of its whole value|only part of it/);
+  });
+});
+
+describe("the read window's note â€” 'concurrent-write', from a forward answer and from a backward slice", () => {
+  it('names both reasons a read has only possible sources: a second look, or an array that does not place the step', () => {
+    expect(concurrentReadsNote(1)).toEqual({
+      code: 'concurrent-write',
+      detail:
+        '1 read was made by a step that looked at state again after another step committed the key (steps side by side), or by a step the array handed over does not place among its commits. Such a step may have read this value or another one written in that time, so it is a possible reader, not a certain one.',
+    });
+    expect(concurrentWriteNote(2)).toEqual({
+      code: 'concurrent-write',
+      detail:
+        '2 reads were made by a step that looked at state again after another step committed the same key (steps side by side), or by a step the array handed over does not place among its commits. The record cannot say which value such a read saw, so every writer shown for that key is a possible source, not a certain one; the real source is among them, or is the value from before the run when the key is listed as read from there.',
+    });
   });
 });
 

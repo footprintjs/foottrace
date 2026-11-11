@@ -217,7 +217,8 @@ export interface CausalEdge {
   /**
    * Present only on a `'data'` edge whose `key` was written inside the child's read window
    * (`CommitBundle.beganAt` / `sawUntil`: steps side by side, and the child looked at state again
-   * after a sibling committed). The record cannot say which value the read saw, so EVERY edge of the
+   * after a sibling committed; or an array that does not show where that window sits, so that a write
+   * which could lie in it is taken to). The record cannot say which value the read saw, so EVERY edge of the
    * child for that key carries a mark and is a possible source, not a certain one; the real source is
    * among them (or is the value from before the run, when `preRunReads` lists the key):
    *   - `'replaced-while-running'`: the parent wrote the value the key held when the child began;

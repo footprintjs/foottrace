@@ -18,6 +18,7 @@ import {
   findLastWriter,
   findReadSources,
   formatSlice,
+  HONESTY_CODES,
   keysReadFromMap,
   overlapOf,
   readStoredRecord,
@@ -660,6 +661,27 @@ describe('the backward walk names what a step could have read, and nothing else'
       'fast#0 (written-while-running)',
       'seed#0 (replaced-while-running)',
     ]);
+    // What the answer SAYS of it. This step looked at state once and never again: no stamp says a
+    // second look. Its sources are only possible because the array does not place `fast`. The note
+    // used to name one reason alone ("made by a step that looked at state again after another step
+    // committed the same key"), a second look that did not happen here. It names both now, and so do
+    // the sentences of the two marks.
+    expect(silent.find((bundle) => bundle.runtimeStageId === 'slow#0')?.sawUntil).toBeUndefined();
+    const slice = sliceForKey(silent, ['runs', 'slow', 'copy'], keysReadFromMap(reads), { edgeAttribution: 'stage' });
+    expect(slice.notes).toEqual([
+      {
+        code: 'concurrent-write',
+        detail:
+          '1 read was made by a step that looked at state again after another step committed the same key ' +
+          '(steps side by side), or by a step the array handed over does not place among its commits. The record ' +
+          'cannot say which value such a read saw, so every writer shown for that key is a possible source, not ' +
+          'a certain one; the real source is among them, or is the value from before the run when the key is ' +
+          'listed as read from there.',
+      },
+    ]);
+    for (const code of ['concurrent-write', 'replaced-while-running', 'written-while-running'] as const) {
+      expect(HONESTY_CODES[code], code).toMatch(/the array handed over does not show/);
+    }
     // The whole log with the same bundle silent leaves it one place (commit 3): exact again.
     const whole = log
       .list()

@@ -252,7 +252,9 @@ export interface ForwardRead {
   commitIdx: number;
   /**
    * Present when the key was written inside the reading step's window (`CommitBundle.beganAt` /
-   * `sawUntil`: steps side by side, and the step looked at state again after a sibling committed). The
+   * `sawUntil`: steps side by side, and the step looked at state again after a sibling committed; or
+   * an array that does not show where that window sits, so that a write which could lie in it is
+   * taken to). The
    * step may have read this value or another one written in that time, so it is a possible reader of
    * this value, not a certain one (`memory/readWindow.ts`):
    *   - `'replaced-while-running'`: this value is the one the key held when the step began;
