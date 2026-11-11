@@ -142,7 +142,8 @@ const dataEdges = (node: CausalNode, key: string): CausalEdge[] =>
  * The walk back from `root` through `key`: the parents its read of the key names, then, from each
  * step on the way, that step's edges of the key. (A step that merged into the key and also read it
  * has ONE edge to the step before, the read's: `linkParent`.) `preRun`: the walk ends at the value
- * from before the run (a step on the way read it from there, or its write was folded onto it).
+ * from before the run (a step on the way read it from there, or its write was folded onto it, or the
+ * writer built its `set` row on a view that held it: `preRunReads`, `preRunBase`, `preRunView`).
  * `builtOn` false: the walk as it was before, which had no edge from a write to the write under it.
  */
 function through(root: CausalNode, key: string, builtOn = true): { steps: Set<string>; preRun: boolean } {
@@ -155,7 +156,8 @@ function through(root: CausalNode, key: string, builtOn = true): { steps: Set<st
     const node = queue.shift()!;
     if (steps.has(node.runtimeStageId)) continue;
     steps.add(node.runtimeStageId);
-    if (node.preRunReads?.keys.includes(key) || (builtOn && node.preRunBase?.keys.includes(key))) preRun = true;
+    const underAWrite = node.preRunBase?.keys.includes(key) || node.preRunView?.keys.includes(key);
+    if (node.preRunReads?.keys.includes(key) || (builtOn && underAWrite)) preRun = true;
     for (const edge of dataEdges(node, key)) if (builtOn || edge.builtOn === undefined) queue.push(edge.parent);
   }
   return { steps, preRun };

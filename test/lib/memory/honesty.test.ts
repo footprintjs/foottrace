@@ -1,7 +1,7 @@
 /**
  * honesty.ts — the ONE vocabulary for what a reader cannot see (F4a).
  *
- *   unit      the registry is frozen and closed, holds exactly the twenty-seven codes, and every explanation is
+ *   unit      the registry is frozen and closed, holds exactly the twenty-eight codes, and every explanation is
  *             ONE sentence
  *   boundary  the TYPES, asked of the real compiler: a code the registry does not hold FAILS TO COMPILE; the
  *             six public unions are exactly the members they were (they did not widen); the sentences are
@@ -40,6 +40,16 @@
  * 1.1.0 added ONE code, `'unread-entry'` — a codeless signal, like `'log-gap'`: an entry a sink stored that
  * `readStoredRecord` could not read (`StoredRecord.unread`). The registry holds TWENTY-TWO; no union widened and
  * no runtime string the readers wrote before changed.
+ *
+ * A `set` row the writer built on its step's view added TWO codes. `'built-on-view'` (`FedBasis`, and the mark
+ * of a causal edge): the write the view held is under the row. `'pre-run-view'` (a slice note, and the code of
+ * `CausalNode.preRunView`): the view held no write of the key, so that part of the row came from before the
+ * run. The registry holds TWENTY-EIGHT codes (nine slice notes) and `Today` gains the note. ONE earlier
+ * sentence was reworded, on purpose: `'from-initial-state'` is said of a point (the end of a range, or one
+ * write), because a timeline that names a write folded onto the pre-run value can hold a later `set`, and "no
+ * set in the range asked about" was then false of it. WHY the view has a code of its own and does not borrow
+ * that one: the fold's code says the value may be partial; a marked `set` is a whole write of its path, and only
+ * where part of it came from is outside the log.
  */
 import { join, resolve } from 'path';
 import ts from 'typescript';
@@ -50,8 +60,10 @@ import { LOG_PLACEHOLDER } from '../../../src/lib/memory/placeholders';
 import type { CommitBundle } from '../../../src/lib/memory/types';
 import {
   conservativeEdgesNote,
+  fromInitialStateNote,
   nestedRowsNote,
   preRunOriginNote,
+  preRunViewNote,
   readsNotRecordedNote,
   truncatedNote,
   unknownKeyNote,
@@ -71,8 +83,11 @@ const REPO = resolve(__dirname, '../../..');
 /** The codes each declared vocabulary speaks, and the signals that carry no code field of their own. */
 /** The five slice notes the library built at 9.31.0 — the bytes pinned below. */
 const SLICE_CODES_9_31 = ['conservative-fed-edges', 'pre-run-origin', 'reads-not-recorded', 'unknown-key', 'truncated'];
-/** Every slice note today: the five, F3's `'nested-rows'`, the read window's `'concurrent-write'`, and the built-on rule's `'partial-write'`. */
-const SLICE_CODES = [...SLICE_CODES_9_31, 'nested-rows', 'concurrent-write', 'partial-write'];
+/**
+ * Every slice note today: the five, F3's `'nested-rows'`, the read window's `'concurrent-write'`, the built-on
+ * rule's `'partial-write'`, and `'pre-run-view'` for a row the writer built on a view that held no write.
+ */
+const SLICE_CODES = [...SLICE_CODES_9_31, 'nested-rows', 'concurrent-write', 'partial-write', 'pre-run-view'];
 const MISSING_REASONS = ['empty-log', 'never-written', 'not-an-array'];
 /** The two a read gives, and the one a `set` row the writer built on its step's view gives (`TraceEntry.builtOnView`). */
 const FED_BASES = ['per-write', 'stage', 'built-on-view'];
@@ -104,7 +119,7 @@ describe('HONESTY_CODES — unit', () => {
     }).toThrow(TypeError);
   });
 
-  it('holds exactly twenty-seven codes — eight slice notes, three missing reasons, three fed-edge and three birth bases, two fold bases, two value bases, two read overlaps, four codeless signals', () => {
+  it('holds exactly twenty-eight codes — nine slice notes, three missing reasons, three fed-edge and three birth bases, two fold bases, two value bases, two read overlaps, four codeless signals', () => {
     const all = [
       ...SLICE_CODES,
       ...MISSING_REASONS,
@@ -115,7 +130,7 @@ describe('HONESTY_CODES — unit', () => {
       ...READ_OVERLAPS,
       ...SIGNALS_WITHOUT_A_CODE_FIELD,
     ];
-    expect(all).toHaveLength(27);
+    expect(all).toHaveLength(28);
     expect(Object.keys(HONESTY_CODES).sort()).toEqual(all.sort());
   });
 
@@ -154,7 +169,7 @@ const HEADER = [
   "import { HONESTY_CODES } from './honesty.js';",
   "import type { HonestyCode, RegisteredCode } from './honesty.js';",
   "import type { ReadOverlap } from './readWindow.js';",
-  "type Today = 'conservative-fed-edges' | 'concurrent-write' | 'nested-rows' | 'partial-write' | 'pre-run-origin' | 'reads-not-recorded' | 'unknown-key' | 'truncated' | 'redacted' | 'from-initial-state';",
+  "type Today = 'conservative-fed-edges' | 'concurrent-write' | 'nested-rows' | 'partial-write' | 'pre-run-origin' | 'reads-not-recorded' | 'unknown-key' | 'truncated' | 'redacted' | 'from-initial-state' | 'pre-run-view';",
   "type TodayBasis = 'initial+log' | 'log-only';",
   "type TodayMissing = 'empty-log' | 'never-written';",
   "type TodayProvenance = 'empty-log' | 'never-written' | 'not-an-array';",
@@ -392,6 +407,37 @@ describe('the five slice notes — the bytes the library built at 9.31.0', () =>
     const spoken = new Set(Object.values(NOTES).map((n) => n.built.code));
     expect([...spoken].sort()).toEqual([...SLICE_CODES_9_31].sort());
     for (const code of spoken) expect(Object.keys(HONESTY_CODES), code).toContain(code);
+  });
+});
+
+describe("the two notes of a write that rests on the value from before the run — 'from-initial-state' and 'pre-run-view'", () => {
+  it('a backward slice says the fold of the VALUE at its point; a timeline names the ONE write it is said of', () => {
+    expect(fromInitialStateNote('cfg')).toEqual({
+      code: 'from-initial-state',
+      detail:
+        "'cfg' has no write of its whole value in range — its value rests on what it held before the run, which the commit log cannot see, so the writes here may be only part of it.",
+    });
+    expect(fromInitialStateNote(['cfg', 'inner'].join('\u001F'), 3)).toEqual({
+      code: 'from-initial-state',
+      detail:
+        "'cfg › inner' was first written at commit 3, by a write that did not replace it — the value there rests on what the key held before the run, which the commit log cannot see, so the writes listed may be only part of it until one replaces the key.",
+    });
+  });
+
+  it('a row built on a view that held no write has a note of its own: the commits, the overflow, and no word of a fold', () => {
+    const one = preRunViewNote('cfg', [4]);
+    expect(one.code).toBe('pre-run-view');
+    expect(Object.keys(HONESTY_CODES)).toContain(one.code);
+    expect(one.detail).toBe(
+      "'cfg' at commit 4 is held, in whole or in part, in a set row the writer built on its step's view, and that view held no write of the key (or may have held none, where the moment lists other writes it could have held) — what the row holds beyond the step's own writes was absent or came from before the run, which the commit log cannot see.",
+    );
+    const many = preRunViewNote('cfg', [1, 2, 3, 4, 5, 6, 7]);
+    expect(many.detail.startsWith("'cfg' at commits 1, 2, 3, 4, 5 (+2 more) is held, in whole or in part, in ")).toBe(
+      true,
+    );
+    // The two notes never share words: the fold's says the value may be only part of what the key
+    // held, and that no write of the whole value is under it. The view's says neither.
+    expect(one.detail).not.toMatch(/no write of its whole value|only part of it/);
   });
 });
 

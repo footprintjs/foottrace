@@ -454,27 +454,29 @@ export function mergedWrites(commitLog: readonly CommitBundle[], key: string, wr
   return writes.filter((i) => !replacesValue(commitLog[i], key) && !writesOnlyInside(commitLog[i], key));
 }
 
-/** A write the answer rests on, or that a value's life crosses, merged into the key or appended to it. */
-export function partialWriteNote(key: string, commits: readonly number[]): HonestyNote {
+/** How many commit positions a note lists before it says "+N more" (a note is one bounded line). */
+export const NESTED_WRITES_LISTED = 5;
+
+/** The commits a note names, as words: `commit 3`, `commits 3, 7`, `commits 0, 1, 2, 3, 4 (+2 more)`. */
+function commitsListed(commits: readonly number[]): string {
   const shown = commits.slice(0, NESTED_WRITES_LISTED);
   const more = commits.length - shown.length;
-  const at = `commit${commits.length === 1 ? '' : 's'} ${shown.join(', ')}${more > 0 ? ` (+${more} more)` : ''}`;
+  return `commit${commits.length === 1 ? '' : 's'} ${shown.join(', ')}${more > 0 ? ` (+${more} more)` : ''}`;
+}
+
+/** A write the answer rests on, or that a value's life crosses, merged into the key or appended to it. */
+export function partialWriteNote(key: string, commits: readonly number[]): HonestyNote {
   return {
     code: 'partial-write',
     detail:
-      `'${shownPath(key)}' was merged into or appended to at ${at} — such a write did not replace the value: ` +
-      'it is made of that write and of the earlier ones, and a reader after it read all of them.',
+      `'${shownPath(key)}' was merged into or appended to at ${commitsListed(commits)} — such a write did not ` +
+      'replace the value: it is made of that write and of the earlier ones, and a reader after it read all of them.',
   };
 }
 
-/** How many commit positions a `'nested-rows'` or a `'partial-write'` note lists before it says "+N more". */
-export const NESTED_WRITES_LISTED = 5;
-
 /** A write the answer rests on reached the key only through paths inside it. */
 export function nestedRowsNote(key: string, commits: readonly number[]): HonestyNote {
-  const shown = commits.slice(0, NESTED_WRITES_LISTED);
-  const more = commits.length - shown.length;
-  const at = `commit${commits.length === 1 ? '' : 's'} ${shown.join(', ')}${more > 0 ? ` (+${more} more)` : ''}`;
+  const at = commitsListed(commits);
   return {
     code: 'nested-rows',
     detail:
@@ -506,13 +508,45 @@ export function redactedValueNote(key: string): HonestyNote {
   };
 }
 
-/** No set or delete of the key, or of a container around it, is in range: the value rests on the pre-run state. */
-export function fromInitialStateNote(key: string): HonestyNote {
+/**
+ * No set or delete of the key, or of a container around it, is under a value: it rests on the pre-run state.
+ *
+ * Said of ONE point, and the two callers have different points. A backward slice says it of the value
+ * it explains (no `at`): nothing in its range wrote the whole value. A timeline says it of one WRITE
+ * (`at`): the first write of the key, which did not replace it. WHY the timeline names the write: its
+ * range goes on after that write, and a later one can replace the key. "No write of its whole value
+ * in range" would then be false of the timeline, though it is true of that write.
+ */
+export function fromInitialStateNote(key: string, at?: number): HonestyNote {
+  const shown = shownPath(key);
   return {
     code: 'from-initial-state',
     detail:
-      `'${shownPath(key)}' has no write of its whole value in range — its value rests on what it held before the ` +
-      'run, which the commit log cannot see, so the writes here may be only part of it.',
+      at === undefined
+        ? `'${shown}' has no write of its whole value in range — its value rests on what it held before the ` +
+          'run, which the commit log cannot see, so the writes here may be only part of it.'
+        : `'${shown}' was first written at commit ${at}, by a write that did not replace it — the value there ` +
+          'rests on what the key held before the run, which the commit log cannot see, so the writes listed ' +
+          'may be only part of it until one replaces the key.',
+  };
+}
+
+/**
+ * A `set` row the writer built on its step's view, when that view held no write of the key
+ * (`KeyMoment.builtOnViewPreRun`). The row can sit on the key, around it, or on a path inside it
+ * (then it holds part of the key): "in whole or in part". WHY NOT the `'from-initial-state'` note:
+ * that one says no write of the whole value is under the value, which may then be partial. Such a
+ * row is a whole write of its path. What the log cannot see is where the part of it came from that
+ * the step did not write.
+ */
+export function preRunViewNote(key: string, commits: readonly number[]): HonestyNote {
+  return {
+    code: 'pre-run-view',
+    detail:
+      `'${shownPath(key)}' at ${commitsListed(commits)} is held, in whole or in part, in a set row the writer ` +
+      "built on its step's view, and that view held no write of the key (or may have held none, where the " +
+      "moment lists other writes it could have held) — what the row holds beyond the step's own writes was " +
+      'absent or came from before the run, which the commit log cannot see.',
   };
 }
 

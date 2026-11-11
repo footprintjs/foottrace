@@ -11,10 +11,17 @@
  *   VALUE    the judge is the value. Every write adds a field whose name says who wrote it, so the
  *            object a step read names the COMMITS it is made of. The node of each of those commits
  *            is on the way back from what the reader wrote.
+ *   PRE-RUN  the key holds a field before the run (`seed`). When the value a step read still holds
+ *            it, the way back cannot be whole: some node on it says a gap for what came from outside
+ *            the log (`untracked-input`: a step read the key, or the writer built a row on a view,
+ *            when nothing had written it; `conservative`: a write was folded onto it).
  *
- * This generator and both clauses are the second reader's (review of the change that added these
- * edges, round 2). It failed on the first version of that change, which answered in steps where
- * the graph's nodes are commits, and it fails on the version before the change.
+ * This generator and the first two clauses are the second reader's (review of the change that added
+ * these edges, round 2). It failed on the first version of that change, which answered in steps where
+ * the graph's nodes are commits, and it fails on the version before the change. PRE-RUN was added
+ * with the marked row: a `set` row built on a view that held only the seed had no parent and no gap,
+ * so the graph called the walk back complete (found while answering round 4 of that change's second
+ * read, by asking every reader what it said of such a row).
  *
  * No run is left out. A run in which the WRITER made a `set` row out of writes that only added used
  * to be: the row read as a replacement and the way back ended there. The writer marks such a row now
@@ -31,6 +38,10 @@ import { EventLog, RecordFrame, SharedMemory } from '../../src/write.js';
 const address = { logRunId: 'run', drillPath: [] };
 const ctx = () => ({ signal: new AbortController().signal });
 const D = '\u001f';
+/** The field `k` holds before the run. No commit wrote it. */
+const SEED = 'seed';
+/** The gaps that say part of a value came from outside the log (see PRE-RUN above). */
+const OUTSIDE_THE_LOG = ['untracked-input', 'conservative'];
 type Kind = 'read' | 'set' | 'merge' | 'inside' | 'cut';
 type Encoding = 'full' | 'delta';
 interface Program {
@@ -47,8 +58,8 @@ const program: fc.Arbitrary<Program> = fc.record({
 
 /** The first thing that is wrong in the graph of this run, as text; `undefined` when nothing is. */
 async function firstFault(p: Program, encoding: Encoding): Promise<string | undefined> {
-  const state = new SharedMemory(undefined, {});
-  const events = new EventLog({});
+  const state = new SharedMemory(undefined, { k: { [SEED]: 1 } });
+  const events = new EventLog({ k: { [SEED]: 1 } });
   const count = p.steps.length;
   const frame = () => {
     const made = new RecordFrame(state, events);
@@ -152,7 +163,8 @@ async function firstFault(p: Program, encoding: Encoding): Promise<string | unde
     );
     if (at < 0) continue;
     const back = new Set<string>();
-    const queue = [node(`s${step}#0`, at, `o${step}`)];
+    const start = node(`s${step}#0`, at, `o${step}`);
+    const queue = [start];
     while (queue.length > 0) {
       for (const edge of (await g.parents(queue.shift()!, ctx())).edges) {
         const id = ofKey(edge.nodeId);
@@ -162,11 +174,20 @@ async function firstFault(p: Program, encoding: Encoding): Promise<string | unde
       }
     }
     for (const token of tokens) {
+      if (token === SEED) continue;
       const writer = Number(token.slice(1, token.indexOf(':')));
       const commit = committedAt.get(token);
       if (writer === step || commit === undefined) continue;
       if (!back.has(node(`s${writer}#0`, commit, 'k'))) {
         return `s${step} read k holding ${token}, written at commit ${commit}, which is not on its way back :: ${shown}`;
+      }
+    }
+    // PRE-RUN: the value still holds what `k` held before the run, so the way back is not whole.
+    if (tokens.includes(SEED)) {
+      const said = new Set<string>();
+      for (const id of [start, ...back]) for (const gap of await g.gaps(id, ctx())) said.add(gap.code);
+      if (!OUTSIDE_THE_LOG.some((code) => said.has(code))) {
+        return `s${step} read k holding the value from before the run, and no node on its way back says a gap :: ${shown}`;
       }
     }
   }
@@ -175,7 +196,7 @@ async function firstFault(p: Program, encoding: Encoding): Promise<string | unde
 
 describe('the cause graph and a value built in steps, on the real writer', () => {
   it.each(['full', 'delta'] as const)(
-    '%s: INVERSE and VALUE: steps side by side, steps that commit more than once, rows inside the key',
+    '%s: INVERSE, VALUE and PRE-RUN: steps side by side, steps that commit more than once, rows inside the key',
     async (encoding) => {
       await fc.assert(
         fc.asyncProperty(program, async (p) => {

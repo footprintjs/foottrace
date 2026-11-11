@@ -98,6 +98,9 @@ export const HONESTY_CODES = /* @__PURE__ */ Object.freeze({
   // ── a set row the writer built on its step's view — `ForwardEdge.basis`, `ForwardRead.builtOnView`, `CausalEdge.builtOn` (builtOn.ts) ─
   'built-on-view':
     "No read by the step's code is behind this link, and the record's own row says it: the write is a set row the writer built on its step's view (TraceEntry.builtOnView), so it holds what the view held of the key with the step's own writes folded in, and the write the view held is under it (one of the writes it could have held, where the record does not show where that view sits).",
+  // ── such a row, when its view held no write of the key — a timeline note, and `CausalNode.preRunView` (builtOn.ts) ─
+  'pre-run-view':
+    "A set row the writer built on its step's view (TraceEntry.builtOnView) holds the key, in whole or in part, as that view held it, and no commit had written the key before the view was pinned (or before the earliest moment it could have been pinned, where the record does not show the moment), so what the row holds beyond the step's own writes was absent or came from the state before the run: who put it there is outside the commit log, and no read by the step's code is behind it.",
   // ── how an element's birth was attributed — `ElementBirth.basis` (slice/: AttributionBasis) ─
   'append-verb':
     "The engine recorded the element in an append row's tail (how commitValues: 'delta' records an array's growth), so the commit that added it is known exactly, not inferred.",
@@ -126,7 +129,7 @@ export const HONESTY_CODES = /* @__PURE__ */ Object.freeze({
   deleted:
     "The key's last write in the range asked about left it absent (a delete of the key or of a container around it, or a set of a container that no longer holds it), so the answer is undefined because the record says the key was gone at that point, not because nothing was recorded.",
   'from-initial-state':
-    "No set or delete of the key, or of a container around it, is in the range asked about, so the answer rests on the value the key had before the run: folded from the initialState passed in when there was one, and otherwise only what the log's merges, appends and nested writes added to it (or nothing), which is partial for a key seeded before the run.",
+    "No set or delete of the key, or of a container around it, comes before the point this is said of (the end of the range asked about, or the write a note or a node names), so the value there rests on the value the key had before the run: folded from the initialState passed in when there was one, and otherwise only what the log's merges, appends and nested writes added to it (or nothing), which is partial for a key seeded before the run.",
 } satisfies Record<string, string>);
 
 /** Any code in {@link HONESTY_CODES} — the key a reader looks an explanation up by. */

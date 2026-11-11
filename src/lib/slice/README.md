@@ -236,7 +236,9 @@ A write that did not replace the value says what it was folded onto:
 `builtOnWriteIdx` (the write moment just before it, whichever step made it: a
 step that committed twice has its later commit linked to its earlier one), or
 `builtOnPreRun` (nothing in the log is under it; the timeline then carries a
-`'from-initial-state'` note).
+`'from-initial-state'` note that names the commit: only the first write of a
+key can have nothing before it, and a later write may replace the key, so
+the note speaks of that one write and not of the whole timeline).
 
 ```
 @0 write set — start (start#0)
@@ -274,7 +276,15 @@ write. Both writes are under the value, for certain:
 
 A view that held no write of the key says so in its own field too
 (`builtOnViewPreRun`; the line reads `built on the value its step's view
-held: the value from BEFORE the run`). `builtOnPreRun` stays the fold's.
+held: the value from BEFORE the run`), with a note of its own that names the
+commits (`'pre-run-view'`). `builtOnPreRun` and `'from-initial-state'` stay
+the fold's. WHY two notes for "the value from before the run is under it":
+they say different things about the VALUE. A write folded onto the pre-run
+value has no write of the whole value under it, so the value there may be
+partial. A `set` row built on a view of it is a whole write of its path,
+and only where part of it came from is outside the log. One note for both
+told a reader that a timeline holding two sets of a key had "no write of its
+whole value in range".
 
 Only where the reader cannot place the view at one position of the array it
 was handed are there other writes the view could have held (the usual case:
@@ -407,24 +417,29 @@ with the names it recorded (`test/lib/slice/nested-rows.test.ts`).
   note (`memory/builtOn.ts`, the one rule; `memory/README.md` has the why, an
   example and the one case in which the walk's result is not a DAG). Text
   says `← built on box`.
-- `CausalEdge.builtOn: 'built-on-view'` (backward), `ForwardRead.builtOnView`
-  and `ForwardEdge.basis: 'built-on-view'` (forward),
-  `KeyMoment.builtOnViewIdx` / `builtOnViewPreRun` / `orViewIdxs` (timeline): a `set` row the WRITER built on its
+- `CausalEdge.builtOn: 'built-on-view'` and `CausalNode.preRunView` (backward),
+  `ForwardRead.builtOnView` and `ForwardEdge.basis: 'built-on-view'` (forward),
+  `KeyMoment.builtOnViewIdx` / `builtOnViewPreRun` / `orViewIdxs` and a
+  `'pre-run-view'` note (timeline): a `set` row the WRITER built on its
   step's view (`TraceEntry.builtOnView`). The row replaces the value in the
   fold and still holds what the view held, so the walk goes on to the write
-  that view held. No read by the step is behind it, and every answer says so
-  in its own words instead of counting it as a read.
+  that view held, or says that the view held none. No read by the step is
+  behind it, and every answer says so in its own words instead of counting
+  it as a read.
 - `keysReadKind` + `readsCoverage` — a slice can always be traced to its reads
   provider, and a reads-less provider is detectable, not silent.
 - `HonestyNote[]` (forward, timeline) — the machine-readable envelope: a consumer
-  branches on `code`, a human/LLM reads `detail`. Eight codes:
-  `'unknown-key'`, `'reads-not-recorded'`, `'pre-run-origin'`,
-  `'conservative-fed-edges'`, `'truncated'`, `'nested-rows'` (9.33.0 — a
-  write reached the key only through paths inside it), `'concurrent-write'`
-  (a key was written inside the read window of the step that read it, so that
-  read has possible sources only), and `'partial-write'` (a write merged into
-  the key or appended to it, so the value is made of that write and of the
-  earlier ones). What each code MEANS is
+  branches on `code`, a human/LLM reads `detail`. The codes of a forward
+  slice and a timeline: `'unknown-key'`, `'reads-not-recorded'`,
+  `'pre-run-origin'`, `'conservative-fed-edges'`, `'truncated'`,
+  `'nested-rows'` (9.33.0 — a write reached the key only through paths inside
+  it), `'concurrent-write'` (a key was written inside the read window of the
+  step that read it, so that read has possible sources only),
+  `'partial-write'` (a write merged into the key or appended to it, so the
+  value is made of that write and of the earlier ones), and on a timeline
+  the two that say a write rests on the value from before the run:
+  `'from-initial-state'` (it was folded onto that value) and `'pre-run-view'`
+  (its `set` row was built on a view that held it). What each code MEANS is
   registered once, in `memory/honesty.ts · HONESTY_CODES` (served as
   `HONESTY_CODES` on `foottrace`): `HONESTY_CODES[note.code]` is the
   one-sentence explanation, and the `detail` is the per-instance sentence (it

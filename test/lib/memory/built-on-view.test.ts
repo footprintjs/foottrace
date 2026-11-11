@@ -8,9 +8,11 @@
  * holds what `a` held in the step's view. Read as a plain replacement, the walk back ended at that
  * step and left out every step whose write was still in the value.
  *
- * The writer now marks such a row (`TraceEntry.builtOnView`), dates it (the view's pin counts as a
- * look), and the readers take the mark as a read of the path, made for the step, at the commit that
- * carries the row (`memory/builtOn.ts · readFromView`).
+ * The writer now marks such a row (`TraceEntry.builtOnView`) and says when its view was pinned
+ * (`CommitBundle.viewAt`, when another commit landed since), and the readers take the mark as a read
+ * of the path, made for the step, at the commit that carries the row (`memory/builtOn.ts ·
+ * readFromView`). A view that held no write of the key says so in words of its own, in every reader:
+ * the row is a whole write, and only where part of it came from is outside the log.
  *
  * Test types: unit (which rows are marked, and which are not), scenario (the walk back, the forward
  * walk, the timeline, the cause graph), boundary (steps side by side, a step's later commit, the
@@ -26,6 +28,8 @@ import {
   forwardSliceForKey,
   keysReadFromMap,
   keyTimeline,
+  sliceForKey,
+  sliceToJSON,
 } from '../../../src';
 import type { CausalNode, CommitBundle } from '../../../src';
 import { createRecordGraph, explain } from '../../../src/cause';
@@ -62,6 +66,17 @@ const edgesOf = (root: CausalNode) =>
   );
 const walk = (log: CommitBundle[], id: string, reads: Record<string, string[]>) =>
   causalChain(log, `${id}#0`, keysReadFromMap(reads).lookup)!;
+/** The `'pre-run-view'` note of a timeline, word for word (`slice/keyIndex.ts · preRunViewNote`). */
+const PRE_RUN_VIEW_WORDS = (key: string, at: string) =>
+  `'${key}' at ${at} is held, in whole or in part, in a set row the writer built on its step's view, and that ` +
+  'view held no write of the key (or may have held none, where the moment lists other writes it could have ' +
+  "held) — what the row holds beyond the step's own writes was absent or came from before the run, which the " +
+  'commit log cannot see.';
+/** The `'from-initial-state'` note of a timeline, word for word: it names the write it is said of. */
+const FOLDED_ON_PRE_RUN_WORDS = (key: string, at: number) =>
+  `'${key}' was first written at commit ${at}, by a write that did not replace it — the value there rests on ` +
+  'what the key held before the run, which the commit log cannot see, so the writes listed may be only part of ' +
+  'it until one replaces the key.';
 
 /** Start sets `a`. Fill merges into `a` and writes a path inside it, reading nothing. Use reads `a`. */
 function mergedAndInside(encoding: Encoding) {
@@ -215,7 +230,18 @@ describe('the walk back through a row the writer built on the view', () => {
     commit(use, 'use');
     const root = walk(w.log.list(), 'use', { 'use#0': ['a'] });
     expect(edgesOf(root)).toEqual(['use <- fill via a']);
-    expect(root.parents[0].preRunBase).toEqual({ code: 'from-initial-state', keys: ['a'] });
+    // The node says it in the view's own field. `preRunBase` would say the write was FOLDED onto the
+    // pre-run value and may be partial; this row is a whole write of `a`.
+    expect(root.parents[0].preRunView).toEqual({ code: 'pre-run-view', keys: ['a'] });
+    expect(root.parents[0].preRunBase).toBeUndefined();
+    expect(root.parents[0].preRunReads).toBeUndefined();
+    // A slice of the key says it on its root, and the JSON form carries it. The slice has no note:
+    // a note there speaks of the VALUE at the slice's point, and that value is a whole write.
+    const slice = sliceForKey(w.log.list(), 'a', keysReadFromMap({}).lookup);
+    expect(slice.root?.preRunView).toEqual({ code: 'pre-run-view', keys: ['a'] });
+    expect(slice.notes).toBeUndefined();
+    expect(sliceToJSON(slice).nodes?.['fill#0']).toMatchObject({ preRunView: { code: 'pre-run-view', keys: ['a'] } });
+    expect(sliceToJSON(slice).nodes?.['fill#0'].preRunBase).toBeUndefined();
     // The timeline says the same on the write, in the view's own field: the row replaced the value (no
     // fold), and the view it was built on held no write of the key.
     const timeline = keyTimeline(w.log.list(), 'a', keysReadFromMap({ 'use#0': ['a'] }).lookup);
@@ -226,7 +252,9 @@ describe('the walk back through a row the writer built on the view', () => {
       undefined,
       undefined,
     ]);
-    expect(timeline.notes.map((note) => note.code)).toContain('from-initial-state');
+    // Its note is the view's too, and names the commit. The fold's note (`'from-initial-state'`: no
+    // write of the whole value is under it) would be false here: commit 0 IS a set of the whole of `a`.
+    expect(timeline.notes).toEqual([{ code: 'pre-run-view', detail: PRE_RUN_VIEW_WORDS('a', 'commit 0') }]);
     expect(formatTimeline(timeline)).toContain(
       "@0 write set — fill (fill#0) (built on the value its step's view held: the value from BEFORE the run)",
     );
@@ -357,13 +385,23 @@ describe('the walk back through a row the writer built on the view', () => {
       { ...log[1], idx: 1 },
       { ...log[2], idx: 2, viewAt: 9 },
     ];
-    const guarded = (keyTimeline(badStamp, 'a', keysReadFromMap({}).lookup).moments ?? []).find(
-      (moment) => moment.stageId === 'fill',
-    );
+    const guardedTimeline = keyTimeline(badStamp, 'a', keysReadFromMap({}).lookup);
+    const guarded = (guardedTimeline.moments ?? []).find((moment) => moment.stageId === 'fill');
     expect([guarded?.builtOnViewIdx, guarded?.builtOnViewPreRun, guarded?.orViewIdxs]).toEqual([
       undefined,
       true,
       [0, 1],
+    ]);
+    // The view MAY have held no write of the key. The note and the walk's node say so, beside the
+    // writes it could have held instead (each a possible source, on an edge that says why).
+    expect(guardedTimeline.notes.filter((note) => note.code === 'pre-run-view')).toEqual([
+      { code: 'pre-run-view', detail: PRE_RUN_VIEW_WORDS('a', 'commit 2') },
+    ]);
+    const guardedRoot = causalChain(badStamp, 'fill#0', keysReadFromMap({}).lookup, { rootLinkKeys: ['a'] })!;
+    expect(guardedRoot.preRunView).toEqual({ code: 'pre-run-view', keys: ['a'] });
+    expect(edgesOf(guardedRoot).sort()).toEqual([
+      'fill <- other via a [built-on-view] (written-while-running)',
+      'fill <- start via a [built-on-view] (written-while-running)',
     ]);
     // With the index said, the same record has one answer.
     const said = [log[0], { ...log[1], idx: 12 }, log[2], log[3]];
@@ -606,8 +644,43 @@ describe('forward, the timeline and the cause graph', () => {
     expect(moment?.builtOnPreRun).toBeUndefined();
     expect(moment?.builtOnViewIdx).toBeUndefined();
     expect(moment?.orViewIdxs).toBeUndefined();
-    expect(timeline.notes.map((note) => note.code)).toContain('from-initial-state');
+    // One note per link, each in its own words (second read, round 4: the fold's note said "no write
+    // of its whole value in range" for a timeline that holds two sets of the whole of `a`).
+    const said = (code: string) => timeline.notes.filter((note) => note.code === code).map((note) => note.detail);
+    expect(said('pre-run-view')).toEqual([PRE_RUN_VIEW_WORDS('a', 'commit 1')]);
+    // P's own write: a `set` has nothing under it; a `merge` was folded onto the value from before the run.
+    expect(said('from-initial-state')).toEqual(inside ? [FOLDED_ON_PRE_RUN_WORDS('a', 0)] : []);
     expect(formatTimeline(timeline)).toContain(`@1 write set — fill (fill#0) ${words}`);
+    // The walk says the view's answer in the view's field, whichever case.
+    const root = causalChain(w.log.list(), 'fill#0', keysReadFromMap({}).lookup, { rootLinkKeys: ['a'] })!;
+    expect(root.preRunView).toEqual({ code: 'pre-run-view', keys: ['a'] });
+    expect(root.preRunBase).toBeUndefined();
+  });
+
+  it('a marked row inside the key at the start of the log: both links end before the run, and each says so', () => {
+    // `a` came with the initial state. Fill merges into a.b and sets a.b.c: one `set` of a.b, marked.
+    //   - the commit did not replace `a` and nothing wrote `a` before it: FOLDED onto the pre-run value;
+    //   - the row at a.b was BUILT on a view that held no write of `a`.
+    // Two statements about one write, in two fields, two notes and two fields of the walk's node.
+    const w = world('delta', { a: { seeded: 1 } });
+    const fill = w.frame();
+    fill.write(['a', 'b'], { m: 1 }, 'merge');
+    fill.write(['a', 'b', 'c'], 1, 'set');
+    commit(fill, 'fill');
+    const list = w.log.list();
+    expect(rowsOf(list[0])).toEqual(['set a.b.c', 'set a.b (built on view)']);
+    const timeline = keyTimeline(list, 'a', keysReadFromMap({}).lookup);
+    expect((timeline.moments ?? [])[0]).toMatchObject({ commitIdx: 0, builtOnPreRun: true, builtOnViewPreRun: true });
+    const said = (code: string) => timeline.notes.filter((note) => note.code === code).map((note) => note.detail);
+    expect(said('from-initial-state')).toEqual([FOLDED_ON_PRE_RUN_WORDS('a', 0)]);
+    expect(said('pre-run-view')).toEqual([PRE_RUN_VIEW_WORDS('a', 'commit 0')]);
+    expect(formatTimeline(timeline)).toContain(
+      "@0 write set — fill (fill#0) (added to the value from BEFORE the run; built on the value its step's view held: the value from BEFORE the run)",
+    );
+    const root = causalChain(list, 'fill#0', keysReadFromMap({}).lookup, { rootLinkKeys: ['a'] })!;
+    expect(root.preRunBase).toEqual({ code: 'from-initial-state', keys: ['a'] });
+    expect(root.preRunView).toEqual({ code: 'pre-run-view', keys: ['a'] });
+    expect(root.parentEdges).toEqual([]);
   });
 
   it('a row INSIDE the key has two links, and they can name two writes: the fold and the view', () => {

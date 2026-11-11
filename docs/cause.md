@@ -62,7 +62,17 @@ One case gives several parents: a record handed over in memory in which bundles 
 
 The two directions are inverses for these edges too, checked on logs the real writer made under both encodings (`test/cause/built-on.property.test.ts`). A record from outside can carry a marked row on every commit and leave the place of every view open over a long stretch of the log. So one question about a node that names a key (its parents, or its children) is answered in work that grows with the log, not with its square, and stops at the cap on edges (`test/cause/built-on-view.test.ts` counts it). A node that names no key is asked once for each key its commit wrote, as it was before this edge.
 
-A write folded onto the value from before the run has no node to point at and adds no gap of its own. Without exact read sources the node carries `conservative`, as it always has for a value with no whole write in range; that gap does not consult the record's initial state, so it is also there when the key did not exist before the run. With exact sources the pre-run state is a known end of the walk. A graph of your own may return `'recorded-write'` on a data edge; a control edge with it is refused, like any other mismatch.
+A write folded onto the value from before the run has no node to point at and adds no gap of its own. Without exact read sources the node carries `conservative`, as it always has for a value with no whole write in range; that gap does not consult the record's initial state, so it is also there when the key did not exist before the run. With exact sources the pre-run state is a known end of the walk.
+
+A `set` row built on a view that held no write of the key has no node to point at either, and here a gap IS added: `untracked-input` (the node took in something the record cannot trace to a write). WHY this one differs: a marked `set` of the key is a whole write of it, so nothing else on the node says that part of it came from before the run. Without the gap the node read as complete with no parent, and `explain` confirmed its step as the root of a value the step only passed on. It is the gap a step that read the key from before the run and then set it has always had; here the writer took that input for the step. Like the gap above it does not consult the record's initial state, so it is also there when the key did not exist before the run. With exact sources it is not added: the pre-run state is a known end of the walk there.
+
+```ts
+// commitValues: 'delta', and `box` came with the initial state. Fill merges into `box` and sets `box.in`:
+// ONE `set` of `box`, marked, built on a view that held no write of `box`. Use reads `box`.
+await graph.parents(node('fill', 'box')); // []
+await graph.gaps(node('fill', 'box'));    // [ untracked-input ]
+// explain(final): confidence 'incomplete', Fill among the alternatives. Before: 'complete', root Fill.
+``` A graph of your own may return `'recorded-write'` on a data edge; a control edge with it is refused, like any other mismatch.
 
 ## Optional exact root-read sources
 

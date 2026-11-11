@@ -54,11 +54,18 @@ export interface BuiltOnParent {
   readonly certain: boolean;
 }
 
-/** What the write of `key` at a commit was built on: the earlier writes, and whether the pre-run value is under it. */
+/** What the write of `key` at a commit was built on: the earlier writes, and whether a view of the pre-run value is. */
 export interface BuiltOnParents {
   readonly parents: readonly BuiltOnParent[];
-  /** Part of the value came from before the run (or from nothing): there is no node to point at. */
-  readonly preRun: boolean;
+  /**
+   * The commit holds a `set` row built on a view that held no write of the key, or may have held none
+   * (where the view cannot be placed): that part of the row came from before the run, or from nothing,
+   * and there is no node to point at. WHY ONLY THE VIEW IS SAID. A write FOLDED onto the pre-run value
+   * has no node either, and no caller needs to hear it from here: its node already says so through
+   * its slice (`recordInspection.ts · addBuiltOnParents`). A marked `set` is a whole write, so this
+   * flag is the only thing that says it.
+   */
+  readonly viewHeldPreRun: boolean;
 }
 
 /**
@@ -82,10 +89,8 @@ export function builtOnParents(
   limit = Infinity,
 ): BuiltOnParents {
   const found = new Map<number, boolean>();
-  let preRun = false;
   const add = (position: number, certain: boolean): void => {
-    if (position < 0) preRun = true;
-    else found.set(position, (found.get(position) ?? false) || certain);
+    if (position >= 0) found.set(position, (found.get(position) ?? false) || certain);
   };
   const folded = builtOnBefore(
     key,
@@ -94,6 +99,7 @@ export function builtOnParents(
     (path, before) => lastWriterPosition(scope.log, path, before),
   );
   if (folded !== undefined) add(folded, true);
+  let viewHeldPreRun = false;
   if (readFromView(scope.log[commitIndex], key)) {
     // The sources of a window are every write of the key inside it, one writer lookup each. ONE model
     // answers them all; asked one by one, each lookup could build a model of its own.
@@ -103,6 +109,7 @@ export function builtOnParents(
     );
     queryWork.units += 1 + seen.during.length;
     const certain = seen.during.length === 0;
+    viewHeldPreRun = seen.before < 0;
     add(seen.before, certain);
     for (const position of seen.during) add(position, false);
   }
@@ -111,7 +118,7 @@ export function builtOnParents(
       .sort(([a], [b]) => a - b)
       .slice(0, limit)
       .map(([position, certain]) => ({ edge: edgeTo(scope, key, position), certain })),
-    preRun,
+    viewHeldPreRun,
   };
 }
 

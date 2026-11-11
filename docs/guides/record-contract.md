@@ -193,7 +193,12 @@ use, remote commitment or complete external ancestry.
   `builtOnView` and one edge to that row (`basis: 'built-on-view'`),
   `keyTimeline` with `builtOnViewIdx` on the write moment, the cause graph
   with an edge of attribution `'recorded-write'`. The view has one source,
-  for certain. (A commit whose marked row sits inside the key has a second
+  for certain. Where it held no write of the key, each reader says that in
+  the view's own words (`preRunView` on the node, `builtOnViewPreRun` and a
+  `'pre-run-view'` note on the timeline, the gap `untracked-input` in the
+  cause graph), and never in the words of a write folded onto the pre-run
+  value: the row is a whole write of its path, and only where part of it
+  came from is outside the log. (A commit whose marked row sits inside the key has a second
   write under it as well, the one the key was folded onto: the timeline says
   that one in `builtOnWriteIdx`, and the two can differ.) It is never
   counted as a read by the stage's code: the timeline

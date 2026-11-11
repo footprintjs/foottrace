@@ -75,6 +75,7 @@ export function sliceToJSON(slice: VariableSlice): SliceJSON {
       ...(node.incompleteSources !== undefined && { incompleteSources: node.incompleteSources }),
       ...(node.preRunReads !== undefined && { preRunReads: node.preRunReads }),
       ...(node.preRunBase !== undefined && { preRunBase: node.preRunBase }),
+      ...(node.preRunView !== undefined && { preRunView: node.preRunView }),
     };
     for (const edge of node.parentEdges) {
       edges.push({

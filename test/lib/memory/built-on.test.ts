@@ -61,6 +61,11 @@ const edgesOf = (root: CausalNode) =>
         (edge.overlap ? ` (${edge.overlap})` : ''),
     ),
   );
+/** The `'from-initial-state'` note of a timeline, word for word: it names the write it is said of. */
+const FOLDED_ON_PRE_RUN_WORDS = (key: string, at: number) =>
+  `'${key}' was first written at commit ${at}, by a write that did not replace it — the value there rests on ` +
+  'what the key held before the run, which the commit log cannot see, so the writes listed may be only part of ' +
+  'it until one replaces the key.';
 const walk = (log: CommitBundle[], id: string, reads: Record<string, string[]>, options = {}) =>
   causalChain(log, `${id}#0`, keysReadFromMap(reads).lookup, options)!;
 
@@ -658,7 +663,39 @@ describe('forward: the life of a value does not end at a write that only added t
     expect(b.builtOnPreRun).toBeUndefined();
     expect(read.fromWriteIdx).toBe(1);
     expect(timeline.notes.map((note) => note.code)).toEqual(['partial-write', 'from-initial-state']);
+    // The note names the write it is said of: the first write of the key.
+    expect(timeline.notes[1].detail).toBe(FOLDED_ON_PRE_RUN_WORDS('k', 0));
     expect(formatTimeline(timeline)).toContain('@0 write merge — a (a#0) (added to the value from BEFORE the run)');
+  });
+
+  it('a later set of the whole value does not make that note false: it speaks of ONE write, by its commit', () => {
+    // A merges into the seeded `k`; C then sets `k`. The timeline holds a write of the whole value
+    // (commit 1), so "no write of its whole value in range" would be false of it. What is true: the
+    // write at commit 0 rests on the value from before the run. (The note said the first until the
+    // second reader of the marked row asked what its words meant, round 4.)
+    const w = world({ k: { seeded: true } });
+    writes(w, 'a', [[['k'], { a: 1 }, 'merge']]);
+    writes(w, 'c', [[['k'], { c: 3 }, 'set']]);
+    const log = w.log.list();
+    const timeline = keyTimeline(log, 'k', lookup({}));
+    expect(momentsOf(timeline).map((m) => [m.commitIdx, m.verb, m.builtOnPreRun])).toEqual([
+      [0, 'merge', true],
+      [1, 'set', undefined],
+    ]);
+    expect(timeline.notes.filter((note) => note.code === 'from-initial-state')).toEqual([
+      { code: 'from-initial-state', detail: FOLDED_ON_PRE_RUN_WORDS('k', 0) },
+    ]);
+    // A backward slice says the code of the VALUE at its point, in the words it always had. At the
+    // end of this log the value is C's alone: no note. Just before C it is the merge on the seed.
+    expect(sliceForKey(log, 'k', lookup({})).notes).toBeUndefined();
+    expect(sliceForKey(log, 'k', lookup({}), { before: 1 }).notes).toEqual([
+      {
+        code: 'from-initial-state',
+        detail:
+          "'k' has no write of its whole value in range — its value rests on what it held before the run, " +
+          'which the commit log cannot see, so the writes here may be only part of it.',
+      },
+    ]);
   });
 
   it('the link is by COMMIT: a step that committed twice has its later commit linked to its earlier one', () => {

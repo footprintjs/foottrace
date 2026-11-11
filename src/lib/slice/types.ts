@@ -228,6 +228,7 @@ export type HonestyNoteCode = RegisteredCode<
   | 'truncated'
   | 'redacted'
   | 'from-initial-state'
+  | 'pre-run-view'
 >;
 
 /** One honesty statement — see {@link HonestyNoteCode}. */
@@ -433,8 +434,9 @@ export interface KeyMoment {
    * `'write'` moments only: the write did not replace the value and no
    * commit before it wrote the key, so it was folded onto what the key held
    * before the run, which the log cannot see. The timeline then carries a
-   * `'from-initial-state'` note. It speaks of the FOLD only: a row the writer
-   * built on a view that held no write says so in `builtOnViewPreRun`.
+   * `'from-initial-state'` note that names the commit. It speaks of the FOLD
+   * only: a row the writer built on a view that held no write says so in
+   * `builtOnViewPreRun`.
    */
   builtOnPreRun?: true;
   /**
@@ -456,12 +458,15 @@ export interface KeyMoment {
    * `'write'` moments only, for a commit with such a row: no commit before
    * the moment its view was pinned wrote the key, so what the row holds of
    * the key was built on the value from before the run (or on nothing),
-   * which the log cannot see. The timeline then carries a
-   * `'from-initial-state'` note. WHY NOT `builtOnPreRun`: that one says the
-   * commit was FOLDED onto the pre-run value. A marked `set` of the key is
-   * folded onto nothing (it replaced whatever a sibling had committed), and
-   * a marked row inside the key can be folded onto a commit while its view
-   * held none. The two say different things and can both be there.
+   * which the log cannot see. The timeline then carries a `'pre-run-view'`
+   * note that names the commit. WHY NOT `builtOnPreRun` and its
+   * `'from-initial-state'` note: those say the commit was FOLDED onto the
+   * pre-run value, with no write of the whole value before it, so that the
+   * value there may be partial. A marked `set` of the key is folded onto
+   * nothing (it replaced whatever a sibling had committed) and holds the
+   * whole value, and a marked row inside the key can be folded onto a
+   * commit while its view held none. The two say different things and can
+   * both be there.
    */
   builtOnViewPreRun?: true;
   /**
@@ -685,6 +690,8 @@ export interface SliceJSON {
       preRunReads?: { code: RegisteredCode<'pre-run-origin'>; keys: string[] };
       /** Copied from `CausalNode.preRunBase`; absent unless a write of the node was folded onto a pre-run value. */
       preRunBase?: { code: RegisteredCode<'from-initial-state'>; keys: string[] };
+      /** Copied from `CausalNode.preRunView`; absent unless a `set` row the writer built on the node's view held no write of a key. */
+      preRunView?: { code: RegisteredCode<'pre-run-view'>; keys: string[] };
     }
   >;
   /** Id-referenced edges: child (`from`) depends on parent (`to`). */

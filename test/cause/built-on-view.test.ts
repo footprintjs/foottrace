@@ -171,6 +171,75 @@ describe.each(Object.entries(ADAPTERS))('the cause graph over %s', (_name, graph
     expect(await answer.children(1, 'box')).toEqual([]);
   });
 
+  it('a view that held no write of the key: no parent, and the node says the rest came from outside the log', async () => {
+    // Fill's row is a `set` of the whole box, built on a view that held no write of it: the box as it
+    // was before the run, or nothing. There is no node to point at. The row IS a whole write, so
+    // nothing else on the node says that part of it came from outside the log, and without a gap the
+    // node read as complete: a walk back confirmed Fill as the root of a value it only passed on.
+    const withView: Log = [commit('fill', 0, [viewed('box')]), commit('use', 1, [set('final', ['box'])])];
+    expect(await ask(withView).parents(0, 'box')).toEqual([]);
+    expect(await ask(withView).gaps(0, 'box')).toEqual(['untracked-input']);
+    // It is the gap a step that READ the box from before the run and then set it has always had:
+    // the same input, taken by the step's code there and by the writer here.
+    const withRead: Log = [commit('fill', 0, [set('box', ['box'])]), commit('use', 1, [set('final', ['box'])])];
+    expect(await ask(withRead).gaps(0, 'box')).toEqual(['untracked-input']);
+    // A `set` the step made itself, having read nothing, holds nothing from before the run: no gap.
+    const plain: Log = [commit('fill', 0, [set('box')]), commit('use', 1, [set('final', ['box'])])];
+    expect(await ask(plain).gaps(0, 'box')).toEqual([]);
+  });
+
+  it('explain does not confirm a root through such a row: Fill is a possible cause, not the root', async () => {
+    const log: Log = [commit('fill', 0, [viewed('box')]), commit('use', 1, [set('final', ['box'])])];
+    const g = graphOf(log, { 'fill#0': [failure] });
+    const node = (at: number, key: string) =>
+      g.nodeId(address, { runtimeStageId: log[at].runtimeStageId, commitIdx: at, key });
+    const finding = await explain(g, node(1, 'final'), { includeBackward: true });
+    expect(finding.confidence).toBe('incomplete');
+    expect(finding.rootCause).toBeUndefined();
+    expect(finding.gaps.map((gap) => gap.code)).toContain('untracked-input');
+    expect(finding.alternatives).toHaveLength(1);
+    // The same record with a `set` the step made itself is a whole answer, and Fill is its root.
+    const plain: Log = [commit('fill', 0, [set('box')]), commit('use', 1, [set('final', ['box'])])];
+    const whole = graphOf(plain, { 'fill#0': [failure] });
+    const found = await explain(whole, whole.nodeId(address, { runtimeStageId: 'use#1', commitIdx: 1, key: 'final' }), {
+      includeBackward: true,
+    });
+    expect([found.confidence, found.gaps]).toEqual(['complete', []]);
+    expect(found.rootCause).toBe(whole.nodeId(address, { runtimeStageId: 'fill#0', commitIdx: 0, key: 'box' }));
+  });
+
+  it("a view pinned before the first write of the key: a sibling's write is not under the row, and the gap is said", async () => {
+    // P sets the box and commits. Fill's row was built on a view pinned before that (`viewAt: 0`: the
+    // log held no commit). In the fold Fill's row replaced what P wrote, and nothing of P's is in it.
+    const log: Log = [commit('p', 0, [set('box')]), commit('fill', 1, [viewed('box')], { viewAt: 0 })];
+    const answer = ask(log);
+    expect(await answer.parents(1, 'box')).toEqual([]);
+    expect(await answer.gaps(1, 'box')).toEqual(['untracked-input']);
+    expect(await answer.children(0, 'box')).toEqual([]);
+  });
+
+  it('a marked row INSIDE the key at the start of the log: each link says its own gap', async () => {
+    // The row sets `box.in`, so the box was not replaced: the commit was FOLDED onto the box from before
+    // the run (`conservative`: no whole write is in range, as before this change). And the row was
+    // BUILT on a view that held no write (`untracked-input`). Two statements, two gaps.
+    const log: Log = [commit('fill', 0, [viewed('box\u001fin')]), commit('use', 1, [set('final', ['box'])])];
+    expect(await ask(log).parents(0, 'box')).toEqual([]);
+    expect(await ask(log).gaps(0, 'box')).toEqual(['conservative', 'untracked-input']);
+  });
+
+  it('a view pinned after a later write holds THAT write: the earlier one is not under the row', async () => {
+    // Start sets the box, mid replaces it, and fill's row is built on a view of the state just before
+    // its own commit (no `viewAt`). That view held what mid wrote. Start's box ended when mid replaced
+    // it, so fill is no child of start, though fill's row came after and nothing but mid lies between.
+    // (A fault planted here, "judge a child as if no later write had ended the value", was caught only
+    // by the randomly seeded property test until this case was written down.)
+    const log = [commit('start', 0, [set('box')]), commit('mid', 1, [set('box')]), commit('fill', 2, [viewed('box')])];
+    const answer = ask(log);
+    expect(await answer.parents(2, 'box')).toEqual(['mid.box (recorded-write)']);
+    expect(await answer.children(1, 'box')).toEqual(['fill.box (recorded-write)']);
+    expect(await answer.children(0, 'box')).toEqual([]);
+  });
+
   it("a step that also READ the key keeps the edge it always had: one edge, the read's", async () => {
     const log = [
       commit('start', 0, [set('box')]),
@@ -285,6 +354,18 @@ describe('a record in memory that does not show where a view sits', () => {
     expect(await answer.children(1, 'box')).toEqual(['fill.box (recorded-write)']);
   });
 
+  it('a view that MAY have held no write: the write it could have held is a possible parent, and both gaps are said', async () => {
+    // Other says no index and fill says 13, with its view pinned when the log held 12 commits. Other
+    // sits before that moment or after it. Before: the view held other's box. After: it held no write.
+    const log: Log = [
+      unplaced('other', 0, [set('box')]),
+      { ...commit('fill', 1, [viewed('box')], { viewAt: 12 }), idx: 13 },
+    ];
+    const answer = ask(log);
+    expect(await answer.parents(1, 'box')).toEqual(['other.box (recorded-write)']);
+    expect(await answer.gaps(1, 'box')).toEqual(['untracked-input', 'conservative']);
+  });
+
   it('a step whose read and whose view are both only possible: the reads keep their edges', async () => {
     // The view names the same two writes as the read and nothing more certain, so nothing takes a place.
     const answer = ask(placeNotShown([viewed('box', ['box'])], { beganAt: 11, sawUntil: 13 }));
@@ -377,6 +458,39 @@ describe('with exact read sources, which know of reads only', () => {
       [node(1), 'recorded-write'],
     ]);
     expect((await g.gaps(node(2), ctx())).map((gap) => gap.code)).toContain('conservative');
+  });
+
+  it('a view that held no write is a known end here, as a read of the state before the run is: no gap', async () => {
+    // With exact sources the host hands over the initial state, and the state before the run is an
+    // end of the walk the graph knows (`docs/cause.md`). The gap of the other path would be noise.
+    const first: Log = [commit('fill', 0, [viewed('box')]), commit('use', 1, [set('final', ['box'])])];
+    const g = createRecordGraph([
+      {
+        ...scope(first),
+        initialState: {},
+        readSources: {
+          record: {
+            ...book,
+            occurrences: [
+              {
+                ...book.occurrences[0],
+                runtimeStageId: 'use#1',
+                attemptId: 'use#1@1',
+                source: { kind: 'committed', commitIdx: 0 },
+              },
+            ],
+          },
+          executions: first.map((bundle) => ({
+            runtimeStageId: bundle.runtimeStageId,
+            stateAddress: [],
+            attemptIds: [`${bundle.runtimeStageId}@1`],
+          })),
+        },
+      } as unknown as RecordScope,
+    ]);
+    const fill = g.nodeId(address, { runtimeStageId: 'fill#0', commitIdx: 0, key: 'box' });
+    expect((await g.parents(fill, ctx())).edges).toEqual([]);
+    expect((await g.gaps(fill, ctx())).map((gap) => gap.code)).toEqual([]);
   });
 
   it('no read occurrence names what Fill built its row on; the mark does, both ways', async () => {

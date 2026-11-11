@@ -58,6 +58,15 @@
  * that ran beside others and then wrote such a row holds what was there when its view was pinned,
  * not what a sibling committed since. WHY A STAMP OF ITS OWN FOR THAT MOMENT, and not the step's
  * read stamps: `CommitBundle.viewAt` says it.
+ * WHEN THE VIEW HELD NO WRITE OF THE KEY the row was built on the value from before the run, or on
+ * nothing. A reader says that in the view's own words (`'pre-run-view'`: `CausalNode.preRunView`,
+ * `KeyMoment.builtOnViewPreRun`, the cause graph's `untracked-input`) and never in the fold's
+ * (`'from-initial-state'`). WHY: the fold's code says no write of the whole value is under the
+ * value, so it may be partial. A marked `set` is a whole write of its path, and what the log
+ * cannot see is only where part of it came from. One code for both made a timeline that held two
+ * `set` rows of a key say it had "no write of its whole value in range", and left the cause
+ * graph's node with no parent and no gap, the shape of a root (found in round 4 of this change's
+ * second read, and by then asking every reader about the same row).
  * Until the writer marked these rows they were read as plain replacements and the walk stopped at
  * them (found by this rule's own property test, and under the default encoding by its second reader).
  *

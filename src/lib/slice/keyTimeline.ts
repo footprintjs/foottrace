@@ -42,6 +42,17 @@
  * cannot place the view at one position of the array could it have held
  * other writes (`orViewIdxs`).
  *
+ * ### LAW — one note per link, each in its own words
+ *
+ * "The value from before the run is under this write" is two statements.
+ * FOLDED onto it (`builtOnPreRun`): no write of the whole value is under
+ * the write, so the value there may be partial. The note is
+ * `'from-initial-state'`, and it names the write, because a later write in
+ * the same timeline can replace the key. BUILT on a view of it
+ * (`builtOnViewPreRun`): the row is a whole write of its path, and only
+ * where part of it came from is outside the log. The note is
+ * `'pre-run-view'`. Neither borrows the other's words (`keyIndex.ts`).
+ *
  * DAG position: memory ← slice. Imports memory/ only (see README.md).
  */
 
@@ -60,6 +71,7 @@ import {
   nestedRowsNote,
   partialWriteNote,
   preRunOriginNote,
+  preRunViewNote,
   readsNotRecordedNote,
   unknownKeyNote,
   writeEntry,
@@ -133,7 +145,9 @@ export function keyTimeline(
   let r = 0;
   let sawPreRunRead = false;
   let concurrentReads = 0;
-  let restsOnPreRun = false;
+  // The writes that rest on what the key held before the run, by the link that says so (`KeyMoment`).
+  let foldedOnPreRun: number | undefined; // at most one: only the first write of a key has nothing before it
+  const viewsOfPreRun: number[] = [];
   const bundleAt = (position: number): CommitBundle => commitLog[position];
   const writeBefore = (_key: string, before: number): number => lastIndexBefore(allWrites, before) ?? -1;
   while (w < writes.length || r < reads.length) {
@@ -176,7 +190,8 @@ export function keyTimeline(
       // inside the key, folded onto an earlier commit, whose view was pinned before any write).
       const foldPreRun = under === -1;
       const viewPreRun = seen !== undefined && seen.before < 0;
-      if (foldPreRun || viewPreRun) restsOnPreRun = true;
+      if (foldPreRun) foldedOnPreRun = idx;
+      if (viewPreRun) viewsOfPreRun.push(idx);
       moments.push({
         kind: 'write',
         commitIdx: idx,
@@ -198,7 +213,10 @@ export function keyTimeline(
   if (nested.length > 0) notes.push(nestedRowsNote(normalisedKey, nested));
   const merged = mergedWrites(commitLog, normalisedKey, writes);
   if (merged.length > 0) notes.push(partialWriteNote(normalisedKey, merged));
-  if (restsOnPreRun) notes.push(fromInitialStateNote(normalisedKey));
+  // One note per link, each in its own words: a fold onto the pre-run value says the value may be
+  // partial; a row built on a view of it is a whole write whose origin the log cannot see.
+  if (foldedOnPreRun !== undefined) notes.push(fromInitialStateNote(normalisedKey, foldedOnPreRun));
+  if (viewsOfPreRun.length > 0) notes.push(preRunViewNote(normalisedKey, viewsOfPreRun));
   if (concurrentReads > 0) notes.push(concurrentReadsNote(concurrentReads));
   return { ...base, moments, notes };
 }

@@ -166,8 +166,28 @@ export interface CausalNode {
    * part. The code says so (`'from-initial-state'`, registered in `memory/honesty.ts · HONESTY_CODES`);
    * `keys` are in the order the walk met them. Only for a key the walk came through (a child read it
    * from this node, or it is the key a slice is about). ABSENT otherwise, so a node keeps its shape.
+   * It speaks of the FOLD only: a `set` row the writer built on a view that held no write of the key
+   * is in `preRunView`.
    */
   preRunBase?: { code: RegisteredCode<'from-initial-state'>; keys: string[] };
+  /**
+   * The keys for which this node holds a `set` row the WRITER built on its step's view
+   * (`TraceEntry.builtOnView`; on the key, around it, or on a path inside it) when no commit had
+   * written the key before that view was pinned: what the row holds of the key beyond the step's own
+   * writes was absent or came from the state before the run, which the commit log cannot see, so the
+   * walk has no edge to follow for that part. The
+   * code says so (`'pre-run-view'`, registered in `memory/honesty.ts · HONESTY_CODES`); `keys` are in
+   * the order the walk met them. Said too where the record does not show where the view sits and it
+   * only MAY have been pinned that early: the writes it could have held instead are then edges with
+   * `overlap`. Only for a key the walk came through. ABSENT otherwise, so a node keeps its shape.
+   *
+   * WHY A FIELD OF ITS OWN. Not `preRunReads`: no code of the step read the key, the same reason the
+   * edge to a write a view held is marked `builtOn: 'built-on-view'`. Not `preRunBase`: that one says
+   * the write was FOLDED onto the pre-run value, with no write of the whole value under it, so the
+   * value there may be partial. A marked `set` of the key replaced the value in the fold and holds
+   * all of it. What the log cannot see here is only where part of it came from.
+   */
+  preRunView?: { code: RegisteredCode<'pre-run-view'>; keys: string[] };
 }
 
 /**
@@ -764,10 +784,14 @@ function buildCausalChain(
       }
       for (const [position, overlap] of under) {
         if (position < 0) {
-          // Folded onto what the key held before the run (or built on a view that held it): say why
-          // there is no edge.
-          node.preRunBase ??= { code: 'from-initial-state', keys: [] };
-          if (!node.preRunBase.keys.includes(key)) node.preRunBase.keys.push(key);
+          // Nothing in the log is under this link: say why there is no edge, in the field of the link.
+          // Folded onto what the key held before the run, or built on a view that held it, are two
+          // statements (`CausalNode.preRunBase`, `preRunView`): only the first leaves the value partial.
+          const keys =
+            from === 'fold'
+              ? (node.preRunBase ??= { code: 'from-initial-state', keys: [] }).keys
+              : (node.preRunView ??= { code: 'pre-run-view', keys: [] }).keys;
+          if (!keys.includes(key)) keys.push(key);
         } else if (commitLog[position].runtimeStageId === node.runtimeStageId) {
           pending.push(...partialWrite(node.runtimeStageId, key, position));
         } else {

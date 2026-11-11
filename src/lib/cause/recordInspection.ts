@@ -112,9 +112,15 @@ function projectParentEdges(
  * An edge from here that is itself only possible (a view with a write of the key in its window)
  * stands where no read names the node, and brings `conservative` with it.
  *
- * A write that rests on the value from before the run has no node to point at and adds no gap of
- * its own: the node already carries `conservative` for a value with no whole write in range (the
- * `'from-initial-state'` note of its slice), as it did before this edge existed.
+ * THE VALUE FROM BEFORE THE RUN has no node to point at, and the two links owe different things:
+ *   - a write FOLDED onto it adds no gap of its own. The node already carries `conservative` for a
+ *     value with no whole write in range (the `'from-initial-state'` note of its slice), as it did
+ *     before this edge existed;
+ *   - a `set` row built on a VIEW that held it (or may have) adds `untracked-input`. WHY: a marked
+ *     `set` of the key IS a whole write of it, so its slice has no note and nothing else says that
+ *     part of the row came from outside the log. Without the gap the node read as complete with no parent, and a walk
+ *     back confirmed it as the root of a value it only passed on. It is the gap a step that READ the
+ *     key from before the run gets (`preRunReads`, below): the same input, taken by the writer.
  */
 function addBuiltOnParents(
   scope: PreparedRecordScope,
@@ -124,7 +130,9 @@ function addBuiltOnParents(
   maximumEdges: number,
   addGap: AddRecordGap,
 ): void {
-  for (const { edge, certain } of builtOnParents(scope, key, commitIndex, maximumEdges + 1).parents) {
+  const under = builtOnParents(scope, key, commitIndex, maximumEdges + 1);
+  if (under.viewHeldPreRun) addGap('untracked-input');
+  for (const { edge, certain } of under.parents) {
     const named = parents.edges.findIndex((other) => other.kind === 'data' && other.nodeId === edge.nodeId);
     if (named >= 0) {
       if (certain && parents.onlyPossible.has(edge.nodeId)) parents.edges[named] = edge;
