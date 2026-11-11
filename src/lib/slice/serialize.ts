@@ -244,7 +244,10 @@ const MAYBE_READ_WORDS: Record<ReadOverlap, string> = {
 /**
  * What a write moment's value still holds of earlier writes, as the end of its line. Two links, each
  * said when it is there: the write it was folded onto, and the write its step's view held (for a row
- * the writer built on that view; several when the array does not show where the view sits).
+ * the writer built on that view; several when the reader cannot place the view at one position of
+ * the array). WHY two wordings: "added to" is true of a fold only. A `set` the writer built on its
+ * view replaced the value in the fold, so calling it "added to" would say a write is still under it
+ * that the fold dropped. Each link is worded from its own fields (`KeyMoment`), never from the other's.
  */
 function builtOnWords(moment: KeyMoment): string {
   const parts: string[] = [];
