@@ -25,13 +25,20 @@ import type { Stop, TimeTravelStrategy } from './types.js';
  */
 function mountIdsFrom(tree: ExecutionTree | undefined): Set<string> {
   const ids = new Set<string>();
-  if (!tree) return ids;
-  const work: ExecutionTree[] = [tree];
+  // The tree can come from a file or be built by hand, so a node is read only when it is a plain
+  // object, and once: a null child is no crash, and a `next` or a child that points back is no
+  // endless walk. A node of another shape names no mount (the rule `readTree` applies to the root).
+  const seen = new Set<object>();
+  const work: unknown[] = [tree];
   while (work.length > 0) {
-    const node = work.pop()!;
-    if (node.subflowId && node.runtimeStageId) ids.add(node.runtimeStageId);
-    if (node.next) work.push(node.next);
-    if (node.children) work.push(...node.children);
+    const node = work.pop();
+    if (!isPlainish(node) || seen.has(node)) continue;
+    seen.add(node);
+    if (node.subflowId && typeof node.runtimeStageId === 'string' && node.runtimeStageId !== '') {
+      ids.add(node.runtimeStageId);
+    }
+    work.push(node.next);
+    if (Array.isArray(node.children)) for (const child of node.children) work.push(child);
   }
   return ids;
 }

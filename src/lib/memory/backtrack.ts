@@ -23,24 +23,23 @@
  *
  * ## Staged Optimization
  *
- * Two writer-lookup strategies, chosen automatically by commit log size:
+ * Two writer-lookup strategies, chosen automatically by commit log size. Both
+ * give the answer `findLastWriter` gives, so the choice never changes a slice:
  *
- * | Strategy | When | Complexity per lookup |
- * |----------|------|----------------------|
- * | Linear scan | N ≤ 256 | O(N) — simple backward scan |
- * | Reverse index | N > 256 | O(K log N) — prebuilt key→[indices], binary search |
+ * | Strategy | When | Cost per lookup |
+ * |----------|------|-----------------|
+ * | Scan | N ≤ 256 | `findLastWriter`: a backward scan of the log. A frozen log (an engine snapshot's) is answered from its memoised read model instead. |
+ * | Read model | N > 256 | one build of the log's read model for the call (`logModel.ts`: a path trie over the rows), then a binary search |
  *
- * The threshold (256) is chosen so the O(N) build cost of the reverse index
- * is amortized over the BFS traversal. Below 256, linear scan wins because
- * there's no index build overhead. The consumer never sees this — `causalChain()`
- * picks the right strategy internally (like a query optimizer choosing between
- * sequential scan vs index scan based on table size).
+ * The threshold (256) is where building the read model for one call pays for
+ * itself. The consumer never sees this — `causalChain()` picks the strategy
+ * internally (like a query optimizer choosing between a sequential scan and
+ * an index scan by table size).
  *
  * ## Complexity
  *
- * - **Small logs (N ≤ 256):** O(V × K × N) total. V=visited, K=avg keys/node.
- * - **Large logs (N > 256):** O(N × U) index build + O(V × K × log N) lookups.
- *   U = unique keys. Amortized over all BFS hops.
+ * - **Small logs (N ≤ 256):** O(V × K × N) total at worst. V=visited, K=avg keys/node.
+ * - **Large logs (N > 256):** O(rows) model build + O(V × K × (depth + log N)) lookups.
  *
  * ## References
  *
@@ -61,6 +60,7 @@ import { buildCommitIndex, findLastWriter } from './commitLogUtils.js';
 import type { RegisteredCode } from './honesty.js';
 import { queryWork, relation, writesOnlyInside } from './keyPaths.js';
 import { logModel } from './logModel.js';
+import { shownPath } from '../record-paths/codec.js';
 import type { CommitBundle, TraceEntry, UntrackedSource } from './types.js';
 
 // ── Types ──────────────────────────────────────────────────────────────
@@ -290,14 +290,17 @@ function reverseIndexLookup(commitLog: CommitBundle[]): WriterLookup {
 
 /**
  * The trace entries of `commit` that make it a writer of `linkKey` — the entries whose read
- * prefix (`TraceEntry.readKeys`) a per-write edge expands through. The FIRST entry on the exact
- * path when there is one (the #P1 behaviour, unchanged); otherwise every entry inside or around
- * the key (9.33.0: the commit wrote the key through a nested row — a subflow seed, an
- * outputMapper merge-back — and all of those rows wrote it).
+ * prefix (`TraceEntry.readKeys`) a per-write edge expands through. EVERY entry on the exact path
+ * when there is one: a stage that wrote the key twice committed its LAST write, and the reads
+ * between the two writes are causes of it. ('delta' encoding keeps one row per path with the last
+ * prefix; 'full' keeps a row per write, so taking the first row alone dropped those reads.) The
+ * caller unions the rows' prefixes, which is the last prefix when prefixes only grow. Otherwise
+ * every entry inside or around the key (9.33.0: the commit wrote the key through a nested row — a
+ * subflow seed, an outputMapper merge-back — and all of those rows wrote it).
  */
 function linkingEntries(commit: CommitBundle, linkKey: string): TraceEntry[] {
-  const exact = commit.trace.find((t) => t.path === linkKey);
-  if (exact !== undefined) return [exact];
+  const exact = commit.trace.filter((t) => t.path === linkKey);
+  if (exact.length > 0) return exact;
   return commit.trace.filter((t) => relation(t.path, linkKey) !== undefined);
 }
 
@@ -306,13 +309,13 @@ function linkingEntries(commit: CommitBundle, linkKey: string): TraceEntry[] {
  *
  * Like a database query optimizer choosing between sequential scan and index scan:
  *
- * - **Small log (≤ 256):** Linear scan wins. Zero setup cost, good cache locality.
- *   The overhead of building a reverse index isn't worth it for short logs.
+ * - **Small log (≤ 256):** the scan (`findLastWriter`). No model is built for the call unless
+ *   a lookup needs one; a frozen log is answered from its memoised read model.
  *
- * - **Large log (> 256):** Reverse index wins. O(N×U) upfront build cost is amortized
- *   across all BFS hops. Each lookup becomes O(log N) via binary search instead of O(N).
- *   For an agent loop with 500 iterations and 5 keys per hop, this is 500×5×log(500)≈22K ops
- *   vs 500×5×500=1.25M ops with linear scan.
+ * - **Large log (> 256):** the read model. One O(rows) build is amortized across all BFS
+ *   hops, and each lookup is a binary search instead of a scan. For an agent loop with 500
+ *   iterations and 5 keys per hop, this is 500×5×log(500)≈22K ops vs 500×5×500=1.25M ops
+ *   with a scan.
  *
  * The caller never sees this — `causalChain()` picks automatically.
  */
@@ -660,9 +663,9 @@ export function flattenCausalDAG(root: CausalNode): CausalNode[] {
  * (human or LLM) debugging from the slice is TOLD when it is incomplete.
  *
  * RFC-003 D3: control edges render as `← [control: <rule label>]`
- * (label omitted when the decision carried none). Data rendering is
- * byte-identical to the pre-D3 output — `← via <key>` from the node's
- * discovery-time `linkedBy`.
+ * (label omitted when the decision carried none). A data edge renders as
+ * `← via <key>`: the key of the edge from the child the node is shown under
+ * (the first one, when that child read several keys from this node).
  *
  * RFC-003 D4: edge weights from the `weigh` hook render as a suffix —
  * `← via systemPrompt (0.18)` — only when ≠ 1.0, so unweighted output is
@@ -683,18 +686,19 @@ export function formatCausalChain(root: CausalNode): string {
     }
     visited.add(node.runtimeStageId);
 
+    // The key is the DISPLAYED child's own edge to this node. `node.linkedBy` is the key of whichever
+    // child discovered the node first (breadth-first), and this walk is depth-first: under another
+    // child it named a key that child never read.
     const linkParts: string[] = [];
-    if (node.linkedBy) {
-      const dataEdge = edgesFromChild?.find((e) => e.kind === 'data');
-      linkParts.push(`via ${node.linkedBy}${weightSuffix(dataEdge)}`);
-    }
+    const dataEdge = edgesFromChild?.find((e) => e.kind === 'data');
+    if (dataEdge?.key) linkParts.push(`via ${shownPath(dataEdge.key)}${weightSuffix(dataEdge)}`);
     const controlEdge = edgesFromChild?.find((e) => e.kind === 'control');
     if (controlEdge) {
       linkParts.push(`[control${controlEdge.key ? `: ${controlEdge.key}` : ''}]${weightSuffix(controlEdge)}`);
     }
     const link = linkParts.length > 0 ? ` ← ${linkParts.join(' ← ')}` : '';
 
-    const writes = node.keysWritten.length > 0 ? ` [wrote: ${node.keysWritten.join(', ')}]` : '';
+    const writes = node.keysWritten.length > 0 ? ` [wrote: ${node.keysWritten.map(shownPath).join(', ')}]` : '';
     lines.push(`${'  '.repeat(indent)}${node.stageName} (${node.runtimeStageId})${link}${writes}`);
 
     if (node.incompleteSources && node.incompleteSources.length > 0) {

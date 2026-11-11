@@ -65,3 +65,12 @@ export function normalisePath(path: (string | number)[]): string {
 export function pathSegments(path: string): string[] {
   return path.split(DELIM);
 }
+
+/**
+ * A path as a person reads it: its segments joined by ` › `. The one display form the library's own
+ * text uses (slice and causal-chain text, honesty notes), so none of it prints the separator, a
+ * control character. A single-segment path, a top-level key, prints as itself.
+ */
+export function shownPath(path: string): string {
+  return pathSegments(path).join(' › ');
+}

@@ -38,6 +38,7 @@ import type {
   SliceJSON,
   VariableSlice,
 } from './types.js';
+import { shownPath } from '../record-paths/codec.js';
 
 /**
  * Flat, JSON-safe projection: every DAG node exactly once (keyed by
@@ -53,7 +54,11 @@ export function sliceToJSON(slice: VariableSlice): SliceJSON {
     keysReadKind: slice.keysReadKind,
     ...(slice.readsCoverage !== undefined && { readsCoverage: slice.readsCoverage }),
   };
-  if (!slice.root) return out;
+  if (!slice.root) {
+    // A missing slice can still hold a note: a redaction hid the write.
+    if (slice.notes !== undefined) out.notes = slice.notes;
+    return out;
+  }
 
   out.writerId = slice.root.runtimeStageId;
   const nodes: NonNullable<SliceJSON['nodes']> = {};
@@ -102,18 +107,24 @@ export function sliceToJSON(slice: VariableSlice): SliceJSON {
 export function formatSlice(slice: VariableSlice): string {
   const lines: string[] = [];
   const anchor = slice.before !== undefined ? ` (before commit ${slice.before})` : '';
-  lines.push(`SLICE for '${slice.key}'${anchor} — reads via: ${slice.keysReadKind}`);
+  const key = shownPath(slice.key);
+  lines.push(`SLICE for '${key}'${anchor} — reads via: ${slice.keysReadKind}`);
 
   if (slice.missing === 'empty-log') {
     lines.push('no slice: the commit log is empty (nothing has executed).');
     return lines.join('\n');
   }
   if (slice.missing === 'never-written') {
+    // A note on a missing slice says why no write is visible (a redaction hid it). Then the
+    // sentence about values from before the run would be the wrong claim, so the note stands alone.
+    const notes = slice.notes ?? [];
     lines.push(
-      `no slice: '${slice.key}' was never written in range — the value came from ` +
-        'initial state, frozen run input (args), or a closure; the commit log cannot see those.',
+      notes.length > 0
+        ? `no slice: no write of '${key}' is visible in range.`
+        : `no slice: '${key}' was never written in range — the value came from ` +
+            'initial state, frozen run input (args), or a closure; the commit log cannot see those.',
     );
-    return lines.join('\n');
+    return [...lines, ...noteLines(notes)].join('\n');
   }
 
   const cov = slice.readsCoverage;
@@ -156,9 +167,9 @@ function nodeHeadline(node: ForwardNode): string {
   const life =
     node.nextWriteIdx !== undefined ? `live until commit ${node.nextWriteIdx}` : 'live to the end of the run';
   if (node.origin === 'pre-run') {
-    return `'${node.key}' from BEFORE the run (initial state / input / closure) — ${life}`;
+    return `'${shownPath(node.key)}' from BEFORE the run (initial state / input / closure) — ${life}`;
   }
-  return `'${node.key}' ${node.verb ?? 'set'} by ${node.stageName} (${node.runtimeStageId}) @${
+  return `'${shownPath(node.key)}' ${node.verb ?? 'set'} by ${node.stageName} (${node.runtimeStageId}) @${
     node.commitIdx
   } — ${life}`;
 }
@@ -207,7 +218,6 @@ export function forwardSliceToJSON(slice: ForwardSlice): ForwardSliceJSON {
     node.fedEdges.map((edge) => ({ from: ids.get(node)!, to: ids.get(edge.child)!, basis: edge.basis })),
   );
   if (slice.root.truncated) out.truncated = slice.root.truncated;
-  if (slice.notes !== undefined) out.notes = slice.notes;
   return out;
 }
 
@@ -222,14 +232,14 @@ export function forwardSliceToJSON(slice: ForwardSlice): ForwardSliceJSON {
 export function formatForwardSlice(slice: ForwardSlice): string {
   const lines: string[] = [];
   const anchor = slice.before !== undefined ? ` (as of before commit ${slice.before})` : '';
-  lines.push(`FORWARD SLICE for '${slice.key}'${anchor} — reads via: ${slice.keysReadKind}`);
+  lines.push(`FORWARD SLICE for '${shownPath(slice.key)}'${anchor} — reads via: ${slice.keysReadKind}`);
 
   if (slice.missing === 'empty-log') {
     lines.push('no forward slice: the commit log is empty (nothing has executed).');
     return [...lines, ...noteLines(slice.notes)].join('\n');
   }
   if (slice.missing === 'never-written') {
-    lines.push(`no forward slice: '${slice.key}' was never written and never read in this log.`);
+    lines.push(`no forward slice: '${shownPath(slice.key)}' was never written and never read in this log.`);
     return [...lines, ...noteLines(slice.notes)].join('\n');
   }
 
@@ -275,14 +285,14 @@ const MOMENTS_RENDERED = 60;
 export function formatTimeline(timeline: KeyTimeline): string {
   const lines: string[] = [];
   const bound = timeline.before !== undefined ? ` (before commit ${timeline.before})` : '';
-  lines.push(`TIMELINE for '${timeline.key}'${bound} — reads via: ${timeline.keysReadKind}`);
+  lines.push(`TIMELINE for '${shownPath(timeline.key)}'${bound} — reads via: ${timeline.keysReadKind}`);
 
   if (timeline.missing === 'empty-log') {
     lines.push('no timeline: the commit log is empty (nothing has executed).');
     return [...lines, ...noteLines(timeline.notes)].join('\n');
   }
   if (timeline.missing === 'never-written') {
-    lines.push(`no timeline: '${timeline.key}' was never written and never read in this log.`);
+    lines.push(`no timeline: '${shownPath(timeline.key)}' was never written and never read in this log.`);
     return [...lines, ...noteLines(timeline.notes)].join('\n');
   }
 

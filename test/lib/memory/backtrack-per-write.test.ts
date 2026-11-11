@@ -142,6 +142,50 @@ describe('edgeAttribution per-write — unit', () => {
     const dag = causalChain(LOG, 'writerA#0', lookup, { edgeAttribution: 'per-write', rootLinkKeys: ['a'] })!;
     expect(dag.parents).toHaveLength(0); // [] ≠ absent: no fallback, honest leaf
   });
+
+  it('a key written twice in one commit expands through the reads behind its LAST write', () => {
+    // S reads a, writes k, reads b, writes k again: the committed k came from the second write, so b
+    // is a cause. ('full' encoding keeps one trace row per write; 'delta' keeps the last one only.)
+    const twice = [
+      commit('wa', 'wa#0', [{ key: 'a', readKeys: [] }], 0),
+      commit('wb', 'wb#1', [{ key: 'b', readKeys: [] }], 1),
+      commit(
+        'S',
+        'S#2',
+        [
+          { key: 'k', readKeys: ['a'] },
+          { key: 'k', readKeys: ['a', 'b'] },
+        ],
+        2,
+      ),
+    ];
+    const dag = causalChain(twice, 'S#2', (id) => (id === 'S#2' ? ['a', 'b'] : []), {
+      edgeAttribution: 'per-write',
+      rootLinkKeys: ['k'],
+    })!;
+    expect(ids(dag)).toEqual(new Set(['S#2', 'wa#0', 'wb#1']));
+
+    // The same stage recorded with the last row only ('delta') gives the same causes.
+    const lastOnly = [...twice.slice(0, 2), commit('S', 'S#2', [{ key: 'k', readKeys: ['a', 'b'] }], 2)];
+    const fromLastOnly = causalChain(lastOnly, 'S#2', (id) => (id === 'S#2' ? ['a', 'b'] : []), {
+      edgeAttribution: 'per-write',
+      rootLinkKeys: ['k'],
+    })!;
+    expect(ids(dag)).toEqual(ids(fromLastOnly));
+  });
+
+  it('a row without readKeys among the rows of one key falls back to the stage level', () => {
+    const mixedRows = [
+      commit('wa', 'wa#0', [{ key: 'a', readKeys: [] }], 0),
+      commit('wb', 'wb#1', [{ key: 'b', readKeys: [] }], 1),
+      commit('S', 'S#2', [{ key: 'k', readKeys: ['a'] }, { key: 'k' }], 2),
+    ];
+    const dag = causalChain(mixedRows, 'S#2', (id) => (id === 'S#2' ? ['a', 'b'] : []), {
+      edgeAttribution: 'per-write',
+      rootLinkKeys: ['k'],
+    })!;
+    expect(ids(dag)).toEqual(new Set(['S#2', 'wa#0', 'wb#1']));
+  });
 });
 
 // ════════════════════════════════════════════════════════════════════════

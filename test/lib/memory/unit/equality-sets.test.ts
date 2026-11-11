@@ -1,0 +1,405 @@
+/**
+ * `deepEqual` on sets. A set is compared member by member in any order, so the search tries a
+ * member against candidates that do not match. A try that fails must leave nothing behind: the
+ * pairs it met are otherwise remembered as "already known equal", and a later comparison of the
+ * same two objects is answered `true`. The net-change filter then drops a real change.
+ */
+import { describe, expect, it } from 'vitest';
+
+import { deepEqual } from '../../../../src/lib/memory/equality.js';
+import { TransactionBuffer } from '../../../../src/lib/memory/TransactionBuffer.js';
+
+describe('deepEqual — a failed try inside a set leaves no memory', () => {
+  it('two different objects stay different after a set tried and refused to pair them', () => {
+    const o1 = { v: 1 };
+    const o2 = { v: 2 };
+    // In the sets, o1 is first tried against o2 (no match) and then pairs with { v: 1 }.
+    const a = [new Set([o1, { v: 2 }]), o1];
+    const b = [new Set([o2, { v: 1 }]), o2];
+    expect(deepEqual(o1, o2)).toBe(false);
+    expect(deepEqual(a, b)).toBe(false);
+  });
+
+  it('the pairs met deeper inside a failed try are forgotten too', () => {
+    const inner1 = { v: 1 };
+    const inner2 = { v: 2 };
+    const a = [
+      new Set([
+        { same: 0, box: inner1 },
+        { same: 0, box: { v: 2 } },
+      ]),
+      inner1,
+    ];
+    const b = [
+      new Set([
+        { same: 0, box: inner2 },
+        { same: 0, box: { v: 1 } },
+      ]),
+      inner2,
+    ];
+    expect(deepEqual(a, b)).toBe(false);
+  });
+
+  it('a failed try inside a set that is itself being tried is forgotten with it', () => {
+    const o1 = { v: 1 };
+    const o2 = { v: 2 };
+    const a = [new Set([new Set([o1, { v: 2 }])]), o1];
+    const b = [new Set([new Set([o2, { v: 1 }])]), o2];
+    expect(deepEqual(a, b)).toBe(false);
+  });
+
+  it('the net-change filter records the change such a value hides', () => {
+    const o1 = { v: 1 };
+    const o2 = { v: 2 };
+    const before = { k: [new Set([o1, { v: 2 }]), o1] };
+    const buffer = new TransactionBuffer(before, 'full');
+    buffer.set(['k'], [new Set([o2, { v: 1 }]), o2]);
+    expect(buffer.commit().trace.map((row) => row.path)).toEqual(['k']);
+  });
+});
+
+describe('deepEqual — a pair is compared once, whichever way a set search goes', () => {
+  /**
+   * `depth` levels, each a set of two objects that share the level below. The innermost object counts
+   * how often it is read, so the tests count comparisons and need no clock. `flip` lists the two
+   * objects of each level in the other order, so the first candidate tried is the wrong one.
+   */
+  function shared(depth: number, leaf: number, flip = false) {
+    const counter = { reads: 0 };
+    const innermost = Object.defineProperty({}, 'v', {
+      enumerable: true,
+      get() {
+        counter.reads++;
+        return leaf;
+      },
+    });
+    let level: unknown = new Set([innermost]);
+    for (let d = 0; d < depth; d++) {
+      const below = level;
+      const pair = [
+        { n: below, t: 1 },
+        { n: below, t: 2 },
+      ];
+      level = new Set(flip ? pair.reverse() : pair);
+    }
+    return { value: level, counter };
+  }
+  const DEPTH = 16; // comparing the innermost pair once per path would be 2^16 comparisons
+
+  it('equal values: a pair proven equal inside a try that fails is not compared again', () => {
+    const a = shared(DEPTH, 0);
+    const b = shared(DEPTH, 0, true);
+    expect(deepEqual(a.value, b.value)).toBe(true);
+    expect(a.counter.reads).toBeLessThanOrEqual(4);
+  });
+
+  it('different values: a pair found different is not compared again', () => {
+    const a = shared(DEPTH, 0);
+    const b = shared(DEPTH, 1);
+    expect(deepEqual(a.value, b.value)).toBe(false);
+    expect(a.counter.reads).toBeLessThanOrEqual(4);
+  });
+
+  it('a value that shares one object many times, with no set at all, is walked once', () => {
+    const counter = { reads: 0 };
+    const leaf = () =>
+      Object.defineProperty({}, 'v', {
+        enumerable: true,
+        get() {
+          counter.reads++;
+          return 1;
+        },
+      });
+    const diamonds = (inner: object) => {
+      let level: object = inner;
+      for (let d = 0; d < DEPTH; d++) level = { left: level, right: level };
+      return level;
+    };
+    expect(deepEqual(diamonds(leaf()), diamonds(leaf()))).toBe(true);
+    expect(counter.reads).toBeLessThanOrEqual(4);
+  });
+});
+
+describe('deepEqual — values that point back at themselves', () => {
+  it('two rings of the same shape are equal, and a ring with one different link is not', () => {
+    const ring = (values: number[]) => {
+      const nodes = values.map((v) => ({ v, next: null as unknown }));
+      nodes.forEach((node, i) => (node.next = nodes[(i + 1) % nodes.length]));
+      return nodes[0];
+    };
+    expect(deepEqual(ring([1, 2, 3]), ring([1, 2, 3]))).toBe(true);
+    expect(deepEqual(ring([1, 2, 3]), ring([1, 2, 4]))).toBe(false);
+    // The same ring unrolled twice has the same structure: every walk from the start reads the same values.
+    expect(deepEqual(ring([1, 2]), ring([1, 2, 1, 2]))).toBe(true);
+  });
+
+  it('a ring whose links are doubled is still walked once', () => {
+    // Each node points at the next one twice. The second link meets a pair that was found equal
+    // only as long as the ring's first pair is; comparing it again each time would double per node.
+    const counter = { reads: 0 };
+    const ring = (length: number) => {
+      const nodes = Array.from({ length }, (_, i) => {
+        const node: Record<string, unknown> = { i };
+        if (i === length - 1) {
+          Object.defineProperty(node, 'mark', {
+            enumerable: true,
+            get() {
+              counter.reads++;
+              return 'last';
+            },
+          });
+        }
+        return node;
+      });
+      nodes.forEach((node, i) => {
+        node.left = nodes[(i + 1) % length];
+        node.right = nodes[(i + 1) % length];
+      });
+      return nodes[0];
+    };
+    expect(deepEqual(ring(18), ring(18))).toBe(true);
+    expect(counter.reads).toBeLessThanOrEqual(8);
+  });
+
+  it('an equal answer that rested on a pair still being compared is not kept when that pair fails', () => {
+    // inner(a) and inner(b) look equal only while their owners are assumed equal; the owners differ in `tail`.
+    const make = (tail: number) => {
+      const owner: Record<string, unknown> = {};
+      const inner = { back: owner };
+      owner.first = new Set([inner]);
+      owner.tail = tail;
+      return { owner, inner };
+    };
+    const a = make(1);
+    const b = make(2);
+    expect(deepEqual([a.owner, a.inner], [b.owner, b.inner])).toBe(false);
+    expect(deepEqual(a.inner, b.inner)).toBe(false);
+  });
+
+  it('a "different" that rested on a wrong guess about a pair above it is not kept as a fact', () => {
+    // A and B are equal: A = { {p: h1}, {p: h2x} }, B = { {p: h2}, {p: h1x} }, where h1 ~ h1x and
+    // h2x ~ h2 exactly because A ~ B. But h1 and h2 differ (their `tail`).
+    const A = new Set<unknown>();
+    const B = new Set<unknown>();
+    const h1 = { s: A, tail: 1 };
+    const h2 = { s: B, tail: 2 };
+    const h1x = { s: B, tail: 1 };
+    const h2x = { s: A, tail: 2 };
+    A.add({ p: h1 }).add({ p: h2x });
+    B.add({ p: h2 }).add({ p: h1x });
+    expect(deepEqual(A, B)).toBe(true);
+    expect(deepEqual(h1, h2)).toBe(false);
+
+    // Comparing h1 with h2 walks into (A, B) while (h1, h2) is still assumed equal. Under that wrong
+    // assumption the set search pairs {p: h1} with {p: h2}, cannot pair the rest, and answers
+    // "different" for (A, B). That answer must not be remembered: (A, B) is asked again below,
+    // where the right answer is "equal".
+    const a = new Set<unknown>([{ probe: h1 }, { probe: h2x }, { w: A }]);
+    const b = new Set<unknown>([{ probe: h2 }, { probe: h1x }, { w: B }]);
+    expect(deepEqual(a, b)).toBe(true);
+  });
+
+  it('equal sets whose members lead back to a set that pairs the other way round', () => {
+    // Aa ~ Ab2 and Y ~ Ab. Comparing Aa with Ab first (different) walks into (X, X') on a wrong
+    // assumption; what it concludes there must not decide the later, right comparison.
+    const build = (side: 'a' | 'b', wrapped: boolean) => {
+      const X = new Set<unknown>();
+      const link = wrapped ? { w: X } : X;
+      const first = { x: link, k: side === 'a' ? 1 : 2 };
+      const second = { x: link, k: side === 'a' ? 2 : 1 };
+      X.add({ r: first }).add({ r: second });
+      return { X, S: new Set<unknown>([first, second]) };
+    };
+    expect(deepEqual(build('a', false).X, build('b', false).X)).toBe(true);
+    expect(deepEqual(build('a', false).S, build('b', false).S)).toBe(true);
+    expect(deepEqual(build('a', true).S, build('b', true).S)).toBe(true);
+    const one = build('a', false).S;
+    expect(deepEqual(one, structuredClone(one))).toBe(true);
+  });
+
+  it('a member that leads back to its owner: the same shape with two values swapped is different', () => {
+    const owner = (v: number, w: number) => {
+      const r: Record<string, unknown> = {};
+      const members = [
+        { back: r, v },
+        { back: r, v: w },
+      ];
+      r.s = new Set(members);
+      r.o = members[0];
+      return r;
+    };
+    expect(deepEqual(owner(1, 2), owner(1, 2))).toBe(true);
+    expect(deepEqual(owner(1, 2), owner(2, 1))).toBe(false);
+  });
+
+  it('a chain that shares each next node twice and points back at its root is walked once', () => {
+    const counter = { reads: 0 };
+    const chain = (depth: number) => {
+      const root: Record<string, unknown> = {};
+      let node: Record<string, unknown> = Object.defineProperty({ back: root }, 'leaf', {
+        enumerable: true,
+        get() {
+          counter.reads++;
+          return 1;
+        },
+      });
+      for (let d = 0; d < depth; d++) node = { p: node, q: node, back: root };
+      root.top = node;
+      return root;
+    };
+    expect(deepEqual(chain(18), chain(18))).toBe(true);
+    expect(counter.reads).toBeLessThanOrEqual(8);
+  });
+
+  it('a state whose items all share one config that points back at the state is walked once', () => {
+    const counter = { reads: 0 };
+    const state = (items: number) => {
+      const root: Record<string, unknown> = {};
+      const cfg: Record<string, unknown> = { owner: root };
+      Object.defineProperty(cfg, 'setting', {
+        enumerable: true,
+        get() {
+          counter.reads++;
+          return 'on';
+        },
+      });
+      root.cfg = cfg;
+      root.items = Array.from({ length: items }, (_, id) => ({ id, cfg }));
+      return root;
+    };
+    expect(deepEqual(state(200), state(200))).toBe(true);
+    // One comparison of (cfg, cfg'), not one per item.
+    expect(counter.reads).toBeLessThanOrEqual(8);
+  });
+
+  it('an answer that leaned on an "equal by assumption" answer leans on what that one leaned on', () => {
+    // r and r2 differ (tail). P is equal to P2 only while r is taken as equal to r2, and G is equal
+    // to G2 only through P. Comparing r with r2 first (a failed set try) must leave no belief about
+    // (G, G2) behind: the wrappers { g: G } and { g: G2 } are different.
+    const record = (tail: number) => {
+      const r: Record<string, unknown> = {};
+      const P = { back: r };
+      const G = { p: P };
+      Object.assign(r, { p: P, g: G, tail });
+      return { r, G };
+    };
+    const a1 = record(1);
+    const aTwin = record(2);
+    const b2 = record(2);
+    const bTwin = record(1);
+    const a = new Set<unknown>([a1.r, { g: a1.G }, aTwin.r]);
+    const b = new Set<unknown>([b2.r, bTwin.r, { g: b2.G }]);
+    expect(deepEqual({ g: a1.G }, { g: b2.G })).toBe(false);
+    expect(deepEqual(a, b)).toBe(false);
+  });
+
+  it('an "equal by assumption" answer is forgotten when the comparison it was made in ends different', () => {
+    // f and f2 differ (tail), and both lead back to the two roots. P is equal to P2 only while f is
+    // taken as equal to f2. That try fails, and while the roots are still taken as equal f pairs
+    // with its twin instead. The roots then compare P with P2 directly: they are different, so the
+    // roots are.
+    const rootA: Record<string, unknown> = {};
+    const rootB: Record<string, unknown> = {};
+    const member = (root: object, tail: number) => {
+      const f: Record<string, unknown> = {};
+      const P = { back: f };
+      Object.assign(f, { p: P, r: root, tail });
+      return { f, P };
+    };
+    const a1 = member(rootA, 1);
+    const aTwin = member(rootA, 2);
+    const b2 = member(rootB, 2);
+    const bTwin = member(rootB, 1);
+    Object.assign(rootA, { s: new Set([a1.f, aTwin.f]), later: a1.P });
+    Object.assign(rootB, { s: new Set([b2.f, bTwin.f]), later: b2.P });
+    expect(deepEqual(rootA, rootB)).toBe(false);
+    expect(deepEqual(rootB, rootA)).toBe(false);
+  });
+
+  it('a failed set try keeps what it found that did not rest on the try itself', () => {
+    // Every level is a set of two objects that share the level below and point back at the root; the
+    // other side lists each set the other way round, so the first candidate tried is always the wrong
+    // one. What that try learned about the level below rests on the roots only, not on the try, so
+    // the right candidate must not compare the level below again.
+    const counter = { reads: 0 };
+    const value = (depth: number, flip: boolean) => {
+      const root: Record<string, unknown> = {};
+      const innermost = Object.defineProperty({ root }, 'v', {
+        enumerable: true,
+        get() {
+          counter.reads++;
+          return 0;
+        },
+      });
+      let level: unknown = new Set([innermost]);
+      for (let d = 0; d < depth; d++) {
+        const below = level;
+        const pair = [
+          { n: below, t: 1, root },
+          { n: below, t: 2, root },
+        ];
+        level = new Set(flip ? pair.reverse() : pair);
+      }
+      root.top = level;
+      return root;
+    };
+    expect(deepEqual(value(16, false), value(16, true))).toBe(true);
+    expect(counter.reads).toBeLessThanOrEqual(8);
+  });
+
+  it('a map that holds a set that holds the map', () => {
+    const make = (extra: number) => {
+      const map = new Map<string, unknown>();
+      map.set('k', new Set([map]));
+      map.set('n', extra);
+      return map;
+    };
+    expect(deepEqual(make(1), make(1))).toBe(true);
+    expect(deepEqual(make(1), make(2))).toBe(false);
+  });
+});
+
+describe('deepEqual — sets, the rules that stay', () => {
+  it('order does not matter, for primitives and for objects', () => {
+    expect(deepEqual(new Set([1, 'a', null]), new Set([null, 1, 'a']))).toBe(true);
+    expect(deepEqual(new Set([{ v: 1 }, { v: 2 }]), new Set([{ v: 2 }, { v: 1 }]))).toBe(true);
+  });
+
+  it('a primitive member has no structural twin', () => {
+    expect(deepEqual(new Set([1, 2]), new Set([1, 3]))).toBe(false);
+    expect(deepEqual(new Set([NaN, 0]), new Set([-0, NaN]))).toBe(true);
+    expect(deepEqual(new Set(['1']), new Set([1]))).toBe(false);
+  });
+
+  it('two equal members of one set cannot both claim the same member of the other', () => {
+    expect(deepEqual(new Set([{ v: 1 }, { v: 1 }]), new Set([{ v: 1 }, { v: 2 }]))).toBe(false);
+  });
+
+  it('a member both sets hold by reference pairs with itself, and the rest pair by content', () => {
+    const shared = { v: 1 };
+    expect(deepEqual(new Set([{ v: 1 }, shared]), new Set([shared, { v: 1 }]))).toBe(true);
+    expect(deepEqual(new Set([{ v: 1 }, shared]), new Set([shared, { v: 2 }]))).toBe(false);
+  });
+
+  it('a set that holds itself still ends, and compares by structure', () => {
+    const a = new Set<unknown>([1]);
+    a.add(a);
+    const b = new Set<unknown>([1]);
+    b.add(b);
+    expect(deepEqual(a, b)).toBe(true);
+    const c = new Set<unknown>([2]);
+    c.add(c);
+    expect(deepEqual(a, c)).toBe(false);
+  });
+
+  it('a large set of primitives is compared in one pass (no quadratic scan)', () => {
+    const n = 200_000;
+    const a = new Set<number>();
+    const b = new Set<number>();
+    for (let i = 0; i < n; i++) a.add(i);
+    for (let i = n - 1; i >= 0; i--) b.add(i);
+    const started = performance.now();
+    expect(deepEqual(a, b)).toBe(true);
+    expect(performance.now() - started).toBeLessThan(2_000);
+  });
+});
