@@ -1,5 +1,39 @@
 # Changelog
 
+## 1.13.0 — 2026-11-11
+
+### Added
+
+- `CommitBundle` gains two optional fields that `RecordFrame` writes: `beganAt` (how many commits the log held at the earliest moment one of the step's reads saw, when another step committed before the step did) and `sawUntil` (how many it held at the latest such moment, when that was after such a commit). What counts is a read: a step that only wrote carries neither. A run whose steps go one after another carries neither, so its record bytes do not change. Records of forks and other parallel steps gain `beganAt` on the steps a sibling committed under.
+- `findReadSources(log, position, key)` answers what the step whose first bundle sits at `position` could have read when it read `key`: `before`, the last write before the step began (-1 when the value is from before the run), and `during`, the writes inside the step's read window. With `during` empty, `before` is the source for certain; otherwise each of them is a possible source and the real one is among them. `overlapOf(sources, at)` gives the mark of one of those sources. Both are on the root door, with the types `ReadSources` and `ReadOverlap`. Ask `findReadSources` what a step read; `findLastWriter` still answers for a position in the log, not for a step.
+- A step that only read what it saw when it began has one certain source however many siblings committed first. A step that read live state again after a sibling committed the key has several possible sources, and the answers say so: `CausalEdge.overlap` (`'replaced-while-running' | 'written-while-running'`, also on the edges `sliceToJSON` writes), `ForwardRead.overlap` and `KeyMoment.orWriteIdxs` forward, and a `'concurrent-write'` note on the answers of `sliceForKey`, `forwardSliceForKey` and `keyTimeline`. The three codes are added to `HONESTY_CODES`.
+
+### Fixed
+
+- Run evidence: the writer no longer stores `about` content its own reader refuses. A read name with a control character is left out and counted in `readsOmitted`; an `about` whose `parent` or `resumes` is not a runtimeStageId is dropped and counted. Before this the reader refused the whole `about` and its parent link was lost. An id longer than the `text` cap now reads `truncated`, not `invalid-data`. `RunControl.why` and `EvidenceChannel.why` are typed as a union of the nine reasons the code returns, `unknown-execution` among them.
+- PROV export: each read is charged for its own lookup, not for the whole index, so a record of a thousand commits keeps its `ft:Read` evidence under the `maxWork` ceiling. Output bytes are no longer also charged as work: the default `maxWork` used to stop an export near 240 KB, below the default `maxOutputBytes`. "export output limit reached" is reported only when the byte ceiling refused a node. A mark carried by both the attention map and the execution tree is one `ft:Attention` node.
+- Cause: a source identity past the ID ceiling is reported as `invalid-data` and the remaining source edges are kept. It was reported as `edge-limit`, and the remaining edges were dropped.
+- Walk back for steps that run side by side. A log is ordered by commit, so a step that read `x` when it started and committed after a sibling replaced `x` was answered with the sibling as its source, and the step whose value it really read was left out. `causalChain`, `sliceForKey`, `forwardSliceForKey`, `keyTimeline`, the cause graph and the PROV export now date a read where its step looked at state.
+- A record without the fields (written by an earlier version, or by a producer that does not write them) is read as before: a read is dated at its step's commit.
+- The cause graph and the PROV export keep the two fields, and each bundle's own `idx`, when they admit a bundle, and refuse a bundle whose values cannot be such stamps. A reader places a step's window by the `idx` the bundles carry, so a log handed over as a slice, with some bundles filtered out, or behind another log gives the same answer as the whole log; where the indices around a step cannot be trusted, every earlier writer is given as a possible source. A bundle that says no `idx`, in a place where the indices around it show that bundles are missing, is counted inside a step's window whenever it could be there. The two doors keep a bundle's `idx` only when it rises past the bundle before it (a missing or odd `idx` on a bundle with no stamp is left off the copy; beside a stamp it refuses the bundle) and write none of their own.
+- Backward slices: a stage that wrote one key more than once in a commit is followed through the reads behind its last write. A per-write edge used the first trace row on the key, so reads made between the two writes were missed. `formatCausalChain` names the key the shown child read; it named the key of whichever child had found the node first.
+- Forward queries (`keyTimeline`, `forwardSliceForKey`): an execution's reads are dated once, at its first bundle. A continuation bundle (`phase: 'repeat'` or `'exit'`) recorded them again, which made a stage a reader of writes made after it ran.
+- `sliceToJSON` and `formatSlice` keep the note of a slice that has no writer in range (a redaction hid the write) and no longer say that value came from before the run. Slice, timeline and causal-chain text shows a nested key as its segments joined by ` › `; it printed the path separator, a control character.
+- `commitStops` and `timeTravel` read an execution tree from a file safely: a null child no longer throws, and a node that points back at itself no longer loops for ever.
+- `deepEqual`: two different values could compare equal after a set had tried and refused to pair their members, and the net-change filter then dropped a real change. A set of primitives is compared in one pass.
+- `RecordFrame`: a write after `commit()` with no `release()` starts on committed state as it stands. It used to diff against the base from before that commit, so a write that restored a value was dropped and live state kept the wrong value.
+- `setNestedValue`, `updateNestedValue`, `SharedMemory.setValue` and `updateValue`: a write whose path runs through a primitive or null replaces it with a container, as replay does. It threw a TypeError.
+- `commitValues: 'delta'`: an array with a hole and a named property is recorded as a `set`. It was recorded as an `append`, and replay lost the property and filled the hole.
+
+### Security
+
+- `EventLog.note(kind, data)` refuses a kind that takes the reserved `run.` prefix: the entry is counted in `sinkFailures` and reported to `sink.onFailure`, as any other refused entry is. Only `noteRun` writes those kinds. Before this, a writer's own note could be read back as run evidence, including a decision the run never made.
+
+### Documentation
+
+- The record contract guide lists `phase` and `untrackedSources` on a bundle. The time-travel README points at the examples and tests that live in the FootPrint repository. Stale notes are gone from two example headers, the script headers and the `CommitRangeIndex` header, and `docs/design/prov-p2-contract.md` is marked as not shipped.
+- New example `examples/post-execution/metadata/01-trace-metadata.ts`. Every runnable example now runs in the test suite and is checked against the output its own comments give.
+
 ## 1.12.0 — 2026-11-07
 
 ### Added
