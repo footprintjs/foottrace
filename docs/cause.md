@@ -28,6 +28,24 @@ frame.commit(() => ({ stage: 'Derive', stageId: 'derive', runtimeStageId: 'deriv
 frame.release();
 ```
 
+## A value built in steps
+
+A node is one commit's write of one key. When that write did not replace the key's value (a `merge`, an `append`, a row on a path inside the key), the value it left is made of that write and of what the write before it had left. No read is behind that dependence, so it has its own kind of edge: `attribution: 'recorded-write'`, from the node to the write just before it, read off the record's rows and commit order. It is exact. The link is by commit: when a step committed twice, its later commit's node has its earlier commit's node as parent.
+
+```ts
+// Start sets `box`. Fill merges into `box` without reading it. Use reads `box` and writes `final`.
+await graph.parents(node('use', 'final')); // [ fill·box   attribution: 'per-write' ]
+await graph.parents(node('fill', 'box'));  // [ start·box  attribution: 'recorded-write' ]
+// A failure marked on Start is now the root cause explain() finds for `final`.
+// Before this edge the walk ended at Fill, and Start was never reached.
+```
+
+Forward, a write's children include the next write of the key, when that one was folded onto it. Without exact read sources they also include every reader of the value for as long as nothing replaced it. With exact sources they include the readers whose recorded source is this commit, and a later reader is reached through the write that was folded onto this one. For these `'recorded-write'` edges the two directions are exact inverses: a child names the node among its parents, and a parent names it among its children. A test checks that, and that the way back from every child and the way forward from every parent reach the node, on every log of up to four commits with no row on a path inside a key. One exception is older than this edge and outside that test: the node of a path INSIDE a key lists the readers of the whole key among its children, and the way back from such a reader names the node of the whole key at that commit, not the node of the path.
+
+A node is named once among a node's parents. When a read already names the write underneath: a certain read keeps its edge as it is (a step that read a key and then added to it is answered as before), and a read that is only a possible source gives its place to the `'recorded-write'` edge, which is certain. The node keeps the `conservative` gap that read brought.
+
+A write folded onto the value from before the run has no node to point at and adds no gap of its own. Without exact read sources the node carries `conservative`, as it always has for a value with no whole write in range; that gap does not consult the record's initial state, so it is also there when the key did not exist before the run. With exact sources the pre-run state is a known end of the walk. A graph of your own may return `'recorded-write'` on a data edge; a control edge with it is refused, like any other mismatch.
+
 ## Optional exact root-read sources
 
 An authorized host can supply `RecordScope.readSources` and the same scope's `initialState`. Exact committed observations use `recorded-read` source-to-execution edges, and forward impact reaches that consuming execution. Key-qualified output links remain conservative because the source channel does not join each occurrence to a write. Base observations are known pre-run termini. Missing, staged, child/resume and unsupported evidence retains gaps. See the [shared source contract](read-sources.md#consume-an-authorized-root-observation) for authorization, bounds and PROV meaning.

@@ -72,6 +72,7 @@ export function sliceToJSON(slice: VariableSlice): SliceJSON {
       depth: node.depth,
       ...(node.incompleteSources !== undefined && { incompleteSources: node.incompleteSources }),
       ...(node.preRunReads !== undefined && { preRunReads: node.preRunReads }),
+      ...(node.preRunBase !== undefined && { preRunBase: node.preRunBase }),
     };
     for (const edge of node.parentEdges) {
       edges.push({
@@ -82,6 +83,7 @@ export function sliceToJSON(slice: VariableSlice): SliceJSON {
         weight: edge.weight,
         ...(edge.basis !== undefined && { basis: edge.basis }),
         ...(edge.overlap !== undefined && { overlap: edge.overlap }),
+        ...(edge.builtOn !== undefined && { builtOn: edge.builtOn }),
       });
     }
   }
@@ -312,7 +314,14 @@ export function formatTimeline(timeline: KeyTimeline): string {
   for (const moment of moments.slice(0, MOMENTS_RENDERED)) {
     const where = `${moment.stageName} (${moment.runtimeStageId})`;
     if (moment.kind === 'write') {
-      lines.push(`@${moment.commitIdx} write ${moment.verb ?? 'set'} — ${where}`);
+      // A value built in steps: this write did not replace the value, it was folded onto an earlier one.
+      const under =
+        moment.builtOnWriteIdx !== undefined
+          ? ` (added to the value of commit ${moment.builtOnWriteIdx})`
+          : moment.builtOnPreRun
+          ? ' (added to the value from BEFORE the run)'
+          : '';
+      lines.push(`@${moment.commitIdx} write ${moment.verb ?? 'set'} — ${where}${under}`);
     } else {
       const from =
         moment.fromWriteIdx !== undefined ? `value from commit ${moment.fromWriteIdx}` : 'value from BEFORE the run';

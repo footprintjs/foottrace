@@ -27,7 +27,12 @@ export interface Gap {
 export interface GraphEdge {
   readonly nodeId: NodeId;
   readonly kind: 'data' | 'control';
-  readonly attribution: 'per-write' | 'stage' | 'recorded-control' | 'recorded-read';
+  /**
+   * How the edge is known. `'recorded-write'`: no read is behind it; the record's own rows say that the
+   * child's write did not replace the value, so it was folded onto what the parent had written
+   * (`memory/builtOn.ts`). That edge is exact.
+   */
+  readonly attribution: 'per-write' | 'stage' | 'recorded-control' | 'recorded-read' | 'recorded-write';
   readonly evidence: readonly string[];
 }
 export interface Adjacency {

@@ -64,7 +64,7 @@ export const HONESTY_CODES = /* @__PURE__ */ Object.freeze({
   'conservative-fed-edges':
     "At least one 'fed' edge is stage-level (conservative): its write carries no per-write read provenance, so the edge may not be real — turn on writeProvenance: 'reads-prefix' for exact edges.",
   'nested-rows':
-    "A write this answer rests on reached the key only through paths inside it (a subflow's input seed, an outputMapper merge-back, a fork child's namespace), so it changed part of the key's value, not the whole: earlier writes may account for the rest, and a reader of the key may not have read the part that write changed.",
+    "A write this answer rests on reached the key only through paths inside it (a subflow's input seed, an outputMapper merge-back, a fork child's namespace), so it changed part of the key's value, not the whole: earlier writes account for the rest (a walk back follows them), and a reader of the key may not have read the part that write changed.",
   'pre-run-origin':
     'The value being followed was absent or already there before the first write this log can see (initial state, frozen run input or a closure), so who put it there is outside the commit log.',
   'concurrent-write':
@@ -92,6 +92,9 @@ export const HONESTY_CODES = /* @__PURE__ */ Object.freeze({
     'This write is the value the key held when the reading step began, and another step committed the key, in whole or in part, before the reading step last looked at state, so the step may have read that later value instead: this is a possible source, not a certain one.',
   'written-while-running':
     'This write was committed while the reading step was running and before the step last looked at state, so the step may have read the key before or after it: this is a possible source, not a certain one.',
+  // ── a write that did not replace a value — a slice note, and `CausalEdge.builtOn` (builtOn.ts) ─
+  'partial-write':
+    "A write this answer rests on did not replace the key's value but merged into it or appended to it, so the value is made of that write and of what the earlier writes had left: a walk back goes on to the commit that wrote the key before it (an edge marked builtOn, which no read by the step is behind), and a reader after it read all of them.",
   // ── how an element's birth was attributed — `ElementBirth.basis` (slice/: AttributionBasis) ─
   'append-verb':
     "The engine recorded the element in an append row's tail (how commitValues: 'delta' records an array's growth), so the commit that added it is known exactly, not inferred.",

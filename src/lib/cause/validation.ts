@@ -89,7 +89,8 @@ export function adjacency(value: unknown, maximum: number): Adjacency {
         (attribution !== 'per-write' &&
           attribution !== 'stage' &&
           attribution !== 'recorded-control' &&
-          attribution !== 'recorded-read') ||
+          attribution !== 'recorded-read' &&
+          attribution !== 'recorded-write') ||
         (kind === 'control' && attribution !== 'recorded-control') ||
         (kind === 'data' && attribution === 'recorded-control')
       )

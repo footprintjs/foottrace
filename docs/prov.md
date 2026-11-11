@@ -54,6 +54,7 @@ Use a distinct namespace for each export scope whose identities must differ.
 | A read prefix | Extension-only `ft:Read`/candidate evidence and `ft:possibleDerivation` with `reads-prefix` attribution |
 | Stage-level reads | Conservative candidate evidence, with a `conservative` gap |
 | A read by a step that ran beside others | The candidate is the last write before the step BEGAN (`beganAt`), not before its commit. When the key was also written inside the step's read window (`sawUntil`), no candidate is named and the export says `read basis is not a single recorded binding` |
+| A write that merged into a value or appended to it | Its entity is that write alone (`ft:verb` says `merge` or `append`), counted under `final value reconstruction is outside stage one`. The export does not link it to the write it was folded onto. A reader that needs every writer of the value asks `causalChain` or `foottrace/cause`, which follow that link |
 | A supported earlier governing decider | `prov:wasInformedBy` and qualified communication, with `ft:relation: 'control'` |
 | Hidden or absent evidence | A named gap, never an apparently healthy empty fact |
 

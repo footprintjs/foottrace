@@ -77,6 +77,54 @@ WHY the stamps are refused, not dropped, at a door that takes records from outsi
 
 What it does not cover is listed at the top of `readWindow.ts` and of `windowPlacement.ts`. Where the idea comes from, and what is ours: [REFERENCES.md](REFERENCES.md).
 
+## A value built in steps (what a write was folded onto)
+
+A write does one of two things to a key. It REPLACES the value: a `set` or a `delete` of the key, or of a container around it. Or it ADDS to the value: a `merge`, an `append`, a row on a path inside the key. After a write that only added, the key holds that write and what was there before, and a step that reads the key reads both.
+
+Every reader used to stop at the last commit that wrote the key. For a write that replaced the value that is the whole answer. For one that added, it left out the step that wrote the rest, with no note:
+
+```ts
+// Start sets box = { a: 1 }. Fill merges { b: 2 } into box WITHOUT reading it. Use reads box.
+causalChain(log, 'use#2', reads);
+//   before:  use <- fill via box                      (Start is missing, and it wrote `a`)
+//   now:     use <- fill via box
+//            fill <- start via box   builtOn: 'partial-write'
+```
+
+One rule answers it (`builtOn.ts`):
+
+| The commit's rows for the key | The value after it | The walk |
+|---|---|---|
+| a `set` or a `delete` on the key, or around it | this commit's alone | ends here for this key |
+| anything else: a `merge`, an `append`, rows inside the key | this write and what the last write before it left | goes on to that commit, with an edge marked `builtOn` |
+| the same, and no commit before it wrote the key | this write and the value from before the run | the node says so: `preRunBase` |
+
+WHY commit order here, when a read is dated by the read window: a write that adds is not a read by the step. It is applied when the step commits, onto state as it stands then, and every replay folds the log in that order. So what a write was folded onto is exact: the last write before its own commit, whatever the step saw while it ran. A step that ran beside others can therefore have two parents for one key, each of them certain: the write it read (dated by the window) and the write its own was folded onto.
+
+WHY by verb and path, never by value: calling a write that added a replacement leaves a real source out. Calling a replacement an addition names one step too many. Only the first is an omission, so in doubt a write is read as adding. A `merge` that happens to overwrite the one field a value has is followed to the step that wrote the field before.
+
+WHY no second edge when the step also read the key: `scope.box.b = 2` and `scope.list.push(x)` read the key first, and that read already leads to the earlier writer. A record whose walk was right keeps its answer byte for byte. Beside a read that is only a possible source (steps side by side) both edges stand, because the `builtOn` one is certain.
+
+WHY the rule speaks in commits and knows nothing of steps: a step can commit more than once (a subflow mount commits and then commits its exit), and its later commit is folded onto its earlier one like any other. A reader whose nodes are commits (the cause graph, the key timeline) wants exactly that link. The backward walk's nodes are steps: it draws no edge from a step to itself and passes through the step's own earlier commit to what that one was folded onto. That pass belongs to the walk, not to the rule. The first version had it inside the rule, and the cause graph then had no way back to a step's earlier commit although its way forward reached readers from it.
+
+One consequence for `causalChain`: its result is a DAG unless a step commits a key between two commits of another step that both add to that key. Each of the two then rests on the other, and the walk says so with an edge each way. `flattenCausalDAG`, `formatCausalChain` and `sliceToJSON` visit a node once and end on it; code that follows `parents` itself must do the same. The cause graph, with one node per commit, is always acyclic.
+
+What each reader does with the rule:
+
+| Reader | What it says |
+|---|---|
+| `causalChain`, `sliceForKey` | `CausalEdge.builtOn` on the edge to the write underneath; `CausalNode.preRunBase` when nothing in the log is underneath. Text: `← built on box` |
+| `forwardSliceForKey` | a value's life does not end at a write that only added, so the readers after it are readers of this value too. A `'partial-write'` note names the commits it crossed |
+| `keyTimeline` | on the WRITE moment: `builtOnWriteIdx`, or `builtOnPreRun`. One number per write: a list on every read would grow with the square of a loop that appends and reads |
+| `foottrace/cause` | an edge with `attribution: 'recorded-write'` from a node to the write just before it, and from that write forward. Its nodes are commits, so it asks the rule for each node by its own commit and names a node once |
+
+What it does not cover is listed at the top of `builtOn.ts`. The one that matters: a `set` row that the WRITER makes out of writes that only added. It does so under both encodings:
+
+- `'full'`, the default: when a step's rows would not fold back to what the step read, they are written as `set` rows of what it read. Ordinary writes reach it, for example one step that merges into `a.x`, deletes `a.x` and merges into `a`: the record holds `set a.x`, `set a`.
+- `'delta'`: also any step that merged into a key and wrote a path inside it.
+
+Such a row says `set`, nothing in it says the value was built on what was there, and the walk stops at it: the steps whose writes are still in the value are left out, with no note. A reader cannot follow what the record does not say, so the fix is in the writer (it has to mark such a row) and changes record bytes. Both cases are pinned as `KNOWN LIMIT` in `test/lib/memory/property/built-on.property.test.ts`. Where the idea comes from, and what is ours: [REFERENCES.md](REFERENCES.md).
+
 ## Run evidence rides the same doors
 
 A log built with `collects: { reads }` also keeps what an offline reader needs to say why a stage ran: `about` beside a commit (`record(bundle, about)`, or `CommitStamp.about` through a frame), three `run.*` notes (`noteRun`, which stamps `seq` as `record` stamps `idx`) and `runNotes` on `closed`. A lost `about` or note is counted like any lost entry, and the commit still goes. `keepsEvidence` is the one question a writer's seam asks first. The bundle never changes; the shapes and their bounds are in [run-evidence](../run-evidence/README.md).

@@ -1,5 +1,6 @@
 import { sliceForKey } from '../slice/sliceForKey.js';
 import { relation } from '../memory/keyPaths.js';
+import { builtOnChild, builtOnParent } from './recordBuiltOn.js';
 import { collectControlChildCoverage, collectControlParentCoverage } from './recordControl.js';
 import { collectScopeCoverage, recordGapCollector, writtenKeysForNode } from './recordCoverage.js';
 import { nodeIdFor } from './recordIdentity.js';
@@ -92,6 +93,19 @@ export function inspectSourceParents(
       break;
     }
   }
+  // A write that did not replace its key was folded onto what the write before it had left. No read
+  // occurrence says so; the record's rows do (`recordBuiltOn.ts`). A write folded onto the value from
+  // before the run adds nothing here: with exact sources the pre-run state is a known end of the walk,
+  // for a write as for a read of it (`docs/cause.md`), and not a gap. One edge per node: a read
+  // occurrence that already names that write keeps its edge.
+  if (identity.key !== undefined && !identity.read) {
+    const under = builtOnParent(scope, identity.key, commitIndex);
+    if (under !== undefined && under !== 'pre-run' && !edges.some((edge) => edge.nodeId === under.nodeId)) {
+      const added = append(edges, under, maximum);
+      if (added === 'invalid') coverage.addGap('invalid-data');
+      if (added === 'full') coverage.addGap('edge-limit');
+    }
+  }
   const deciderId = scope.control?.get(identity.runtimeStageId)?.deciderId;
   const parentIndex = scope.log.findIndex((entry) => entry.runtimeStageId === deciderId);
   if (deciderId && parentIndex >= 0 && parentIndex < first) {
@@ -170,6 +184,14 @@ export function sourceDataChildren(
       },
       maximum,
     );
+    if (added === 'invalid') invalid = true;
+    if (added === 'full') return { edges, complete: false, invalid };
+  }
+  // The write that was folded onto this one: no read occurrence names it (`recordBuiltOn.ts`).
+  for (const key of keys) {
+    const over = builtOnChild(scope, key, node.commitIndex);
+    if (over === undefined || edges.some((edge) => edge.nodeId === over.nodeId)) continue;
+    const added = append(edges, over, maximum);
     if (added === 'invalid') invalid = true;
     if (added === 'full') return { edges, complete: false, invalid };
   }

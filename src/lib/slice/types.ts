@@ -214,6 +214,7 @@ export type HonestyNoteCode = RegisteredCode<
   | 'conservative-fed-edges'
   | 'concurrent-write'
   | 'nested-rows'
+  | 'partial-write'
   | 'pre-run-origin'
   | 'reads-not-recorded'
   | 'unknown-key'
@@ -392,6 +393,25 @@ export interface KeyMoment {
    * the record does not say which (`memory/readWindow.ts`).
    */
   orWriteIdxs?: number[];
+  /**
+   * `'write'` moments only, and only when the write did not replace the
+   * value (it merged into it, appended to it, or wrote a path inside it):
+   * the `commitIdx` of the write it was folded onto, which is the write
+   * moment just before it in this timeline, whichever step made it (an
+   * earlier commit of the same step included; `memory/builtOn.ts`). A read
+   * that saw this write also saw that one, and so on back to a write that
+   * carries neither this field nor `builtOnPreRun`: that one replaced the
+   * value. One number per write: follow it from the write a read names
+   * (`fromWriteIdx`, `orWriteIdxs`).
+   */
+  builtOnWriteIdx?: number;
+  /**
+   * `'write'` moments only: the write did not replace the value and no
+   * commit before it wrote the key, so it was folded onto what the key held
+   * before the run, which the log cannot see. The timeline then carries a
+   * `'from-initial-state'` note.
+   */
+  builtOnPreRun?: true;
 }
 
 /**
@@ -599,6 +619,8 @@ export interface SliceJSON {
       incompleteSources?: ReadonlyArray<UntrackedSource>;
       /** Copied from `CausalNode.preRunReads` (9.33.0); absent when every read had a writer. */
       preRunReads?: { code: RegisteredCode<'pre-run-origin'>; keys: string[] };
+      /** Copied from `CausalNode.preRunBase`; absent unless a write of the node was folded onto a pre-run value. */
+      preRunBase?: { code: RegisteredCode<'from-initial-state'>; keys: string[] };
     }
   >;
   /** Id-referenced edges: child (`from`) depends on parent (`to`). */
@@ -612,6 +634,8 @@ export interface SliceJSON {
     basis?: RegisteredCode<'nested-rows'>;
     /** Why this edge is a possible source and not a certain one (`CausalEdge.overlap`). Absent on a certain edge. */
     overlap?: ReadOverlap;
+    /** An edge no read made: the child's write of `key` kept part of what the parent wrote (`CausalEdge.builtOn`). */
+    builtOn?: RegisteredCode<'partial-write'>;
   }>;
   /** Copied from the root when a budget cut the slice — registered as `'truncated'` in `HONESTY_CODES`. */
   truncated?: { byDepth: boolean; byNodes: boolean };

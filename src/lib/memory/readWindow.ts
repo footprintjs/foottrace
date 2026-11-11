@@ -168,14 +168,31 @@ export function readSourcesOf(key: string, window: ReadWindow, lastWriterBefore:
 /**
  * How sure the source at `at` is, among the `sources` of one read: `undefined` when it is the certain one.
  *
- * `at` must be one of those sources: `sources.before`, or a member of `sources.during`. The function
- * does not look `at` up, so for any other position the answer says nothing. WHY NO CHECK: every caller
- * asks once per source it has just taken from `sources`, and a search of `during` on each call would
- * make a wide window cost its width squared.
+ * `at` must be one of those sources: `sources.before`, or a member of `sources.during`. Any other
+ * position is refused with a `RangeError`. WHY REFUSED, NOT ANSWERED: the function used to answer
+ * `'written-while-running'` for a position that is no source at all, and a mark on a commit the read
+ * could not have seen is a wrong statement that looks like a careful one. The check is a binary
+ * search of `during` (it is ascending), so asking once per source of a wide window stays near linear.
  */
 export function overlapOf(sources: ReadSources, at: number): ReadOverlap | undefined {
+  if (at !== sources.before && !holds(sources.during, at)) {
+    throw new RangeError(`overlapOf: position ${at} is not one of the sources of this read`);
+  }
   if (sources.during.length === 0) return undefined;
   return at === sources.before ? 'replaced-while-running' : 'written-while-running';
+}
+
+/** Is `value` in the ascending list? */
+function holds(ascending: readonly number[], value: number): boolean {
+  let low = 0;
+  let high = ascending.length - 1;
+  while (low <= high) {
+    const middle = (low + high) >> 1;
+    if (ascending[middle] === value) return true;
+    if (ascending[middle] < value) low = middle + 1;
+    else high = middle - 1;
+  }
+  return false;
 }
 
 /**

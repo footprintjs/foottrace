@@ -1,6 +1,7 @@
 import { sourceChildrenCollected, sourceDataChildren } from './recordSourceEdges.js';
 import { forwardSliceForKey } from '../slice/forwardSliceForKey.js';
 import type { ForwardNode } from '../slice/types.js';
+import { builtOnChild } from './recordBuiltOn.js';
 import { appendControlChildren } from './recordControl.js';
 import { allStageReadsCollected, writtenKeysForNode } from './recordCoverage.js';
 import { nodeIdFor } from './recordIdentity.js';
@@ -87,6 +88,13 @@ function appendDataChildren(
     }
     complete = appendFedChildren(scope, forward.root, maximumEdges, edges) && complete;
     complete = appendReadOnlyChildren(scope, forward.root, key, maximumEdges, edges) && complete;
+    // The write that was folded onto this one (the next write of the key, when it was a merge, an
+    // append or a row inside the key): no read made it a child, the record's rows do (`recordBuiltOn.ts`).
+    const over = builtOnChild(scope, key, commitIndex);
+    if (over !== undefined && !edges.some((existing) => existing.nodeId === over.nodeId)) {
+      if (edges.length >= maximumEdges) complete = false;
+      else edges.push(over);
+    }
   }
   return complete;
 }

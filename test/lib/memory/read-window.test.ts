@@ -109,6 +109,27 @@ describe('the rule, backward: a read saw the last write before the step began, o
     expect(overlapOf(contested, 4)).toBe('written-while-running');
     expect(overlapOf(contested, 6)).toBe('written-while-running');
   });
+
+  it('a position that is not one of the sources is refused, not answered', () => {
+    // It used to answer 'written-while-running' for a commit the read could not have seen.
+    const contested = readSourcesOf('x', { start: 3, end: 7 }, lookup([1, 4, 6]));
+    expect(contested).toEqual({ before: 1, during: [4, 6] });
+    for (const stray of [0, 2, 3, 5, 7, 99, -1]) {
+      expect(() => overlapOf(contested, stray), String(stray)).toThrow(RangeError);
+    }
+    expect(() => overlapOf(contested, 5)).toThrow('overlapOf: position 5 is not one of the sources of this read');
+    // With no write in the window the one source is `before`, and only that.
+    const alone = readSourcesOf('x', at(7), lookup([1, 4]));
+    expect(() => overlapOf(alone, 1)).toThrow(RangeError);
+    // The value from before the run is a source when no commit wrote the key before the step began.
+    const fromStart = readSourcesOf('x', { start: 0, end: 3 }, lookup([1, 2]));
+    expect(fromStart).toEqual({ before: -1, during: [1, 2] });
+    expect(overlapOf(fromStart, -1)).toBe('replaced-while-running');
+    // A wide window: every member is found.
+    const wide = { before: -1, during: Array.from({ length: 1001 }, (_, i) => i * 2) };
+    expect(wide.during.every((position) => overlapOf(wide, position) === 'written-while-running')).toBe(true);
+    expect(() => overlapOf(wide, 1001)).toThrow(RangeError);
+  });
 });
 
 describe('the rule, forward: a step read a value when one of its looks could see it', () => {

@@ -66,8 +66,10 @@ import {
   type KeyIndex,
   lastIndexBefore,
   lastTraceEntry,
+  mergedWrites,
   nestedOnlyWrites,
   nestedRowsNote,
+  partialWriteNote,
   preRunOriginNote,
   readersOfLife,
   readsNotRecordedNote,
@@ -114,8 +116,9 @@ function makeNode(
   writeIdx: number | undefined,
   depth: number,
 ): ForwardNode {
-  // A life ends at the next write that replaces the value — never at one that only wrote a path INSIDE the
-  // key (a seed, a merge-back): a reader after that one still read the rest of this value.
+  // A life ends at the next write that REPLACES the value — never at one that merged into it, appended to
+  // it or wrote a path inside it (a seed, a merge-back, `$update`): a reader after that one still read the
+  // rest of this value (`memory/builtOn.ts`).
   const writes = index.closingWritesOf(key);
   if (writeIdx === undefined) {
     const firstWrite = writes?.[0];
@@ -272,26 +275,28 @@ export function forwardSliceForKey(
 
   // ── Honesty envelope, deterministic order ─────────────────────────────
   if (root.origin === 'pre-run') notes.push(preRunOriginNote(normalisedKey));
-  // Every life a write INSIDE its key starts or crosses — the anchor's, a pre-run life's, a child's — says so.
-  const partial = new Map<string, Set<number>>();
+  // Every life that a write which did not replace its key starts or crosses — the anchor's, a pre-run
+  // life's, a child's — says so: a write inside the key (`'nested-rows'`), a merge or an append
+  // (`'partial-write'`).
+  const inside = new Map<string, Set<number>>();
+  const merged = new Map<string, Set<number>>();
+  const gather = (into: Map<string, Set<number>>, key: string, commits: readonly number[]) => {
+    if (commits.length === 0) return;
+    const set = into.get(key) ?? new Set<number>();
+    for (const c of commits) set.add(c);
+    into.set(key, set);
+  };
   for (const node of nodes.values()) {
     const start = node.commitIdx ?? -1;
     const crossed = index
       .writesOf(node.key)
       .filter((c) => (c === start || c > start) && (node.nextWriteIdx === undefined || c < node.nextWriteIdx));
-    for (const c of nestedOnlyWrites(commitLog, node.key, crossed)) {
-      const set = partial.get(node.key) ?? new Set<number>();
-      set.add(c);
-      partial.set(node.key, set);
-    }
+    gather(inside, node.key, nestedOnlyWrites(commitLog, node.key, crossed));
+    gather(merged, node.key, mergedWrites(commitLog, node.key, crossed));
   }
-  for (const [key, commits] of partial)
-    notes.push(
-      nestedRowsNote(
-        key,
-        [...commits].sort((a, b) => a - b),
-      ),
-    );
+  const ascending = (commits: Set<number>) => [...commits].sort((a, b) => a - b);
+  for (const [key, commits] of inside) notes.push(nestedRowsNote(key, ascending(commits)));
+  for (const [key, commits] of merged) notes.push(partialWriteNote(key, ascending(commits)));
   if (anyConservative) notes.push(conservativeEdgesNote(normalisedKey));
   if (concurrentReads > 0) notes.push(concurrentReadsNote(concurrentReads));
   if (truncatedByDepth || truncatedByNodes) {
