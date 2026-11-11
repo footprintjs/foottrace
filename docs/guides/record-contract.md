@@ -191,9 +191,12 @@ use, remote commitment or complete external ancestry.
   that commit's `viewAt`: `causalChain` and `sliceForKey` with an edge
   marked `builtOn: 'built-on-view'`, `forwardSliceForKey` with a read marked
   `builtOnView` and one edge to that row (`basis: 'built-on-view'`),
-  `keyTimeline` with `builtOnWriteIdx` on the write moment, the cause graph
-  with an edge of attribution `'recorded-write'`. It is one write, for
-  certain. It is never counted as a read by the stage's code: the timeline
+  `keyTimeline` with `builtOnViewIdx` on the write moment, the cause graph
+  with an edge of attribution `'recorded-write'`. The view has one source,
+  for certain. (A commit whose marked row sits inside the key has a second
+  write under it as well, the one the key was folded onto: the timeline says
+  that one in `builtOnWriteIdx`, and the two can differ.) It is never
+  counted as a read by the stage's code: the timeline
   shows no read moment for it, and the stage's own reads are dated as
   before. A door that takes records from outside keeps the mark and the
   stamp, and refuses a mark that cannot be one (another value, or another
@@ -244,9 +247,9 @@ use, remote commitment or complete external ancestry.
   of the log the bundle was written to. A log handed over as a slice, or
   with rows taken out, can hold bundles that say no index, and the place of
   that index is then a range. Each write inside the range is named as a
-  possible source of the row (`overlap` on the walk's edge,
-  `builtOnViewIdxs` on the timeline's write moment, `conservative` on the
-  cause graph's node), and none as the certain one. A stored record says
+  possible source of the row (`overlap` on the walk's edge, `orViewIdxs` on
+  the timeline's write moment, `conservative` on the cause graph's node),
+  and none as the certain one. A stored record says
   every bundle's index, so this cannot happen there.
 
 ## Bring your own record

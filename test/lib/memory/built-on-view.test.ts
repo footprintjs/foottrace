@@ -198,6 +198,12 @@ describe('the walk back through a row the writer built on the view', () => {
     const root = walk(w.log.list(), 'use', { 'use#0': ['a'] });
     expect(edgesOf(root)).toEqual(['use <- fill via a']);
     expect(root.parents[0].preRunBase).toEqual({ code: 'from-initial-state', keys: ['a'] });
+    // The timeline says the same on the write: nothing in the log is under it, and the note says why.
+    const timeline = keyTimeline(w.log.list(), 'a', keysReadFromMap({ 'use#0': ['a'] }).lookup);
+    expect((timeline.moments ?? [])[0]).toMatchObject({ kind: 'write', commitIdx: 0, builtOnPreRun: true });
+    expect((timeline.moments ?? [])[0].builtOnViewIdx).toBeUndefined();
+    expect(timeline.notes.map((note) => note.code)).toContain('from-initial-state');
+    expect(formatTimeline(timeline)).toContain('@0 write set — fill (fill#0) (added to the value from BEFORE the run)');
   });
 
   it('steps side by side: the row holds what the VIEW held, not what a sibling committed since', () => {
@@ -264,12 +270,17 @@ describe('the walk back through a row the writer built on the view', () => {
     );
     const timeline = keyTimeline(all, 'a', keysReadFromMap({ 'use#0': ['a'] }).lookup);
     const writes = (timeline.moments ?? []).filter((moment) => moment.kind === 'write');
-    expect(writes.map((moment) => [moment.commitIdx, moment.builtOnWriteIdx, moment.builtOnViewIdxs])).toEqual([
-      [0, undefined, undefined],
-      [1, undefined, undefined],
-      [2, 0, undefined],
+    // The row replaced the value in the fold (no fold link), and its view held commit 0, for certain.
+    expect(
+      writes.map((moment) => [moment.commitIdx, moment.builtOnWriteIdx, moment.builtOnViewIdx, moment.orViewIdxs]),
+    ).toEqual([
+      [0, undefined, undefined, undefined],
+      [1, undefined, undefined, undefined],
+      [2, undefined, 0, undefined],
     ]);
-    expect(formatTimeline(timeline)).toContain('@2 write set — fill (fill#0) (added to the value of commit 0)');
+    expect(formatTimeline(timeline)).toContain(
+      "@2 write set — fill (fill#0) (built on the value its step's view held: commit 0)",
+    );
   });
 
   it('an array that does not show where the view sits: each write it could have held is a possible source', () => {
@@ -302,16 +313,16 @@ describe('the walk back through a row the writer built on the view', () => {
         'fill <- other via a [built-on-view] (written-while-running)',
       ].sort(),
     );
-    // The timeline says it on the write: one number cannot, so it lists the writes the view could have held.
+    // The timeline says it on the write: the write the view held, OR another one it could have held.
     const timeline = keyTimeline(log, 'a', keysReadFromMap({ 'use#0': ['a'] }).lookup);
     const writes = (timeline.moments ?? []).filter((moment) => moment.kind === 'write');
-    expect(writes.map((moment) => [moment.commitIdx, moment.builtOnWriteIdx, moment.builtOnViewIdxs])).toEqual([
+    expect(writes.map((moment) => [moment.commitIdx, moment.builtOnViewIdx, moment.orViewIdxs])).toEqual([
       [0, undefined, undefined],
       [1, undefined, undefined],
-      [2, undefined, [0, 1]],
+      [2, 0, [1]],
     ]);
     expect(formatTimeline(timeline)).toContain(
-      "@2 write set — fill (fill#0) (built on the value its step's view held: commit 0 or 1)",
+      "@2 write set — fill (fill#0) (built on the value its step's view held: commit 0 or commit 1)",
     );
     // With the index said, the same record has one answer.
     const said = [log[0], { ...log[1], idx: 12 }, log[2], log[3]];
@@ -504,11 +515,51 @@ describe('forward, the timeline and the cause graph', () => {
     const { list, reads } = mergedAndInside('delta');
     const timeline = keyTimeline(list, 'a', keysReadFromMap(reads).lookup);
     const writes = (timeline.moments ?? []).filter((moment) => moment.kind === 'write');
-    expect(writes.map((moment) => [moment.commitIdx, moment.verb, moment.builtOnWriteIdx])).toEqual([
-      [0, 'set', undefined],
-      [1, 'set', 0],
+    expect(
+      writes.map((moment) => [moment.commitIdx, moment.verb, moment.builtOnWriteIdx, moment.builtOnViewIdx]),
+    ).toEqual([
+      [0, 'set', undefined, undefined],
+      [1, 'set', undefined, 0],
     ]);
-    expect(formatTimeline(timeline)).toContain('@1 write set — fill (fill#0) (added to the value of commit 0)');
+    expect(formatTimeline(timeline)).toContain(
+      "@1 write set — fill (fill#0) (built on the value its step's view held: commit 0)",
+    );
+  });
+
+  it('a row INSIDE the key has two links, and they can name two writes: the fold and the view', () => {
+    // S sets `a`. Fill pins its view (it reads another key). P merges into `a`. Fill merges into a.b and
+    // sets a.b.c, and commits one `set` of a.b that the writer built on Fill's view.
+    //   - `a` was not replaced by Fill's commit: it was folded onto what P left (commit 1).
+    //   - the row at a.b holds what the VIEW held there, and the view was pinned before P (commit 0).
+    // Both are under the value, for certain, in an unbroken log. One number cannot say two links.
+    // (Found by the second reader: a single list held this case and the uncertain one alike.)
+    const w = world('delta');
+    const s = w.frame();
+    s.write(['a'], { s: 1 }, 'set');
+    commit(s, 's');
+    const fill = w.frame();
+    fill.read([], 'other');
+    const p = w.frame();
+    p.write(['a'], { p: 1 }, 'merge');
+    commit(p, 'p');
+    fill.write(['a', 'b'], { m: 1 }, 'merge');
+    fill.write(['a', 'b', 'c'], 1, 'set');
+    commit(fill, 'fill');
+    const list = w.log.list();
+    expect(w.state.getState().a).toEqual({ s: 1, p: 1, b: { m: 1, c: 1 } });
+    expect(rowsOf(list[2])).toEqual(['set a.b.c', 'set a.b (built on view)']);
+    expect(list[2]).toMatchObject({ idx: 2, viewAt: 1 });
+    const timeline = keyTimeline(list, 'a', keysReadFromMap({}).lookup);
+    const fillMoment = (timeline.moments ?? []).find((moment) => moment.stageId === 'fill');
+    expect(fillMoment).toMatchObject({ kind: 'write', commitIdx: 2, builtOnWriteIdx: 1, builtOnViewIdx: 0 });
+    expect(fillMoment?.orViewIdxs).toBeUndefined();
+    expect(formatTimeline(timeline)).toContain(
+      "@2 write set — fill (fill#0) (added to the value of commit 1; built on the value its step's view held: commit 0)",
+    );
+    // The walk says the same in steps: P for the fold, S for the view.
+    expect(edgesOf(causalChain(list, 'fill#0', keysReadFromMap({}).lookup, { rootLinkKeys: ['a'] })!).sort()).toEqual(
+      ['fill <- p via a [partial-write]', 'fill <- s via a [built-on-view]', 'p <- s via a [partial-write]'].sort(),
+    );
   });
 
   it("the cause graph: Fill's node has Start's as parent, Start's has Fill's as child, and explain reaches a failure in Start", async () => {

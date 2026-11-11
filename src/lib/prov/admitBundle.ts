@@ -129,22 +129,28 @@ export function admitBundle(
     if (phase !== undefined && phase !== 'exit' && phase !== 'repeat') throw new ProvDataRefusal();
     // A read is dated by its step's stamps, read against each bundle's own `idx` (`memory/readWindow.ts`).
     // The copy keeps both; stamps that cannot be stamps refuse the bundle.
-    const placed = admitStamps(
-      dataField(raw, 'beganAt', budget),
-      dataField(raw, 'sawUntil', budget),
-      dataField(raw, 'idx', budget),
-      after,
-      dataField(raw, 'viewAt', budget),
-    );
-    if (!placed) {
+    const beganAt = dataField(raw, 'beganAt', budget),
+      sawUntil = dataField(raw, 'sawUntil', budget),
+      idx = dataField(raw, 'idx', budget),
+      viewAt = dataField(raw, 'viewAt', budget);
+    const read = admitStamps(beganAt, sawUntil, idx, after);
+    if (!read) {
       // Said apart from a bundle that cannot be read: this one reads, but its stamps count against an index
       // that cannot be its own (not a whole number, or not past the row before it, whichever of the two is
       // the damaged one). The row is left out, never dated by guess.
       budget.addGap({ code: 'invalid-data', commitIdx, reason: 'read stamps do not fit the commit index' });
       return undefined;
     }
-    // `viewAt` dates the rows the writer built on the step's view. Without such a row it dates nothing, and
-    // the producer and this reader do not agree about the bundle: left out, with its own reason.
+    // `viewAt` dates the rows the writer built on the step's view (`CommitBundle.viewAt`). It is held to
+    // the same rule and asked second, so that each of the two faults is named for what it is: a gap that
+    // said "read stamps" for a bad view stamp sent its reader to the wrong field.
+    const placed = viewAt === undefined ? read : admitStamps(beganAt, sawUntil, idx, after, viewAt);
+    if (!placed) {
+      budget.addGap({ code: 'invalid-data', commitIdx, reason: 'view stamp does not fit the commit index' });
+      return undefined;
+    }
+    // Without a row built on the view the stamp dates nothing, and the producer and this reader do not
+    // agree about the bundle: left out, with its own reason.
     if (!viewStampFits(placed, rows)) {
       budget.addGap({ code: 'invalid-data', commitIdx, reason: 'a view stamp with no row built on the view' });
       return undefined;

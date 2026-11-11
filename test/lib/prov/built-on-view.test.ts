@@ -65,8 +65,17 @@ describe('the PROV export and a row the writer built on the view', () => {
   it.each([
     ['a view stamp at the commit', { viewAt: 2 }],
     ['a view stamp that is not a whole number', { viewAt: '1' }],
-  ])('%s: the commit is left out, and the gap names the stamps', async (_name, stamp) => {
+  ])('%s: the commit is left out, and the gap names the view stamp', async (_name, stamp) => {
     const damaged = await withView({ builtOnView: true }, stamp);
+    expect(damaged.gaps).toContainEqual({
+      code: 'invalid-data',
+      commitIdx: 2,
+      reason: 'view stamp does not fit the commit index',
+    });
+  });
+
+  it('a bad read stamp beside a good view stamp is named as the read stamps', async () => {
+    const damaged = await withView({ builtOnView: true }, { viewAt: 1, beganAt: 2 });
     expect(damaged.gaps).toContainEqual({
       code: 'invalid-data',
       commitIdx: 2,

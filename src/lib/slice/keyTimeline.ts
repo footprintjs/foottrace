@@ -32,12 +32,13 @@
  * a list that was appended to N times saw N writes, and a list on every read
  * grows with the square of a loop that appends and reads. The link is one
  * number per write, found with one look at one bundle; a reader follows it
- * from the write a read names. One more case: a `set` row the WRITER built on
- * the step's view (`TraceEntry.builtOnView`) holds what the view held, as of
- * the moment the view was pinned (`CommitBundle.viewAt`). That is one write,
- * and it is linked like any other. Only where the array does not show where
- * that moment sits are there several possible ones, and they are listed
- * (`builtOnViewIdxs`).
+ * from the write a read names. One more link, with fields of its own: a `set`
+ * row the WRITER built on the step's view (`TraceEntry.builtOnView`) holds
+ * what the view held, as of the moment the view was pinned
+ * (`CommitBundle.viewAt`). That is one write (`builtOnViewIdx`), and it need
+ * not be the write the commit was folded onto: a commit with such a row
+ * INSIDE the key has both links. Only where the array does not show where
+ * the view sits could it have held other writes too (`orViewIdxs`).
  *
  * DAG position: memory ← slice. Imports memory/ only (see README.md).
  */
@@ -161,21 +162,16 @@ export function keyTimeline(
       // names the write it saw, and a reader of the timeline follows the links from there. (A list on
       // every read would grow with the square of a key that is appended to and read in a loop.)
       const under = builtOnBefore(normalisedKey, idx, bundleAt, writeBefore);
-      // A `set` row the WRITER built on the step's view still holds what the view held: its sources
-      // are the read rule's, asked with the moment this commit's view was pinned (`CommitBundle.viewAt`,
-      // `memory/builtOn.ts · readFromView`). One certain source and no fold link: it is the write this
-      // one was built on, said like any other. Otherwise the view's possible sources are listed beside
-      // the fold link.
+      // A `set` row the WRITER built on the step's view still holds what the view held, as of the
+      // moment the view was pinned (`CommitBundle.viewAt`, `memory/builtOn.ts · readFromView`). That
+      // is a second link with fields of its own, because it can name another write than the fold does:
+      // the fold names the write just before this commit, and the view may have been pinned before
+      // that one. `during` is empty unless the array does not show where the view sits.
       const seen = readFromView(bundle, normalisedKey)
         ? readSourcesOf(normalisedKey, index.views.get(idx) ?? { start: idx, end: idx }, writeBefore)
         : undefined;
-      const viewCertain = seen !== undefined && seen.during.length === 0;
-      const link = under ?? (viewCertain ? seen.before : undefined);
-      const viewed =
-        seen === undefined || (under === undefined && viewCertain)
-          ? []
-          : [seen.before, ...seen.during].filter((position) => position >= 0 && position !== under);
-      if (link === -1 || (seen !== undefined && seen.before < 0)) restsOnPreRun = true;
+      const preRun = under === -1 || (seen !== undefined && seen.before < 0);
+      if (preRun) restsOnPreRun = true;
       moments.push({
         kind: 'write',
         commitIdx: idx,
@@ -183,9 +179,10 @@ export function keyTimeline(
         stageId: bundle.stageId,
         stageName: bundle.stage,
         ...(entry !== undefined && { verb: entry.verb }),
-        ...(link !== undefined && link >= 0 && { builtOnWriteIdx: link }),
-        ...((link === -1 || (seen !== undefined && seen.before < 0)) && { builtOnPreRun: true as const }),
-        ...(viewed.length > 0 && { builtOnViewIdxs: viewed }),
+        ...(under !== undefined && under >= 0 && { builtOnWriteIdx: under }),
+        ...(preRun && { builtOnPreRun: true as const }),
+        ...(seen !== undefined && seen.before >= 0 && { builtOnViewIdx: seen.before }),
+        ...(seen !== undefined && seen.during.length > 0 && { orViewIdxs: [...seen.during] }),
       });
     }
   }

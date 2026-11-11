@@ -36,6 +36,7 @@ import type {
   ForwardSlice,
   ForwardSliceJSON,
   HonestyNote,
+  KeyMoment,
   KeyTimeline,
   SliceJSON,
   VariableSlice,
@@ -240,6 +241,25 @@ const MAYBE_READ_WORDS: Record<ReadOverlap, string> = {
   'written-while-running': 'it began before this write',
 };
 
+/**
+ * What a write moment's value still holds of earlier writes, as the end of its line. Two links, each
+ * said when it is there: the write it was folded onto, and the write its step's view held (for a row
+ * the writer built on that view; several when the array does not show where the view sits).
+ */
+function builtOnWords(moment: KeyMoment): string {
+  const parts: string[] = [];
+  if (moment.builtOnWriteIdx !== undefined) parts.push(`added to the value of commit ${moment.builtOnWriteIdx}`);
+  const viewed = moment.builtOnViewIdx !== undefined || (moment.orViewIdxs?.length ?? 0) > 0;
+  if (viewed) {
+    const held = [
+      moment.builtOnViewIdx !== undefined ? `commit ${moment.builtOnViewIdx}` : 'the value from BEFORE the run',
+      ...(moment.orViewIdxs ?? []).map((idx) => `commit ${idx}`),
+    ];
+    parts.push(`built on the value its step's view held: ${held.join(' or ')}`);
+  } else if (moment.builtOnPreRun) parts.push('added to the value from BEFORE the run');
+  return parts.length > 0 ? ` (${parts.join('; ')})` : '';
+}
+
 /** How a fed edge was attributed, in a tree line. The full sentence is the registry's. */
 const FED_WORDS: Record<FedBasis, string> = {
   'per-write': '[exact]',
@@ -325,19 +345,7 @@ export function formatTimeline(timeline: KeyTimeline): string {
   for (const moment of moments.slice(0, MOMENTS_RENDERED)) {
     const where = `${moment.stageName} (${moment.runtimeStageId})`;
     if (moment.kind === 'write') {
-      // A value built in steps: this write did not replace the value, it was folded onto an earlier one,
-      // or the writer built it on what the step's view held (one of several commits, when it cannot say which).
-      const held = moment.builtOnViewIdxs?.length ? `commit ${moment.builtOnViewIdxs.join(' or ')}` : '';
-      const viewed = held ? `; its step's view held ${held}` : '';
-      const under =
-        moment.builtOnWriteIdx !== undefined
-          ? ` (added to the value of commit ${moment.builtOnWriteIdx}${viewed})`
-          : moment.builtOnPreRun
-          ? ` (added to the value from BEFORE the run${viewed})`
-          : held
-          ? ` (built on the value its step's view held: ${held})`
-          : '';
-      lines.push(`@${moment.commitIdx} write ${moment.verb ?? 'set'} — ${where}${under}`);
+      lines.push(`@${moment.commitIdx} write ${moment.verb ?? 'set'} — ${where}${builtOnWords(moment)}`);
     } else {
       const from =
         moment.fromWriteIdx !== undefined ? `value from commit ${moment.fromWriteIdx}` : 'value from BEFORE the run';

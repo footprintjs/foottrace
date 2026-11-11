@@ -250,20 +250,33 @@ on every read grows with the square of a key that is appended to and read in
 a loop. This is one number per write.
 
 A `set` row the writer built on its step's view (`TraceEntry.builtOnView`)
-says what that view held the same way: `builtOnWriteIdx`, the last write
-before the moment the view was pinned (`CommitBundle.viewAt`). Here Fill's
-view was pinned before Other committed:
+says what that view held in a field of its own: `builtOnViewIdx`, the last
+write before the moment the view was pinned (`CommitBundle.viewAt`). Here
+Fill's view was pinned before Other committed:
 
 ```
 @0 write set — start (start#0)
 @1 write set — other (other#0)
-@2 write set — fill (fill#0) (added to the value of commit 0)
+@2 write set — fill (fill#0) (built on the value its step's view held: commit 0)
 ```
 
-Only an array that does not show where that moment sits (a slice, or rows
-taken out, so that bundles around it say no index) leaves several writes the
-view could have held. `builtOnViewIdxs` then lists them, and the line reads
-`(built on the value its step's view held: commit 0 or 1)`.
+WHY a field of its own and not `builtOnWriteIdx`: the two are different
+links and one write moment can have both. A commit with such a row INSIDE
+the key did not replace the key, so it was folded onto the write just before
+it; and its row was built on a view that may have been pinned before that
+write. Both writes are under the value, for certain:
+
+```
+@0 write set — s (s#0)
+@1 write merge — p (p#0) (added to the value of commit 0)
+@2 write set — fill (fill#0) (added to the value of commit 1; built on the value its step's view held: commit 0)
+```
+
+Only an array that does not show where the view sits (a slice, or rows taken
+out, so that bundles around the commit say no index) leaves other writes the
+view could have held. `orViewIdxs` lists them, the line reads
+`(built on the value its step's view held: commit 0 or commit 1)`, and none
+of them is certain.
 
 Such a commit is a write moment only. Its step read nothing, so the timeline
 shows no read for it.
@@ -391,7 +404,7 @@ with the names it recorded (`test/lib/slice/nested-rows.test.ts`).
   says `← built on box`.
 - `CausalEdge.builtOn: 'built-on-view'` (backward), `ForwardRead.builtOnView`
   and `ForwardEdge.basis: 'built-on-view'` (forward),
-  `KeyMoment.builtOnViewIdxs` (timeline): a `set` row the WRITER built on its
+  `KeyMoment.builtOnViewIdx` / `orViewIdxs` (timeline): a `set` row the WRITER built on its
   step's view (`TraceEntry.builtOnView`). The row replaces the value in the
   fold and still holds what the view held, so the walk goes on to the write
   that view held. No read by the step is behind it, and every answer says so

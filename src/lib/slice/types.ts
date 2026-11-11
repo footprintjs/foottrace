@@ -422,8 +422,9 @@ export interface KeyMoment {
    * moment just before it in this timeline, whichever step made it (an
    * earlier commit of the same step included; `memory/builtOn.ts`). A read
    * that saw this write also saw that one, and so on back to a write that
-   * carries neither this field nor `builtOnPreRun`: that one replaced the
-   * value. One number per write: follow it from the write a read names
+   * carries none of the links (this field, `builtOnViewIdx`,
+   * `builtOnPreRun`): that one replaced the value and holds nothing older.
+   * One number per write: follow it from the write a read names
    * (`fromWriteIdx`, `orWriteIdxs`).
    */
   builtOnWriteIdx?: number;
@@ -436,15 +437,29 @@ export interface KeyMoment {
   builtOnPreRun?: true;
   /**
    * `'write'` moments only, and only for a commit with a `set` row the
-   * WRITER built on its step's view (`TraceEntry.builtOnView`) when one
-   * number cannot say it: the array does not show where that view sits
-   * (bundles around it say no index, `CommitBundle.viewAt`), or the commit
-   * has a fold link as well. The `commitIdx` of each write the view could
-   * have held, ascending; one of them is under this value. With one certain
-   * source and no fold link, `builtOnWriteIdx` says it and this field is
-   * absent, which is every such commit of an unbroken log.
+   * WRITER built on its step's view (`TraceEntry.builtOnView`): the
+   * `commitIdx` of the write that view held, the last write of the key
+   * before the moment the view was pinned (`CommitBundle.viewAt`). What the
+   * row holds of the key is that write's value with the step's own writes
+   * folded in, so a read that saw this write also saw that one. Absent when
+   * no commit before the view wrote the key (`builtOnPreRun` says so).
+   *
+   * It is a link of its own beside `builtOnWriteIdx`, and the two can name
+   * different writes: a commit with such a row INSIDE the key was folded
+   * onto the write just before it, and its row was built on a view that may
+   * have been pinned before that write. Follow both.
    */
-  builtOnViewIdxs?: number[];
+  builtOnViewIdx?: number;
+  /**
+   * `'write'` moments only: the OTHER writes the view of such a commit could
+   * have held, ascending. Present only when the array does not show where
+   * the view sits (bundles around the commit say no index: a slice, or rows
+   * taken out). The view then held `builtOnViewIdx` (or the value from
+   * before the run) or one of these, and the record cannot say which: each
+   * is a possible source, none the certain one. Absent in an unbroken log,
+   * where the view has one source.
+   */
+  orViewIdxs?: number[];
 }
 
 /**
