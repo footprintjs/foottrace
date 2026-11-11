@@ -64,7 +64,8 @@ import { buildCommitIndex, lastWriterPosition } from './commitLogUtils.js';
 import type { RegisteredCode } from './honesty.js';
 import { queryWork, relation, writesOnlyInside } from './keyPaths.js';
 import { logModel } from './logModel.js';
-import { type LastWriterBefore, overlapOf, type ReadOverlap, readSourcesOf, windowOf } from './readWindow.js';
+import { type LastWriterBefore, overlapOf, type ReadOverlap, readSourcesOf } from './readWindow.js';
+import { windowsOf } from './windowPlacement.js';
 import { shownPath } from '../record-paths/codec.js';
 import type { CommitBundle, TraceEntry, UntrackedSource } from './types.js';
 
@@ -426,6 +427,8 @@ function buildCausalChain(
 
   // Pick writer lookup strategy based on log size
   const findWriter = createWriterLookup(commitLog);
+  // When each step looked at state (`readWindow.ts`): one pass over the log for the whole walk.
+  const windowAt = windowsOf(commitLog);
 
   // Node dedup map: runtimeStageId → CausalNode (ensures DAG, not tree)
   const nodeMap = new Map<string, CausalNode>();
@@ -614,7 +617,7 @@ function buildCausalChain(
     // What each read could have seen is `readWindow.ts`'s rule: the last writer before the step
     // began, and every writer inside its read window (none for a step with no window).
     const keysRead = keysToExpand;
-    const window = windowOf(commitLog, commitIdx);
+    const window = windowAt(commitIdx);
     for (const key of keysRead) {
       const sources = readSourcesOf(key, window, findWriter);
       if (sources.before < 0) {

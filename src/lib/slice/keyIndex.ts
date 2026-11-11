@@ -38,7 +38,8 @@ import {
   writesOnlyInside,
 } from '../memory/keyPaths.js';
 import { logModel } from '../memory/logModel.js';
-import { type ReadOverlap, type ReadWindow, readOfValue, windowOf } from '../memory/readWindow.js';
+import { type ReadOverlap, type ReadWindow, readOfValue } from '../memory/readWindow.js';
+import { windowsOf } from '../memory/windowPlacement.js';
 import { shownPath } from '../record-paths/codec.js';
 import type { CommitBundle, TraceEntry } from '../memory/types.js';
 import type { HonestyNote } from './types.js';
@@ -108,6 +109,7 @@ export function buildKeyIndex(commitLog: CommitBundle[], lookup: KeysReadLookup)
   const readKeysByRoot = new Map<string, string[]>();
   const executions = new Set<string>();
   const windows = new Map<number, ReadWindow>();
+  const windowAt = windowsOf(commitLog);
   for (let i = 0; i < commitLog.length; i++) {
     const bundle = commitLog[i];
     // Reads: one lookup per EXECUTION, at its first bundle (see THE INVERSION above). A later bundle
@@ -115,7 +117,7 @@ export function buildKeyIndex(commitLog: CommitBundle[], lookup: KeysReadLookup)
     // backward walk dates it there too (`commitLogUtils · buildCommitIndex`).
     if (executions.has(bundle.runtimeStageId)) continue;
     executions.add(bundle.runtimeStageId);
-    const window = windowOf(commitLog, i);
+    const window = windowAt(i);
     if (window.start < i) windows.set(i, window);
     // A provider that throws is a consumer bug, not a reason to lose the
     // query — the same error-isolation posture recorder callbacks get.

@@ -64,10 +64,14 @@ describe('the candidate source of a read in the PROV export', () => {
     ['sawUntil without beganAt', { sawUntil: 2 }],
     ['sawUntil past the step', { beganAt: 1, sawUntil: 3 }],
     ['an idx that contradicts the stamps', { beganAt: 1, idx: 1 }],
-  ])('%s: the bundle is refused as unreadable, never exported with the stamp dropped', async (_name, stamps) => {
+  ])('%s: the row is left out and the gap says why, never exported with the stamp dropped', async (_name, stamps) => {
     const { read, gaps } = await exported(stamps);
     expect(read).toBeUndefined();
-    expect(gaps).toContainEqual({ code: 'invalid-data', commitIdx: 2, reason: 'unreadable commit bundle' });
+    expect(gaps).toContainEqual({
+      code: 'invalid-data',
+      commitIdx: 2,
+      reason: 'read stamps do not fit the commit index',
+    });
   });
 
   // Found by the second reader: one odd idx on a neighbour made the sibling the candidate again.
@@ -86,10 +90,30 @@ describe('the candidate source of a read in the PROV export', () => {
       [seedRow, { ...fastRow, idx: 7 }, { ...slowRow, idx: 2 }],
     ],
     ["a neighbour that repeats the step's index", [seedRow, { ...fastRow, idx: 2 }, { ...slowRow, idx: 2 }]],
-  ])('%s: the stamped row is refused as unreadable', async (_name, rows) => {
+  ])('%s: the stamped row is left out, and the gap says why', async (_name, rows) => {
     const { read, gaps } = await candidateOf(rows);
     expect(read).toBeUndefined();
-    expect(gaps).toContainEqual({ code: 'invalid-data', commitIdx: 2, reason: 'unreadable commit bundle' });
+    expect(gaps).toContainEqual({
+      code: 'invalid-data',
+      commitIdx: 2,
+      reason: 'read stamps do not fit the commit index',
+    });
+  });
+
+  it('one row that says an index far too large makes the stamped rows after it unplaceable: refused, not guessed', async () => {
+    // The door cannot tell which row is the damaged one. It keeps the first and refuses the stamped row
+    // that does not rise past it; the gap names the stamps, so a person can look at the indices around it.
+    const { read, gaps } = await candidateOf([
+      { ...seedRow, idx: 1e9 },
+      { ...fastRow, idx: 1 },
+      { ...slowRow, idx: 2 },
+    ]);
+    expect(read).toBeUndefined();
+    expect(gaps).toContainEqual({
+      code: 'invalid-data',
+      commitIdx: 2,
+      reason: 'read stamps do not fit the commit index',
+    });
   });
 
   it.each([

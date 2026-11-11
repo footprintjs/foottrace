@@ -55,7 +55,7 @@ So the writer says when a step looked at state, and only when that is not "just 
 
 `RecordFrame` has two read tiers: the view pinned at the first look, and live state for a key that view cannot answer. Every read the frame itself makes of state notes the log's length (`RecordFrame · observe`, one door, pinned by a test), and `recordCommit · seenOf` decides what goes on the bundle. The door covers the frame's own reads only: `RecordFrame.state` is public, and a caller that reads it directly is not seen, so what it read is neither tracked nor dated.
 
-A reader places the window by the `idx` each bundle carries, not by counting positions back, so a log handed over as a slice, or without some of its bundles, still reads right (`readWindow.ts · windowOf`). It never walks: one subtraction when the array is unbroken around the step, halving otherwise, so a wide fan-out costs no more per step than a narrow one. The `idx` values have to rise along the array. A door that takes records from outside makes them rise before any reader sees them (`admitStamps`): one odd `idx` on a neighbour could otherwise move a step's window and put a wrong writer forward as the certain one.
+A reader places the window by the `idx` each bundle carries, not by counting positions back, so a log handed over as a slice, without some of its bundles, or behind another log (the legs of a paused run) still reads right. That is `windowPlacement.ts`, apart from the rule on purpose: the rule speaks in positions, the stamps in indices, and turning one into the other has its own traps (its header lists four ways that looked right and were not). It takes one pass per log and never walks per step: one subtraction when the array is unbroken around the step, halving otherwise, so a wide fan-out costs no more per step than a narrow one. Where the indices around a step cannot be trusted to hold its window, the window is opened over everything before the step: possible sources, never a certain one that may be wrong. A door that takes records from outside makes the indices rise before any reader sees them (`admitStamps`).
 
 One rule reads it (`readWindow.ts · readSourcesOf`): a read of a key saw the last write before the step began, or a write of that key inside its window.
 
@@ -71,7 +71,7 @@ WHY two numbers and not one: with `beganAt` alone a reader would have to treat e
 
 WHY the stamps are refused, not dropped, at a door that takes records from outside (`admitStamps`): a dropped stamp reads as "saw everything before its commit", the very dating the stamp corrects.
 
-What it does not cover is listed at the top of `readWindow.ts`. Where the idea comes from, and what is ours: [REFERENCES.md](REFERENCES.md).
+What it does not cover is listed at the top of `readWindow.ts` and of `windowPlacement.ts`. Where the idea comes from, and what is ours: [REFERENCES.md](REFERENCES.md).
 
 ## Run evidence rides the same doors
 

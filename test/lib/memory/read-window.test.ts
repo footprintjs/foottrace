@@ -26,7 +26,8 @@ import {
 } from '../../../src';
 import type { CommitBundle } from '../../../src';
 import { lastWriterPosition } from '../../../src/lib/memory/commitLogUtils';
-import { admitStamps, readOfValue, readSourcesOf, windowOf } from '../../../src/lib/memory/readWindow';
+import { admitStamps, readOfValue, readSourcesOf } from '../../../src/lib/memory/readWindow';
+import { windowOf } from '../../../src/lib/memory/windowPlacement';
 import { EventLog, memorySink, RecordFrame, SharedMemory } from '../../../src/write';
 
 function world(seed: Record<string, unknown> = {}) {
@@ -178,13 +179,89 @@ describe('when a step looked at state (windowOf)', () => {
     expect(windowOf(without(6), 6)).toEqual({ start: 4, end: 6 }); // one after its last look is gone
   });
 
+  it('a log placed after another one is searched on its own, whole or filtered', () => {
+    // Found by the second reader: the legs of a paused run, one after the other. In the second leg (idx 0
+    // to 3) the step at idx 3 began when its log held 1 commit. Searched over the whole array, the window
+    // landed in the first leg, and the step lost its real source with no note.
+    const leg1 = log(4, { idx: 3 });
+    const leg2 = [
+      bundle({ idx: 0 }),
+      bundle({ idx: 1, phase: 'exit' }),
+      bundle({ idx: 2 }),
+      bundle({ idx: 3, beganAt: 1 }),
+    ];
+    const filtered = leg2.filter((each) => !each.phase);
+    expect(windowOf(leg2, 3)).toEqual({ start: 1, end: 1 });
+    expect(windowOf(filtered, 2)).toEqual({ start: 1, end: 1 });
+    expect(windowOf([...leg1, ...leg2], 7)).toEqual({ start: 5, end: 5 });
+    expect(windowOf([...leg1, ...filtered], 6)).toEqual({ start: 5, end: 5 });
+    expect(
+      windowOf(
+        [...leg1, ...leg2].filter((each) => !each.phase),
+        6,
+      ),
+    ).toEqual({ start: 5, end: 5 });
+    // An unusable stamp opens the window over the step's own log only.
+    const odd = [...leg1, bundle({ idx: 0 }), bundle({ idx: 1 }), bundle({ idx: 2, beganAt: 9 })];
+    expect(windowOf(odd, 6)).toEqual({ start: 4, end: 6 });
+  });
+
+  it("a stretch that does not hold the window's start opens the window over everything before the step", () => {
+    // Found by the second reader. One bundle of the step's own log says an index that is too large, or
+    // repeats one: the indices drop at the step, which looks like the start of another log. It cannot be
+    // told from one, so nothing before the step is ruled out, and nothing is put forward as certain.
+    const tooLarge = [bundle({ idx: 0 }), bundle({ idx: 7 }), bundle({ idx: 2, beganAt: 1 })];
+    const repeated = [bundle({ idx: 0 }), bundle({ idx: 2 }), bundle({ idx: 2, beganAt: 1 })];
+    expect(windowOf(tooLarge, 2)).toEqual({ start: 0, end: 2 });
+    expect(windowOf(repeated, 2)).toEqual({ start: 0, end: 2 });
+    // The same for a later log that really was cut inside the step's window: its earlier commits are not here.
+    const cut = [...log(8, { idx: 7 }), bundle({ idx: 5 }), bundle({ idx: 6, beganAt: 3 })];
+    expect(windowOf(cut, 9)).toEqual({ start: 0, end: 9 });
+    // A stretch that starts exactly where the step began holds its whole window: nothing is opened.
+    const exact = [...log(8, { idx: 7 }), bundle({ idx: 5 }), bundle({ idx: 6, beganAt: 5 })];
+    expect(windowOf(exact, 9)).toEqual({ start: 8, end: 8 });
+    // A stamp that cannot be one, in a stretch that is not a log from its first commit: everything before.
+    const lost = [...log(8, { idx: 7 }), bundle({ idx: 5 }), bundle({ idx: 6, beganAt: 9 })];
+    expect(windowOf(lost, 9)).toEqual({ start: 0, end: 9 });
+    // One log with a commit missing is one stretch: its indices rise, and nothing is opened.
+    const missing = [...log(4, { idx: 3 }), bundle({ idx: 5 }), bundle({ idx: 6, beganAt: 3 })];
+    expect(windowOf(missing, 5)).toEqual({ start: 3, end: 3 });
+  });
+
+  it('an array that grows or changes between asks is read again; only a frozen log is remembered', () => {
+    const growing = log(2, { idx: 1 });
+    expect(windowOf(growing, 1)).toEqual({ start: 1, end: 1 });
+    // A second log is put behind it: its step began when ITS log held 1 commit.
+    growing.push(bundle({ idx: 0 }), bundle({ idx: 1 }), bundle({ idx: 2, beganAt: 1 }));
+    expect(windowOf(growing, 4)).toEqual({ start: 3, end: 3 });
+    // A bundle that changes its mind is seen too: nothing about this array was kept.
+    growing[3] = bundle({});
+    growing[2] = bundle({});
+    expect(windowOf(growing, 4)).toEqual({ start: 1, end: 1 });
+  });
+
+  it('the place one subtraction away is taken only from a bundle that says its index', () => {
+    // Found by the second reader. idx 0 to 5 with the bundle of idx 3 taken out; the step at idx 5 began at
+    // 2. One subtraction lands on position 2, where the bundle is really commit 2... unless it does not say
+    // so: a bundle with no idx is read relative to the step and would agree with any guess.
+    const whole = log(6, { idx: 5, beganAt: 2 });
+    const filtered = whole.filter((each) => each.idx !== 3);
+    expect(windowOf(filtered, 4)).toEqual({ start: 2, end: 2 });
+    const silent = filtered.map((each, at) => (at === 1 ? bundle({}) : each));
+    // Position 1 was commit 1, seen when the step began: the window still starts at position 2.
+    expect(windowOf(silent, 4)).toEqual({ start: 2, end: 2 });
+    // A run of silent bundles at the head of a slice counts back from the first one that says its index.
+    const head = [bundle({}), bundle({}), bundle({ idx: 12 }), bundle({ idx: 13, beganAt: 11 })];
+    expect(windowOf(head, 3)).toEqual({ start: 1, end: 1 });
+  });
+
   it("bundles of another log placed before this one are not the step's history", () => {
     const other = log(3, { idx: 2 });
     const own = log(8, { idx: 7, beganAt: 0, sawUntil: 7 });
     expect(windowOf([...other, ...own], 10)).toEqual({ start: 3, end: 10 });
   });
 
-  it('a bundle that does not say its index is placed relative to the step, not at its bare position', () => {
+  it('a bundle that does not say its index is placed next to its neighbour, not at its bare position', () => {
     // Found by the second reader. A slice numbered 10 to 12; the step at 12 began when the log held 11.
     // The middle bundle is commit 11 whatever it says: read at its bare position (1) it would look like
     // one of the first commits of the log, seen by the step, and the step would be dated at its own commit.
@@ -196,6 +273,10 @@ describe('when a step looked at state (windowOf)', () => {
 
   it('a hand-built bundle with no idx is read at its position', () => {
     expect(windowOf(log(5, { beganAt: 1, sawUntil: 3 }), 4)).toEqual({ start: 1, end: 3 });
+    // A log where NO bundle says an index: every position is its index.
+    const bare = [bundle({}), bundle({}), bundle({}), bundle({}), bundle({ beganAt: 1, sawUntil: 3 })];
+    expect(windowOf(bare, 4)).toEqual({ start: 1, end: 3 });
+    expect(windowOf([bundle({}), bundle({}), bundle({ beganAt: 0 })], 2)).toEqual({ start: 0, end: 0 });
   });
 
   it.each([
@@ -336,6 +417,22 @@ describe('the backward walk names what a step could have read, and nothing else'
     expect(parentsVia(whole, 'slow#0', reads, 'x')).toEqual(['seed#0']);
     expect(parentsVia(filtered, 'slow#0', reads, 'x')).toEqual(['seed#0']);
     expect(causalChain(filtered, 'slow#0', keysReadFromMap(reads).lookup)!.preRunReads).toBeUndefined();
+  });
+
+  it("one damaged index in the step's own log: every earlier writer is possible, none is certain, none is left out", () => {
+    // Found by the second reader. `fast` says an index that is too large (or repeats the step's), so the
+    // indices drop at the step and it looks cut off from its own log. Before, the walk then dated it at its
+    // own commit and named `fast` as the one certain source. The truth is `seed`.
+    const { log, reads } = sideBySide();
+    for (const odd of [7, 2]) {
+      const damaged = log.map((each) => (each.runtimeStageId === 'fast#0' ? { ...each, idx: odd } : each));
+      const root = causalChain(damaged, 'slow#0', keysReadFromMap(reads).lookup)!;
+      expect(parentsVia(damaged, 'slow#0', reads, 'x'), `fast says idx ${odd}`).toEqual([
+        'fast#0 (written-while-running)',
+        'seed#0 (written-while-running)',
+      ]);
+      expect(root.preRunReads?.keys).toEqual(['x']);
+    }
   });
 
   it('a step that began after the sibling committed has one source, and no mark', () => {

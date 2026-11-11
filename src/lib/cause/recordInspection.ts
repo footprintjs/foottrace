@@ -1,6 +1,8 @@
 import { inspectSourceParents } from './recordSourceEdges.js';
 import { causalChain, type CausalEdge } from '../memory/backtrack.js';
-import { findReadSources } from '../memory/commitLogUtils.js';
+import { lastWriterPosition } from '../memory/commitLogUtils.js';
+import { type ReadWindow, readSourcesOf } from '../memory/readWindow.js';
+import { windowOf } from '../memory/windowPlacement.js';
 import { sliceForKey } from '../slice/sliceForKey.js';
 import { collectControlParentCoverage, controlParentLookup } from './recordControl.js';
 import {
@@ -21,12 +23,12 @@ import type { Gap, GraphEdge } from './types.js';
  * for an edge marked `'written-while-running'`, each commit of that execution that wrote the key inside
  * the step's read window.
  */
-function writerPositions(scope: PreparedRecordScope, edge: CausalEdge, firstCommitIndex: number): number[] {
+function writerPositions(scope: PreparedRecordScope, edge: CausalEdge, window: ReadWindow): number[] {
   if (edge.kind !== 'data' || !edge.key) {
     const at = scope.log.findIndex((bundle) => bundle.runtimeStageId === edge.parent.runtimeStageId);
     return at < 0 ? [] : [at];
   }
-  const sources = findReadSources(scope.log, firstCommitIndex, edge.key);
+  const sources = readSourcesOf(edge.key, window, (key, before) => lastWriterPosition(scope.log, key, before));
   if (edge.overlap !== 'written-while-running') return sources.before < 0 ? [] : [sources.before];
   return sources.during.filter((at) => scope.log[at].runtimeStageId === edge.parent.runtimeStageId);
 }
@@ -41,12 +43,14 @@ function projectParentEdges(
   addGap: AddRecordGap,
 ): GraphEdge[] {
   const edges: GraphEdge[] = [];
+  // When this step looked at state: placed once for the node, then asked per edge.
+  const window = windowOf(scope.log, firstCommitIndex);
   for (const edge of parentEdges) {
     if (edges.length >= maximumEdges) {
       addGap('edge-limit');
       break;
     }
-    const positions = writerPositions(scope, edge, firstCommitIndex);
+    const positions = writerPositions(scope, edge, window);
     if (positions.length === 0) {
       addGap('untracked-input');
       continue;

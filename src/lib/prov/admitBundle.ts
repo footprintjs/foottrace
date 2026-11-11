@@ -127,7 +127,13 @@ export function admitBundle(
       dataField(raw, 'idx', budget),
       after,
     );
-    if (!placed) throw new ProvDataRefusal();
+    if (!placed) {
+      // Said apart from a bundle that cannot be read: this one reads, but its stamps count against an index
+      // that cannot be its own (not a whole number, or not past the row before it, whichever of the two is
+      // the damaged one). The row is left out, never dated by guess.
+      budget.addGap({ code: 'invalid-data', commitIdx, reason: 'read stamps do not fit the commit index' });
+      return undefined;
+    }
     const untrackedSources = untracked === undefined ? undefined : dataNames(untracked, budget, 'fields');
     if (untrackedSources?.some((source) => source !== 'args' && source !== 'env' && source !== 'silent'))
       throw new ProvDataRefusal();
