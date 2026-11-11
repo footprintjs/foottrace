@@ -36,7 +36,7 @@ The release writer creates a unique `publish-attempt-VERSION.json` asset before 
 
 The main-only manual `verify_only` input is read-only. Use it while main still identifies the release being checked. It checks npm version/latest and downloaded bytes, the tag and GitHub release, and reports pending or conflict precisely. It reports provenance metadata without claiming cryptographic verification. FootTrace has no separate docs deployment; applicable README/package docs are part of the exact reviewed release. If main has moved, preserve evidence and request normal reconciliation rather than substituting another SHA.
 
-Existing matching release branches and proposals are left alone. Multiple open release PRs hold for normal maintainer reconciliation. So does a `release/next` head that no pull request names, unless it is the route's own unfinished proposal (see [below](#when-a-proposal-write-stops-before-its-pull-request)). Branch cleanup is not performed by this workflow.
+Existing matching release branches and proposals are left alone. Multiple open release PRs hold for normal maintainer reconciliation. So does a `release/next` head that no pull request names, unless it holds exactly what the route itself builds and can be taken up as an unfinished proposal (see [below](#when-a-proposal-write-stops-before-its-pull-request)). Branch cleanup is not performed by this workflow.
 
 ### When main moves under an open proposal
 
@@ -53,15 +53,15 @@ The update itself is never sent twice and nothing is rolled back. After either c
 
 A later run takes such a head up. It does so on its own evidence, the evidence a rebuild needs, and never because an earlier run wrote the head:
 
-1. No pull request, open or closed, names the head.
-2. The head has two parents. The second parent leads back to the last merged App release PR through nothing but the route's own rebuilds.
+1. No pull request from `release/next` into main, in any state, names the head. This is read from one listing of every state, so a pull request that is being closed cannot fall between an open and a closed listing.
+2. The head has two parents. The second parent leads back to a merged App release PR of the current version through nothing but the route's own rebuilds, and no pull request names any of those rebuilds either.
 3. The first parent decides what the run does:
    - **It is current main**, and the tree is exactly what this run builds. The run writes nothing to Git and opens the pull request for that head. The step reports `adopted`.
    - **It is an older main** in current main's history, and the tree is exactly what the runner builds on that older main. The run builds the proposal on current main with the unfinished head as second parent, moves the branch forward (`force: false`) and opens a pull request. The step reports `created`.
 
-Every other head without a pull request still holds: other content or other parents (`proposal-head`); a base outside current main's history, a changed version or more than eight rebuilds (`proposal-base-moved`); a head whose pull request a maintainer closed without merging (`proposal-existing`). As for a rebuild, the check is on bytes and parents, not on who made the commit. A recovery proposal is not taken up; it holds with `proposal-existing` as before.
+Every other head without an open pull request still holds: other content or other parents (`proposal-head`); a base outside current main's history, a changed version or more than eight rebuilds (`proposal-base-moved`); a head, or a rebuild under it, that a pull request names, for example a proposal a maintainer closed without merging (`proposal-existing`). A closed proposal therefore keeps its hold even when a rebuild had already moved the branch past it. As for a rebuild, the check is on bytes and parents, not on who made the commit. A recovery proposal is not taken up; it holds with `proposal-existing` as before.
 
-To let the route take the head up, re-run the whole Release App workflow on the same main commit, under the conditions for a whole-workflow rerun given below, or let the next main push run it. Do not move `release/next`. The pull request that results is a new proposal like any other: it needs its own independent review, current checks and exact-head approval.
+To let the route take the head up, re-run the whole Release App workflow on the same main commit, under the conditions for a whole-workflow rerun given below, or let the next main push run it. A rerun loads its helpers from its own main commit, so it takes a head up only if that commit already has this behaviour. Do not move `release/next`. The pull request that results is a new proposal like any other: it needs its own independent review, current checks and exact-head approval.
 
 ## Refusal diagnostics
 

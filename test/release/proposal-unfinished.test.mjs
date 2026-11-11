@@ -91,6 +91,21 @@ test('an update that shows on a later read goes on to its pull request', async (
   }
 });
 
+test('the read waits on the head this run replaced, also when that is not the merged release', async () => {
+  // A rebuild replaces the open proposal's head; a rebuilt take-up replaces the unfinished head.
+  const open = proposalApiFixture();
+  assert.equal((await propose(open)).result.action, 'created');
+  addFile(open, '.changes/later-fix.md', LATER);
+  const rebuild = readsAfterUpdate(open, 1);
+  assert.equal((await propose(open, rebuild.api, rebuild.options)).result.action, 'rebuilt');
+  assert.deepEqual(rebuild.seen.waits, [1000]);
+  const { f } = await unfinishedFixture();
+  addFile(f, '.changes/later-fix.md', LATER);
+  const taken = readsAfterUpdate(f, 1);
+  assert.equal((await propose(f, taken.api, taken.options)).result.action, 'created');
+  assert.deepEqual(taken.seen.waits, [1000]);
+});
+
 test('a read that shows another commit is kept: no wait, no second read', async () => {
   const f = proposalApiFixture(), { api, seen, options } = readsAfterUpdate(f, Infinity, sha('e'));
   await assert.rejects(() => propose(f, api, options), { code: 'proposal-ref-readback' });
@@ -230,6 +245,73 @@ for (const [name, code, mutate] of [
   await assert.rejects(() => runtime.writeProposal(f.api, f.context, payload, pinned, f.options), { code });
   assert.equal(writes(f).length, before);
   assert.equal(openPR(f), undefined);
+});
+
+// A maintainer closes the open proposal while a rebuild is between its last reads and its branch
+// update. The closed pull request keeps naming the old head; the branch moves on to a new one that no
+// pull request names. The close must keep holding, on this main and after main moves again.
+for (const moved of [false, true]) test(`a proposal closed during its rebuild keeps its hold${moved ? ' after main moves' : ''}`, async () => {
+  const f = proposalApiFixture();
+  assert.equal((await propose(f)).result.action, 'created');
+  const closed = openPR(f), old = f.tip;
+  addFile(f, '.changes/later-fix.md', LATER);
+  const api = async (method, route, body) => {
+    if (method === 'PATCH' && route.endsWith(UPDATE)) closed.state = 'closed';
+    return f.api(method, route, body);
+  };
+  await assert.rejects(() => propose(f, api), { code: 'proposal-pr' });
+  assert.equal(closed.head.sha, old, 'A closed pull request does not follow its branch');
+  assert.deepEqual(parentsOf(f, f.tip), [f.context.sha, old], 'The branch moved on to the rebuilt head');
+  if (moved) addFile(f, 'docs/later.md', 'Later documentation.\n');
+  const { pinned, payload } = await prepared(f), before = writes(f).length;
+  await assert.rejects(() => runtime.writeProposal(f.api, f.context, payload, pinned, f.options), { code: 'proposal-existing' });
+  assert.equal(writes(f).length, before);
+  assert.equal(openPR(f), undefined);
+});
+
+test('an exact rebuild on top of a closed proposal is not taken up, although its bytes are the runner\'s', async () => {
+  const { f, head } = await unfinishedFixture();
+  const closed = { ...f.originalPR, id: 9003, number: 9003, merged: false, merged_at: null, merge_commit_sha: null,
+    head: { ...f.originalPR.head, sha: head } };
+  f.pulls.push(closed);
+  addFile(f, '.changes/later-fix.md', LATER);
+  const { pinned, payload } = await prepared(f);
+  const write = () => runtime.writeProposal(f.api, f.context, payload, pinned, f.options);
+  await assert.rejects(write, { code: 'proposal-existing' }, 'The closed head itself holds');
+  // Exactly what the runner builds next on this main, on top of the closed head, put on the branch by hand.
+  const tree = new Map(f.trees.get(f.commits.get(f.context.sha).tree.sha));
+  for (const [path, row] of f.makeInventory(payload.prepared.updates)) tree.set(path, row);
+  for (const path of payload.prepared.deletions) tree.delete(path);
+  f.tip = f.addCommit(tree, [f.context.sha, head]);
+  const before = writes(f).length;
+  await assert.rejects(write, { code: 'proposal-existing' });
+  assert.equal(writes(f).length, before);
+  // Control: the same head is taken up once no pull request names the rebuild under it.
+  f.pulls.splice(f.pulls.indexOf(closed), 1);
+  assert.equal((await write()).action, 'adopted');
+});
+
+test('a just-closed pull request that neither the open nor the closed listing shows still holds', async () => {
+  const { f, head } = await unfinishedFixture();
+  f.pulls.push({ ...f.originalPR, id: 9004, number: 9004, merged: false, merged_at: null, merge_commit_sha: null,
+    head: { ...f.originalPR.head, sha: head } });
+  const { pinned, payload } = await prepared(f), before = writes(f).length;
+  // The closed listing lags; the listing of every state shows the pull request.
+  const api = async (method, route, body) => {
+    const reply = await f.api(method, route, body);
+    return method === 'GET' && route.includes('/pulls?state=closed') ? { data: reply.data.filter((p) => p.number !== 9004) } : reply;
+  };
+  await assert.rejects(() => runtime.writeProposal(api, f.context, payload, pinned, f.options), { code: 'proposal-existing' });
+  assert.equal(writes(f).length, before);
+});
+
+test('a closed pull request that names only the merged release under the head changes nothing', async () => {
+  const { f, head, retained } = await unfinishedFixture();
+  f.pulls.push({ ...f.originalPR, id: 9005, number: 9005, merged: false, merged_at: null, merge_commit_sha: null,
+    head: { ...f.originalPR.head, sha: retained } });
+  const { result } = await propose(f);
+  assert.equal(result.action, 'adopted');
+  assert.equal(result.head, head);
 });
 
 test('an unfinished recovery proposal keeps its hold', async () => {

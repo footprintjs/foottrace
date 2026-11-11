@@ -513,9 +513,10 @@ async function requireRecoveryMerge(api, context, view, bot, record, lineage) {
 }
 // `movedBase` admits an open proposal whose recorded base is older than main; the
 // caller must then account for that base and the head before any decision.
-// `unfinished` admits a head that no pull request, open or closed, was ever opened
-// for: a proposal write that moved the ref and stopped before the pull request.
-// The caller must then show the head to be the runner's own work before any decision.
+// `unfinished` admits a head that no pull request from `release/next` into main names,
+// in any state: a proposal write that moved the ref and stopped before the pull request.
+// The caller must then show the head to be the runner's own work before any decision,
+// and that no pull request names any rebuild under it either (`listed`).
 async function retainedProposal(api, context, view, bot, version, { movedBase = false, unfinished = false } = {}) {
   const base = prefix(context), ref = await optional(api, `${base}/git/ref/heads/release/next`);
   const pulls = await pages(api, `${base}/pulls?state=open&head=footprintjs:release/next&base=main`);
@@ -532,8 +533,13 @@ async function retainedProposal(api, context, view, bot, version, { movedBase = 
   }
   const closed = await pages(api, `${base}/pulls?state=closed&head=footprintjs:release/next&base=main`);
   const matches = closed.filter((p) => p.head?.sha === head.sha && p.merged_at);
-  // A proposal a maintainer closed keeps its hold: only a head with no pull request at all is unfinished.
-  if (unfinished && !closed.some((p) => p.head?.sha === head.sha)) return { head, unfinished: true };
+  if (unfinished && matches.length === 0) {
+    // Here the absence of a pull request permits a write, so it is read from ONE listing of
+    // every state: a pull request that is closed between the two listings above is in neither
+    // of them, and it is in this one. A proposal a maintainer closed keeps its hold.
+    const listed = await pages(api, `${base}/pulls?state=all&head=footprintjs:release/next&base=main`);
+    if (!listed.some((p) => p.head?.sha === head.sha)) return { head, unfinished: true, listed };
+  }
   if (matches.length !== 1) fail('proposal-existing');
   const predecessor = await mergedLineage(api, context, view, bot, matches[0].number, version);
   if (predecessor.head !== head.sha) fail('proposal-existing');
@@ -564,7 +570,10 @@ const MAX_PROPOSAL_GENERATIONS = 8;
 // generation that is not a merged App head must be exactly what this runner builds
 // at its own first parent, an older main; its second parent is the generation
 // before it. A commit pushed by hand, or any other content, cannot satisfy that.
-async function proposalLineage(api, context, view, bot, version, start) {
+// `unnamed` is every pull request from `release/next` into main, given when the walk
+// serves an unfinished head: no generation in that chain may ever have had a pull
+// request. A proposal that was closed keeps its hold when a later head was built on it.
+async function proposalLineage(api, context, view, bot, version, start, unnamed) {
   const closed = await pages(api, `${prefix(context)}/pulls?state=closed&head=footprintjs:release/next&base=main`);
   let id = start;
   for (let depth = 0; depth <= MAX_PROPOSAL_GENERATIONS; depth++) {
@@ -577,6 +586,7 @@ async function proposalLineage(api, context, view, bot, version, start) {
       return predecessor;
     }
     if (depth === MAX_PROPOSAL_GENERATIONS) break;
+    if (unnamed?.some((p) => p.head?.sha === id)) fail('proposal-existing');
     const generation = await view.commit(id), parents = generation.parents.map((p) => p.sha);
     if (parents.length !== 2 || parents[0] === context.sha) fail('proposal-head');
     await accountedBase(api, context, parents[0]);
@@ -1000,12 +1010,12 @@ async function proposalPreflight(api, context, payload, pinned, options) {
       if (parents[0] === context.sha) {
         // Built on this main: it must be exactly this run's proposal; only the pull request is missing.
         if (retained.head.tree.sha !== expectedTree) fail('proposal-head');
-        predecessor = await proposalLineage(api, context, input.view, bot, input.pkg.version, parents[1]);
+        predecessor = await proposalLineage(api, context, input.view, bot, input.pkg.version, parents[1], retained.listed);
         if (parents[1] !== predecessor.head) prior = parents[1];
       } else {
         // Built on an older main, which must be in current main's history: rebuild it on this
         // main, keeping it as second parent so the branch still only fast-forwards.
-        predecessor = await proposalLineage(api, context, input.view, bot, input.pkg.version, retained.head.sha);
+        predecessor = await proposalLineage(api, context, input.view, bot, input.pkg.version, retained.head.sha, retained.listed);
       }
       unfinished = { authored: true, accounted: true };
     }
