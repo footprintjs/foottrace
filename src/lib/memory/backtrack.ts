@@ -20,7 +20,11 @@
  *    the window every edge for that key carries `overlap`: a possible source, not a certain
  *    one. A step with no window has one parent per key, and it is certain.
  * 4. Create parent CausalNode, link to root.parents
- * 5. Enqueue parent. Repeat until queue empty or limits hit.
+ * 5. A parent whose write of the linking key did not REPLACE the value (a merge, an append, a row
+ *    inside the key) is not the end of the walk for that key: the value is made of that write and
+ *    of what was there. The parent is linked to the commit its write was built on, in commit order
+ *    (`builtOn.ts`), with an edge marked `builtOn`. No step read anything for this edge.
+ * 6. Enqueue parent. Repeat until queue empty or limits hit.
  *
  * Output is a **DAG** (not a linked list): a stage reading `creditScore` AND `dti`
  * from different writers has two parents.
@@ -60,6 +64,7 @@
  * ```
  */
 
+import { builtOnBefore, replacesValue } from './builtOn.js';
 import { buildCommitIndex, lastWriterPosition } from './commitLogUtils.js';
 import type { RegisteredCode } from './honesty.js';
 import { queryWork, relation, writesOnlyInside } from './keyPaths.js';
@@ -138,6 +143,15 @@ export interface CausalNode {
    * dropped without a word.
    */
   preRunReads?: { code: RegisteredCode<'pre-run-origin'>; keys: string[] };
+  /**
+   * The keys this node wrote WITHOUT replacing them (a merge, an append, a row inside the key) when no
+   * commit before it had written them: what it left under such a key was folded onto the value the key
+   * held before the run, which the commit log cannot see, so the walk has no edge to follow for that
+   * part. The code says so (`'from-initial-state'`, registered in `memory/honesty.ts · HONESTY_CODES`);
+   * `keys` are in the order the walk met them. Only for a key the walk came through (a child read it
+   * from this node, or it is the key a slice is about). ABSENT otherwise, so a node keeps its shape.
+   */
+  preRunBase?: { code: RegisteredCode<'from-initial-state'>; keys: string[] };
 }
 
 /**
@@ -176,6 +190,18 @@ export interface CausalEdge {
    * edge of a step with no window keeps its shape.
    */
   overlap?: ReadOverlap;
+  /**
+   * Present only on a `'data'` edge that no READ made: the child's own write of `key` did not replace
+   * the value (it merged into it, appended to it, or wrote a path inside it), so what the child left
+   * under `key` still holds part of what the parent had written. The parent is the last commit that
+   * wrote `key` before the child's write, in commit order: a fold applies commits in that order, so
+   * this edge is exact (`memory/builtOn.ts`). Registered as `'partial-write'` in
+   * `memory/honesty.ts · HONESTY_CODES`. Absent on an edge a read made, so such an edge keeps its
+   * shape. When the child ALSO read `key` from this parent, for certain, the read's edge stands
+   * alone and no second one is added; beside a read that is only a possible source (`overlap`), both
+   * edges are there, because this one is certain.
+   */
+  builtOn?: RegisteredCode<'partial-write'>;
 }
 
 /**
@@ -255,7 +281,14 @@ export interface CausalChainOptions {
    * #P1 — the written keys that anchor the ROOT's expansion under
    * `'per-write'` (e.g. `sliceForKey` passes the sliced key, so the root
    * expands through the reads that fed THAT write, not the whole stage).
-   * Ignored under `'stage'`. Unset → root expands at stage level.
+   * Unset → root expands at stage level. Under `'stage'` they do not narrow
+   * the root's reads.
+   *
+   * Under BOTH settings they also say which of the root's writes the walk is
+   * about: a root that wrote one of these keys without replacing it is
+   * linked to what that write was built on (`CausalEdge.builtOn`). A root
+   * that is only a reader (plain `causalChain`, no keys given) has no such
+   * edge of its own.
    */
   rootLinkKeys?: string[];
 }
@@ -424,6 +457,9 @@ function buildCausalChain(
   if (startIdx === undefined) return undefined;
 
   const startCommit = selectedWriter ?? commitLog[startIdx];
+  // Where the root's own writes sit: the selected bundle (a slice may anchor at a continuation), else
+  // the execution's first commit.
+  const startPos = selectedWriter ? commitLog.indexOf(selectedWriter) : startIdx;
 
   // Pick writer lookup strategy based on log size
   const findWriter = createWriterLookup(commitLog);
@@ -478,13 +514,36 @@ function buildCausalChain(
     return [[...union], false];
   }
 
-  // BFS/worklist queue: [node, commitIdx, depth, keysToExpand]
+  // ── Writes that did not replace a value (`builtOn.ts`) ─────────────────
+  // A node the walk came to through key `k`, at the bundle that wrote `k`, owes one more link when
+  // that write was partial: to the commit it was built on. Each (node, key, bundle) is followed once.
+  type Partial = readonly [key: string, at: number];
+  const followed = new Set<string>();
+  const bundleAt = (position: number): CommitBundle => commitLog[position];
+  /** The partial write of `key` at `at` by `id`, when it has not been followed yet. */
+  function partialWrite(id: string, key: string, at: number): Partial[] {
+    queryWork.units += 1 + commitLog[at].trace.length;
+    if (replacesValue(commitLog[at], key)) return [];
+    const mark = `${at}\u0000${key}\u0000${id}`;
+    if (followed.has(mark)) return [];
+    followed.add(mark);
+    return [[key, at]];
+  }
+
+  // BFS/worklist queue: [node, commitIdx, depth, keysToExpand, partial writes to follow]
   const [rootReads, rootIsFull] = perWrite
     ? readsForLinks(startCommit, options?.rootLinkKeys)
     : [getKeysRead(startId), true];
   expandedReads.set(startId, new Set(rootReads));
   if (rootIsFull) fullyExpanded.add(startId);
-  const queue: Array<[CausalNode, number, number, string[]]> = [[root, startIdx, 0, rootReads]];
+  // The root's own writes the walk is about (a slice names its key): only where the root's bundle
+  // really wrote the key (it is then the last writer before the position after it).
+  const rootPartials = (options?.rootLinkKeys ?? []).flatMap((key) =>
+    startPos >= 0 && findWriter(key, startPos + 1) === startPos ? partialWrite(startId, key, startPos) : [],
+  );
+  const queue: Array<[CausalNode, number, number, string[], readonly Partial[]]> = [
+    [root, startIdx, 0, rootReads, rootPartials],
+  ];
   let visited = 1;
 
   /**
@@ -496,13 +555,18 @@ function buildCausalChain(
    */
   function linkParent(
     node: CausalNode,
-    parentCommit: CommitBundle,
+    parentPos: number,
     kind: 'data' | 'control',
     key: string | undefined,
     depth: number,
     overlap?: ReadOverlap,
+    builtOn = false,
   ): void {
+    const parentCommit = commitLog[parentPos];
     const parentId = parentCommit.runtimeStageId;
+    // The parent wrote `key` at `parentPos`. When that write did not replace the value, the parent
+    // owes a link to what it was built on (followed when the parent is expanded).
+    const partials = kind === 'data' && key !== undefined ? partialWrite(parentId, key, parentPos) : [];
     // the dedup scans below, and the parent's trace when it is new — counted for the scaling test
     queryWork.units += 1 + node.parents.length + node.parentEdges.length;
     // #P1: the parent's expansion reads, resolved LAZILY (only for new nodes
@@ -545,20 +609,25 @@ function buildCausalChain(
       const [linkReads, linkIsFull] = resolveLinkReads();
       expandedReads.set(parentId, new Set(linkReads));
       if (linkIsFull) fullyExpanded.add(parentId);
-      queue.push([parentNode, parentIdx, depth + 1, linkReads]);
-    } else if (perWrite && !fullyExpanded.has(parentId)) {
-      // #P1 worklist: an EXISTING node linked via another key may owe more
-      // expansion — enqueue only the reads not yet expanded (monotone; the
-      // node budget is untouched, no node is created). Re-expansion keeps
-      // the node's ORIGINAL depth so its parents get a consistent depth+1.
-      const [linkReads, linkIsFull] = resolveLinkReads();
-      const expanded = expandedReads.get(parentId)!;
-      const delta = linkReads.filter((k) => !expanded.has(k));
-      if (linkIsFull) fullyExpanded.add(parentId);
-      if (delta.length > 0) {
+      queue.push([parentNode, parentIdx, depth + 1, linkReads, partials]);
+    } else {
+      // An EXISTING node. Two things may still be owed, and neither creates a node (the node budget
+      // is untouched). Re-expansion keeps the node's ORIGINAL depth so its parents get a consistent
+      // depth+1.
+      //  - #P1 worklist: linked via another key under 'per-write', it may owe the reads that fed
+      //    THAT write: only the reads not yet expanded are enqueued (monotone, so it terminates).
+      //  - the link under its write of this key, when that write did not replace the value.
+      let delta: string[] = [];
+      if (perWrite && !fullyExpanded.has(parentId)) {
+        const [linkReads, linkIsFull] = resolveLinkReads();
+        const expanded = expandedReads.get(parentId)!;
+        delta = linkReads.filter((k) => !expanded.has(k));
+        if (linkIsFull) fullyExpanded.add(parentId);
         for (const k of delta) expanded.add(k);
+      }
+      if (delta.length > 0 || partials.length > 0) {
         const parentIdx = idxMap.get(parentId);
-        if (parentIdx !== undefined) queue.push([parentNode, parentIdx, parentNode.depth, delta]);
+        if (parentIdx !== undefined) queue.push([parentNode, parentIdx, parentNode.depth, delta, partials]);
       }
     }
 
@@ -569,11 +638,23 @@ function buildCausalChain(
     // One edge per distinct (parent, kind, key) link. The weigher (D4)
     // stamps the weight at creation; `undefined` → 1.0 — the engine never
     // computes weights itself.
-    if (
-      !node.parentEdges.some(
-        (e) => e.parent.runtimeStageId === parentId && e.kind === kind && e.key === key && e.overlap === overlap,
-      )
-    ) {
+    // An edge a READ made is one per (parent, kind, key, overlap), as it always was. Beside that, at
+    // most ONE edge says the child certainly rests on this parent for this key: a certain read's edge,
+    // or else a `builtOn` edge. So a `builtOn` link adds nothing beside a certain read of the key from
+    // the same parent (the read already says it, and a record whose walk was right keeps its bytes),
+    // and a certain read that arrives after a `builtOn` edge takes its place: the order the walk
+    // met them in must not decide the answer. A read that is only a possible source (`overlap`) says
+    // less than `builtOn` does, so beside one of those both edges stand.
+    const sameLink = (e: CausalEdge): boolean =>
+      e.parent.runtimeStageId === parentId && e.kind === kind && e.key === key;
+    const certain = node.parentEdges.find((e) => sameLink(e) && e.overlap === undefined);
+    let known: boolean;
+    if (builtOn) known = certain !== undefined;
+    else if (overlap === undefined && certain?.builtOn !== undefined) {
+      delete certain.builtOn;
+      known = true;
+    } else known = node.parentEdges.some((e) => sameLink(e) && e.overlap === overlap && e.builtOn === undefined);
+    if (!known) {
       // Error isolation (review finding): a consumer weigher that throws
       // must degrade to the default weight, never crash the slice — the
       // same contract every other consumer callback in the library gets.
@@ -593,18 +674,19 @@ function buildCausalChain(
         weight,
         ...(nested && { basis: 'nested-rows' as const }),
         ...(overlap && { overlap }),
+        ...(builtOn && { builtOn: 'partial-write' as const }),
       });
     }
   }
 
   while (queue.length > 0) {
-    const [node, commitIdx, depth, keysToExpand] = queue.shift()!;
-    queryWork.units += 1 + keysToExpand.length;
+    const [node, commitIdx, depth, keysToExpand, partials] = queue.shift()!;
+    queryWork.units += 1 + keysToExpand.length + partials.length;
 
     if (depth >= maxDepth) {
       // D4: only a node that still HAD something to expand counts as a cut
       // (a leaf at the horizon truncates nothing).
-      if (keysToExpand.length > 0 || controlDeps?.(node.runtimeStageId) !== undefined) {
+      if (keysToExpand.length > 0 || partials.length > 0 || controlDeps?.(node.runtimeStageId) !== undefined) {
         truncatedByDepth = true;
       }
       continue;
@@ -626,9 +708,25 @@ function buildCausalChain(
         node.preRunReads ??= { code: 'pre-run-origin', keys: [] };
         if (!node.preRunReads.keys.includes(key)) node.preRunReads.keys.push(key);
       } else {
-        linkParent(node, commitLog[sources.before], 'data', key, depth, overlapOf(sources, sources.before));
+        linkParent(node, sources.before, 'data', key, depth, overlapOf(sources, sources.before));
       }
-      for (const at of sources.during) linkParent(node, commitLog[at], 'data', key, depth, overlapOf(sources, at));
+      for (const at of sources.during) linkParent(node, at, 'data', key, depth, overlapOf(sources, at));
+    }
+
+    // Built-on edges: for each write of this node that did not replace its key, the commit that
+    // write was folded onto (`builtOn.ts`). A certain read of the same key from the same parent keeps
+    // its own edge and no second one is added, whichever of the two the walk meets first (`linkParent`).
+    for (const [key, at] of partials) {
+      const under = builtOnBefore(key, at, bundleAt, findWriter);
+      // `undefined`: an earlier bundle of this same execution replaced the value. Nothing older is in it.
+      if (under === undefined) continue;
+      if (under < 0) {
+        // Folded onto what the key held before the run: say why there is no edge.
+        node.preRunBase ??= { code: 'from-initial-state', keys: [] };
+        if (!node.preRunBase.keys.includes(key)) node.preRunBase.keys.push(key);
+      } else {
+        linkParent(node, under, 'data', key, depth, undefined, true);
+      }
     }
 
     // Control edge (RFC-003 D3): link the governing decider, labeled by the
@@ -639,7 +737,7 @@ function buildCausalChain(
       if (dep) {
         const deciderIdx = idxMap.get(dep.deciderId);
         if (deciderIdx !== undefined) {
-          linkParent(node, commitLog[deciderIdx], 'control', dep.label, depth);
+          linkParent(node, deciderIdx, 'control', dep.label, depth);
         }
       }
     }
@@ -700,6 +798,9 @@ export function flattenCausalDAG(root: CausalNode): CausalNode[] {
  * `← via x (written while the reader ran)`, naming the keys when they are not
  * the one shown.
  *
+ * An edge no read made (`CausalEdge.builtOn`: the child's write of the key did not replace the value,
+ * so it kept part of what the parent had written) renders as `← built on <key>`.
+ *
  * RFC-003 D4: edge weights from the `weigh` hook render as a suffix —
  * `← via systemPrompt (0.18)` — only when ≠ 1.0, so unweighted output is
  * unchanged. A truncated slice (root.truncated) appends a final
@@ -739,10 +840,17 @@ export function formatCausalChain(root: CausalNode): string {
     // child discovered the node first (breadth-first), and this walk is depth-first: under another
     // child it named a key that child never read.
     const linkParts: string[] = [];
-    const dataEdge = edgesFromChild?.find((e) => e.kind === 'data');
+    // A read's edge is shown before one no read made (`CausalEdge.builtOn`): `via x` says the child
+    // read `x` from this node; `built on x` says the child's own write of `x` kept part of what this
+    // node had written there.
+    const dataEdge =
+      edgesFromChild?.find((e) => e.kind === 'data' && e.builtOn === undefined) ??
+      edgesFromChild?.find((e) => e.kind === 'data');
     if (dataEdge?.key)
       linkParts.push(
-        `via ${shownPath(dataEdge.key)}${weightSuffix(dataEdge)}${overlapSuffix(edgesFromChild, dataEdge)}`,
+        `${dataEdge.builtOn === undefined ? 'via' : 'built on'} ${shownPath(dataEdge.key)}${weightSuffix(
+          dataEdge,
+        )}${overlapSuffix(edgesFromChild, dataEdge)}`,
       );
     const controlEdge = edgesFromChild?.find((e) => e.kind === 'control');
     if (controlEdge) {

@@ -1,7 +1,7 @@
 /**
  * honesty.ts — the ONE vocabulary for what a reader cannot see (F4a).
  *
- *   unit      the registry is frozen and closed, holds exactly the twenty-five codes, and every explanation is
+ *   unit      the registry is frozen and closed, holds exactly the twenty-six codes, and every explanation is
  *             ONE sentence
  *   boundary  the TYPES, asked of the real compiler: a code the registry does not hold FAILS TO COMPILE; the
  *             six public unions are exactly the members they were (they did not widen); the sentences are
@@ -24,6 +24,12 @@
  * and `'written-while-running'` (`ReadOverlap`: a causal edge's and a forward read's `overlap`). The registry
  * holds TWENTY-FIVE codes (seven slice notes) and `Today` gains the note. No earlier sentence or note byte
  * changed.
+ *
+ * The built-on rule added ONE code, `'partial-write'` (`memory/builtOn.ts`): a slice note (a write the answer
+ * rests on merged into the value or appended to it) and the mark of a causal edge no read made
+ * (`CausalEdge.builtOn`). The registry holds TWENTY-SIX codes (eight slice notes) and `Today` gains the note.
+ * TWO earlier strings changed, on purpose: the sentence and the note of `'nested-rows'` said that earlier
+ * writes "may account for the rest"; a walk back now follows them, and both say so.
  *
  * F4b (9.33.0) added TWO codes, `'deleted'` and `'from-initial-state'` (the value basis of
  * `commitValueAtWithBasis`): the registry holds TWENTY-ONE. `'redacted'`'s sentence was reworded to be true of
@@ -65,8 +71,8 @@ const REPO = resolve(__dirname, '../../..');
 /** The codes each declared vocabulary speaks, and the signals that carry no code field of their own. */
 /** The five slice notes the library built at 9.31.0 — the bytes pinned below. */
 const SLICE_CODES_9_31 = ['conservative-fed-edges', 'pre-run-origin', 'reads-not-recorded', 'unknown-key', 'truncated'];
-/** Every slice note today: the five, F3's `'nested-rows'`, and the read window's `'concurrent-write'`. */
-const SLICE_CODES = [...SLICE_CODES_9_31, 'nested-rows', 'concurrent-write'];
+/** Every slice note today: the five, F3's `'nested-rows'`, the read window's `'concurrent-write'`, and the built-on rule's `'partial-write'`. */
+const SLICE_CODES = [...SLICE_CODES_9_31, 'nested-rows', 'concurrent-write', 'partial-write'];
 const MISSING_REASONS = ['empty-log', 'never-written', 'not-an-array'];
 const FED_BASES = ['per-write', 'stage'];
 const ATTRIBUTION_BASES = ['append-verb', 'prefix-inference', 'whole-value'];
@@ -97,7 +103,7 @@ describe('HONESTY_CODES — unit', () => {
     }).toThrow(TypeError);
   });
 
-  it('holds exactly twenty-five codes — seven slice notes, three missing reasons, two fed-edge and three birth bases, two fold bases, two value bases, two read overlaps, four codeless signals', () => {
+  it('holds exactly twenty-six codes — eight slice notes, three missing reasons, two fed-edge and three birth bases, two fold bases, two value bases, two read overlaps, four codeless signals', () => {
     const all = [
       ...SLICE_CODES,
       ...MISSING_REASONS,
@@ -108,7 +114,7 @@ describe('HONESTY_CODES — unit', () => {
       ...READ_OVERLAPS,
       ...SIGNALS_WITHOUT_A_CODE_FIELD,
     ];
-    expect(all).toHaveLength(25);
+    expect(all).toHaveLength(26);
     expect(Object.keys(HONESTY_CODES).sort()).toEqual(all.sort());
   });
 
@@ -147,7 +153,7 @@ const HEADER = [
   "import { HONESTY_CODES } from './honesty.js';",
   "import type { HonestyCode, RegisteredCode } from './honesty.js';",
   "import type { ReadOverlap } from './readWindow.js';",
-  "type Today = 'conservative-fed-edges' | 'concurrent-write' | 'nested-rows' | 'pre-run-origin' | 'reads-not-recorded' | 'unknown-key' | 'truncated' | 'redacted' | 'from-initial-state';",
+  "type Today = 'conservative-fed-edges' | 'concurrent-write' | 'nested-rows' | 'partial-write' | 'pre-run-origin' | 'reads-not-recorded' | 'unknown-key' | 'truncated' | 'redacted' | 'from-initial-state';",
   "type TodayBasis = 'initial+log' | 'log-only';",
   "type TodayMissing = 'empty-log' | 'never-written';",
   "type TodayProvenance = 'empty-log' | 'never-written' | 'not-an-array';",
@@ -394,7 +400,7 @@ describe("F3's slice note — 'nested-rows'", () => {
     expect(one.code).toBe('nested-rows');
     expect(Object.keys(HONESTY_CODES)).toContain(one.code);
     expect(one.detail).toBe(
-      "'cfg' was written only through paths inside it at commit 1 — such a write changed part of its value, not the whole: earlier writes may account for the rest, and a reader of the key may not have read the part it changed.",
+      "'cfg' was written only through paths inside it at commit 1 — such a write changed part of its value, not the whole: earlier writes account for the rest (a walk back follows them), and a reader of the key may not have read the part it changed.",
     );
     const many = nestedRowsNote(['cfg', 'inner'].join('\u001F'), [1, 2, 3, 4, 5, 6, 7]);
     expect(

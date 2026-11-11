@@ -37,6 +37,7 @@ import {
   rootOf,
   writesOnlyInside,
 } from '../memory/keyPaths.js';
+import { replacesValue } from '../memory/builtOn.js';
 import { logModel } from '../memory/logModel.js';
 import { type ReadOverlap, type ReadWindow, readOfValue } from '../memory/readWindow.js';
 import { windowsOf } from '../memory/windowPlacement.js';
@@ -64,8 +65,9 @@ export interface KeyIndex {
   /** key → commit ARRAY positions that WROTE it under the writer rule, ascending. Memoised per key. */
   writesOf(key: string): number[];
   /**
-   * The writes that END a value's life: every write except one that reached the key only through paths
-   * inside it — that one changed part of the value, and a reader after it still read the rest. Memoised.
+   * The writes that END a value's life: the ones that REPLACE the key's value (`memory/builtOn.ts ·
+   * replacesValue`). A write that merged into the value, appended to it or wrote a path inside it
+   * changed part of it, and a reader after it still read the rest. Memoised.
    */
   closingWritesOf(key: string): number[];
   /** Read key, as the reads provider named it → commit ARRAY positions whose stage READ it, ascending. */
@@ -142,8 +144,7 @@ export function buildKeyIndex(commitLog: CommitBundle[], lookup: KeysReadLookup)
   const closingWritesOf = (key: string): number[] => {
     let positions = closing.get(key);
     if (positions === undefined) {
-      const nested = new Set(nestedOnlyWrites(commitLog, key, writesOf(key)));
-      positions = writesOf(key).filter((c) => !nested.has(c));
+      positions = writesOf(key).filter((c) => replacesValue(commitLog[c], key));
       closing.set(key, positions);
     }
     return positions;
@@ -338,7 +339,29 @@ export function nestedOnlyWrites(commitLog: readonly CommitBundle[], key: string
   return writes.filter((i) => writesOnlyInside(commitLog[i], key));
 }
 
-/** How many commit positions a `'nested-rows'` note lists before it says "+N more". */
+/**
+ * The commits in `writes` that neither replaced `key` nor reached it only through rows inside it: a
+ * `merge` or an `append` on the key, or a `merge` of a container around it. Each was folded onto what
+ * the key held. What a `'partial-write'` note names (the nested-only ones have their own note).
+ */
+export function mergedWrites(commitLog: readonly CommitBundle[], key: string, writes: readonly number[]): number[] {
+  return writes.filter((i) => !replacesValue(commitLog[i], key) && !writesOnlyInside(commitLog[i], key));
+}
+
+/** A write the answer rests on, or that a value's life crosses, merged into the key or appended to it. */
+export function partialWriteNote(key: string, commits: readonly number[]): HonestyNote {
+  const shown = commits.slice(0, NESTED_WRITES_LISTED);
+  const more = commits.length - shown.length;
+  const at = `commit${commits.length === 1 ? '' : 's'} ${shown.join(', ')}${more > 0 ? ` (+${more} more)` : ''}`;
+  return {
+    code: 'partial-write',
+    detail:
+      `'${shownPath(key)}' was merged into or appended to at ${at} — such a write did not replace the value: ` +
+      'it is made of that write and of the earlier ones, and a reader after it read all of them.',
+  };
+}
+
+/** How many commit positions a `'nested-rows'` or a `'partial-write'` note lists before it says "+N more". */
 export const NESTED_WRITES_LISTED = 5;
 
 /** A write the answer rests on reached the key only through paths inside it. */
@@ -350,8 +373,8 @@ export function nestedRowsNote(key: string, commits: readonly number[]): Honesty
     code: 'nested-rows',
     detail:
       `'${shownPath(key)}' was written only through paths inside it at ${at} — such a write changed part of ` +
-      'its value, not the whole: earlier writes may account for the rest, and a reader of the key may ' +
-      'not have read the part it changed.',
+      'its value, not the whole: earlier writes account for the rest (a walk back follows them), and a ' +
+      'reader of the key may not have read the part it changed.',
   };
 }
 

@@ -104,3 +104,65 @@ describe('a causal walk over nested keys scales near-linearly in the log', () =>
     expect(n4 / n).toBeGreaterThan(6);
   });
 });
+
+/**
+ * A value built in steps (`memory/builtOn.ts`): one key that every commit ADDS to and one reader at the end.
+ * The walk back now follows one link per write, back to the write that replaced the value, so its work has
+ * to grow with the chain and not with its square. Each link is one writer lookup and one look at the rows of
+ * one bundle.
+ */
+function chain(n: number, frozen: boolean) {
+  const log: CommitBundle[] = [];
+  for (let i = 0; i < n; i++) {
+    log.push({
+      idx: i,
+      stage: 'S',
+      stageId: `s${i}`,
+      runtimeStageId: `s${i}#${i}`,
+      trace: [{ path: 'list', verb: i === 0 ? 'set' : 'merge' }],
+      overwrite: i === 0 ? { list: [0] } : {},
+      updates: i === 0 ? {} : { list: [i] },
+      redactedPaths: [],
+    });
+  }
+  log.push({
+    idx: n,
+    stage: 'Use',
+    stageId: 'use',
+    runtimeStageId: `use#${n}`,
+    trace: [{ path: 'out', verb: 'set' }],
+    overwrite: { out: 1 },
+    updates: {},
+    redactedPaths: [],
+  });
+  const lookup = (id: string) => (id.startsWith('use#') ? ['list'] : []);
+  return { log: frozen ? deepFreeze(log, 'indices') : log, lookup };
+}
+
+describe('a walk back through a value built in steps scales near-linearly in the chain', () => {
+  const walkChain = (s: ReturnType<typeof chain>) =>
+    causalChain(s.log, s.log[s.log.length - 1].runtimeStageId, s.lookup, { maxDepth: 1e6, maxNodes: 1e6 });
+  const workOfChain = (n: number, frozen: boolean): number => {
+    const s = chain(n, frozen);
+    const before = queryWork.units;
+    walkChain(s);
+    return queryWork.units - before;
+  };
+
+  for (const frozen of [false, true]) {
+    it(`${
+      frozen ? 'a frozen (engine) log' : 'a hand-built log'
+    }: a chain of 2000 vs 8000 writes does under 6× the work`, () => {
+      // The walk is real: it reaches the write that replaced the value, through every write after it.
+      const small = chain(300, frozen);
+      const root = walkChain(small)!;
+      let depth = 0;
+      for (let node = root; node.parents.length > 0; node = node.parents[0]) depth++;
+      expect(depth).toBe(300);
+      const n = workOfChain(2000, frozen);
+      const n4 = workOfChain(8000, frozen);
+      expect(n).toBeGreaterThan(2000); // it counted the walk
+      expect(n4 / n).toBeLessThan(6);
+    });
+  }
+});

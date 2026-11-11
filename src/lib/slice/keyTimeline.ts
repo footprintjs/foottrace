@@ -20,19 +20,35 @@
  * `fromWriteIdx` and raises the `'pre-run-origin'` note: it saw initial
  * state, frozen run `input`, or a closure.
  *
+ * ### LAW — a value built in steps is said on the WRITE, once
+ *
+ * A write that did not replace the value (a merge, an append, a path inside
+ * the key) was folded onto the write before it. The write moment names that
+ * one (`builtOnWriteIdx`), or says the value from before the run was under it
+ * (`builtOnPreRun`). The rule is `memory/builtOn.ts`, the one the backward
+ * walk follows, so the two cannot disagree. WHY on the write and not on the
+ * read: a read of a list that was appended to N times saw N writes, and a
+ * list on every read grows with the square of a loop that appends and reads.
+ * The link is one number per write; a reader follows it from the write a
+ * read names.
+ *
  * DAG position: memory ← slice. Imports memory/ only (see README.md).
  */
 
 import type { KeysReadLookup } from '../memory/backtrack.js';
+import { builtOnBefore } from '../memory/builtOn.js';
 import { readSourcesOf } from '../memory/readWindow.js';
 import type { CommitBundle } from '../memory/types.js';
 import {
   buildKeyIndex,
   concurrentReadsNote,
+  fromInitialStateNote,
   hasRecordedReads,
   lastIndexBefore,
+  mergedWrites,
   nestedOnlyWrites,
   nestedRowsNote,
+  partialWriteNote,
   preRunOriginNote,
   readsNotRecordedNote,
   unknownKeyNote,
@@ -107,6 +123,9 @@ export function keyTimeline(
   let r = 0;
   let sawPreRunRead = false;
   let concurrentReads = 0;
+  let restsOnPreRun = false;
+  const bundleAt = (position: number): CommitBundle => commitLog[position];
+  const writeBefore = (_key: string, before: number): number => lastIndexBefore(allWrites, before) ?? -1;
   while (w < writes.length || r < reads.length) {
     const takeRead = r < reads.length && (w >= writes.length || reads[r] <= writes[w]);
     if (takeRead) {
@@ -114,11 +133,7 @@ export function keyTimeline(
       const bundle = commitLog[idx];
       // The value this read saw is the one rule's answer (`memory/readWindow.ts`): the last write before
       // the step began, or a write inside its read window (none for a step with no window).
-      const sources = readSourcesOf(
-        normalisedKey,
-        index.windows.get(idx) ?? { start: idx, end: idx },
-        (_key, before) => lastIndexBefore(allWrites, before) ?? -1,
-      );
+      const sources = readSourcesOf(normalisedKey, index.windows.get(idx) ?? { start: idx, end: idx }, writeBefore);
       if (sources.before < 0) sawPreRunRead = true;
       if (sources.during.length > 0) concurrentReads++;
       moments.push({
@@ -134,6 +149,12 @@ export function keyTimeline(
       const idx = writes[w++];
       const bundle = commitLog[idx];
       const entry = writeEntry(bundle, normalisedKey);
+      // A write that did not replace the value was folded onto the write before it, or onto the value
+      // from before the run when there is none (`memory/builtOn.ts`). Said ONCE, on the write: a read
+      // names the write it saw, and a reader of the timeline follows the links from there. (A list on
+      // every read would grow with the square of a key that is appended to and read in a loop.)
+      const under = builtOnBefore(normalisedKey, idx, bundleAt, writeBefore);
+      if (under === -1) restsOnPreRun = true;
       moments.push({
         kind: 'write',
         commitIdx: idx,
@@ -141,6 +162,7 @@ export function keyTimeline(
         stageId: bundle.stageId,
         stageName: bundle.stage,
         ...(entry !== undefined && { verb: entry.verb }),
+        ...(under !== undefined && (under < 0 ? { builtOnPreRun: true as const } : { builtOnWriteIdx: under })),
       });
     }
   }
@@ -148,6 +170,9 @@ export function keyTimeline(
   if (sawPreRunRead) notes.push(preRunOriginNote(normalisedKey));
   const nested = nestedOnlyWrites(commitLog, normalisedKey, writes);
   if (nested.length > 0) notes.push(nestedRowsNote(normalisedKey, nested));
+  const merged = mergedWrites(commitLog, normalisedKey, writes);
+  if (merged.length > 0) notes.push(partialWriteNote(normalisedKey, merged));
+  if (restsOnPreRun) notes.push(fromInitialStateNote(normalisedKey));
   if (concurrentReads > 0) notes.push(concurrentReadsNote(concurrentReads));
   return { ...base, moments, notes };
 }

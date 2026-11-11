@@ -1,5 +1,6 @@
 import { inspectSourceParents } from './recordSourceEdges.js';
 import { causalChain, type CausalEdge } from '../memory/backtrack.js';
+import { builtOnBefore } from '../memory/builtOn.js';
 import { lastWriterPosition } from '../memory/commitLogUtils.js';
 import { type ReadWindow, readSourcesOf } from '../memory/readWindow.js';
 import { windowOf } from '../memory/windowPlacement.js';
@@ -21,12 +22,27 @@ import type { Gap, GraphEdge } from './types.js';
  * The commits one causal edge points at. An edge names an EXECUTION; a graph node is one commit of it. The
  * rule that made a data edge says which (`memory/readWindow.ts`): the last writer before the step began, or,
  * for an edge marked `'written-while-running'`, each commit of that execution that wrote the key inside
- * the step's read window.
+ * the step's read window. An edge no read made (`CausalEdge.builtOn`) is not dated by the window at all:
+ * the node's write was folded onto the last write before its own commit (`memory/builtOn.ts`).
  */
-function writerPositions(scope: PreparedRecordScope, edge: CausalEdge, window: ReadWindow): number[] {
+function writerPositions(
+  scope: PreparedRecordScope,
+  edge: CausalEdge,
+  window: ReadWindow,
+  commitIndex: number,
+): number[] {
   if (edge.kind !== 'data' || !edge.key) {
     const at = scope.log.findIndex((bundle) => bundle.runtimeStageId === edge.parent.runtimeStageId);
     return at < 0 ? [] : [at];
+  }
+  if (edge.builtOn) {
+    const under = builtOnBefore(
+      edge.key,
+      commitIndex,
+      (position) => scope.log[position],
+      (key, before) => lastWriterPosition(scope.log, key, before),
+    );
+    return under === undefined || under < 0 ? [] : [under];
   }
   const sources = readSourcesOf(edge.key, window, (key, before) => lastWriterPosition(scope.log, key, before));
   if (edge.overlap !== 'written-while-running') return sources.before < 0 ? [] : [sources.before];
@@ -38,6 +54,7 @@ function projectParentEdges(
   scope: PreparedRecordScope,
   parentEdges: readonly CausalEdge[],
   firstCommitIndex: number,
+  commitIndex: number,
   precise: boolean,
   maximumEdges: number,
   addGap: AddRecordGap,
@@ -50,7 +67,7 @@ function projectParentEdges(
       addGap('edge-limit');
       break;
     }
-    const positions = writerPositions(scope, edge, window);
+    const positions = writerPositions(scope, edge, window, commitIndex);
     if (positions.length === 0) {
       addGap('untracked-input');
       continue;
@@ -67,7 +84,14 @@ function projectParentEdges(
           ...(edge.kind === 'data' && edge.key ? { key: edge.key } : {}),
         }),
         kind: edge.kind,
-        attribution: edge.kind === 'control' ? 'recorded-control' : precise ? 'per-write' : 'stage',
+        attribution:
+          edge.kind === 'control'
+            ? 'recorded-control'
+            : edge.builtOn
+            ? 'recorded-write'
+            : precise
+            ? 'per-write'
+            : 'stage',
         evidence: ['commit:' + writerIndex],
       });
     }
@@ -130,6 +154,9 @@ export function inspectRecordNode(
             })
           : undefined);
   if (root?.preRunReads?.keys.length) coverage.addGap('untracked-input');
+  // A write folded onto the value from before the run: that part of the value has no node to point at.
+  // The same code as a read of a pre-run value, which is what this view has always said for one.
+  if (root?.preRunBase?.keys.length) coverage.addGap('untracked-input');
   if (root?.truncated?.byNodes) coverage.addGap('edge-limit');
   for (const note of slice?.notes ?? [])
     if (note.code === 'redacted') coverage.addGap('redacted');
@@ -138,6 +165,7 @@ export function inspectRecordNode(
     scope,
     root?.parentEdges ?? [],
     firstCommitIndex,
+    commitIndex,
     precise,
     maximumEdges,
     coverage.addGap,

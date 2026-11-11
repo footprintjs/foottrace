@@ -1,6 +1,7 @@
 import type { CommitBundle } from '../memory/types.js';
 import { relation } from '../memory/keyPaths.js';
 import { forwardSliceForKey } from '../slice/forwardSliceForKey.js';
+import { builtOnChildPositions } from './recordBuiltOn.js';
 import { collectControlChildCoverage } from './recordControl.js';
 import { readKeysForStage } from './recordScope.js';
 import type { AddRecordGap, PreparedRecordScope, RecordIdentity, ResolvedRecordNode } from './recordTypes.js';
@@ -80,6 +81,10 @@ export function collectForwardCoverage(
       neighbors.add(JSON.stringify(['data', edge.child.commitIdx, edge.child.key]));
     for (const read of forward.root?.reads ?? [])
       if (!scope.log[read.commitIdx]?.trace.length) neighbors.add(JSON.stringify(['read', read.commitIdx, key]));
+    // The writes folded onto this one are neighbours too (`recordBuiltOn.ts`); one that also read the
+    // key is the same neighbour as its fed edge.
+    for (const position of builtOnChildPositions(scope, key, commitIndex))
+      neighbors.add(JSON.stringify(['data', position, key]));
   }
   collectControlChildCoverage(scope, identity, firstCommitIndex, neighbors, addGap);
   if (neighbors.size > maximumEdges) addGap('edge-limit');

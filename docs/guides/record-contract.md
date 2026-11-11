@@ -144,6 +144,23 @@ use, remote commitment or complete external ancestry.
   and a guessed one is never read as a said one. It refuses a bundle whose
   stamps cannot be stamps, or whose stamps sit beside such an `idx`; it never
   drops them.
+- **A write that only added is followed to what it was added to.** A `set` or
+  a `delete` of a key, or of a container around it, replaces the key's value.
+  Any other write (a `merge`, an `append`, a row on a path inside the key)
+  was folded onto what the last write before it had left, in commit order,
+  and the value is made of both. Every reader that follows a value to its
+  writers goes on from such a write to that commit: `causalChain` and
+  `sliceForKey` with an edge marked `builtOn: 'partial-write'` (and
+  `preRunBase` on the node when no commit before it wrote the key),
+  `forwardSliceForKey` by not ending a value's life there (a
+  `'partial-write'` note names the commits), `keyTimeline` with
+  `builtOnWriteIdx` or `builtOnPreRun` on the write moment, the cause graph
+  with an edge of attribution `'recorded-write'`. The test is by verb and
+  path, never by value: a `merge` that overwrote the only field a value had
+  is still followed. One writer too many, never one too few. A stage that
+  also read the key keeps its one edge, the read's. Not covered: a `set` row
+  written in place of rows that only added (see "What is not in this
+  contract").
 - **A reader names the writers that are in the array.** Every reader that
   takes a commit log takes it as the history before each stage: the source of
   a read is the last writer of the key that is in the array. A bundle that was
@@ -176,6 +193,16 @@ use, remote commitment or complete external ancestry.
   own keys in the state; the fold carries them like any key.
 - A record version field. The contract is versioned by the foottrace
   version that reads it.
+- A mark on a `set` row whose value was built on what the key held. A reader
+  takes `set` at its word: the value after it owes nothing to the value
+  before it, except through a read the stage is recorded with. A producer
+  that writes a `set` of an earlier value plus a change, and records no read
+  of the key, has left that earlier writer out of every walk back, and no
+  reader can tell. `RecordFrame` itself does this in two cases: under
+  `commitValues: 'delta'` for a stage that merged into a key and also wrote
+  a path inside it, and under either encoding for rows that would not fold
+  back to what the stage read. Both are pinned as a known limit
+  (`test/lib/memory/property/built-on.property.test.ts`).
 
 ## Bring your own record
 

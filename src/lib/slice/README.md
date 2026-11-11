@@ -60,14 +60,16 @@ What moved, on the charts that show it (test/lib/slice/nested-rows.test.ts):
 
 On a log whose rows are all on their exact paths, every answer is the 9.32 answer.
 
-**A write inside the key does not end a value's life.** In `forwardSliceForKey` a life runs to the next
-write that replaces the value — never to one that only wrote a path inside the key: a reader after a
-merge-back still read the rest of the anchored value, so it stays listed.
+**A write that only added does not end a value's life.** In `forwardSliceForKey` a life runs to the next
+write that REPLACES the value: a `set` or a `delete` of the key or of a container around it. It does not
+end at a write inside the key, a `merge` or an `append`: a reader after one of those still read the rest
+of the anchored value, so it stays listed (`memory/builtOn.ts`, the one rule; see "A value built in
+steps" below).
 
 **A write found through a row inside the key wrote only PART of its value.** `keyTimeline` (any such
 write moment) and `forwardSliceForKey` (such an anchor) say so with a `'nested-rows'` note naming the
-commits: earlier writes may account for the rest, and a reader of the key may not have read the part
-that write changed. The other readers carry the same code (F4b, same minor): `sliceForKey` has an
+commits: earlier writes account for the rest (a walk back follows them), and a reader of the key may not
+have read the part that write changed. The other readers carry the same code (F4b, same minor): `sliceForKey` has an
 optional `notes` (a `'nested-rows'` note when its anchor wrote the key only through paths inside it —
 absent otherwise, so an exact slice keeps its 9.32 shape; `sliceToJSON` copies it, `formatSlice` prints
 it); each `causalChain` data edge to such a writer carries `basis: 'nested-rows'`, and a node that read a key no commit before it wrote says so in `preRunReads: { code: 'pre-run-origin', keys }` (the walk used to drop such a read silently); `arrayProvenance` has
@@ -170,7 +172,9 @@ is exclusive — anchor the follow-up with `before: birth.commitIdx + 1`.
 `sliceForKey` (the last write, or the last write before `before`), walked the
 other way. The unit is not a step but a **value's life**:
 
-1. a write starts a life; it ends at the key's **next write** (`nextWriteIdx`);
+1. a write starts a life; it ends at the key's **next write that replaces the value**
+   (`nextWriteIdx`). A write that only added to it (a `merge`, an `append`, a path inside the key)
+   does not end it: the slice carries a `'partial-write'` or `'nested-rows'` note naming those commits;
 2. every stage that read the key inside that window is a `read`;
 3. a reading stage that also wrote something carried the value onward — a
    `fed` edge to that write, itself the start of a new life;
@@ -204,6 +208,21 @@ every recorded read, each moment carrying `runtimeStageId` **and** `commitIdx`
 — the two universal join keys. A read's `fromWriteIdx` says which value it saw,
 by the *same* live-range rule the walk uses (a property test pins the two doors
 to identical attribution). No graph, no budgets, no live references.
+
+A write that did not replace the value says what it was folded onto:
+`builtOnWriteIdx` (the write before it), or `builtOnPreRun` (nothing in the log
+is under it; the timeline then carries a `'from-initial-state'` note).
+
+```
+@0 write set — start (start#0)
+@1 write merge — fill (fill#1) (added to the value of commit 0)
+@2 read  — use (use#2) (value from commit 1)
+```
+
+The read names the write it saw; follow `builtOnWriteIdx` from there to reach
+every write the value is made of. WHY on the write and not on the read: a list
+on every read grows with the square of a key that is appended to and read in
+a loop. This is one number per write.
 
 ### `sliceToJSON(slice)` / `formatSlice(slice)` — the ONLY safe serializations
 
@@ -315,15 +334,26 @@ with the names it recorded (`test/lib/slice/nested-rows.test.ts`).
   marked `'replaced-while-running'` or `'written-while-running'`: possible, not
   certain, the real one among them. Text says `maybe read by` and
   `(written while the reader ran)`.
+- `CausalEdge.builtOn` and `CausalNode.preRunBase` (backward), a
+  `'partial-write'` note (forward, timeline), `KeyMoment.builtOnWriteIdx` /
+  `builtOnPreRun` (timeline): a value built in steps. A write that did not
+  replace a key's value (a `merge`, an `append`, a path inside the key) was
+  folded onto what the write before it had left, and the value is made of
+  both. The walk back goes on to that write with an edge no read is behind;
+  it used to stop, and the step that wrote the rest was left out with no
+  note (`memory/builtOn.ts`, the one rule; `memory/README.md` has the why and
+  an example). Text says `← built on box`.
 - `keysReadKind` + `readsCoverage` — a slice can always be traced to its reads
   provider, and a reads-less provider is detectable, not silent.
 - `HonestyNote[]` (forward, timeline) — the machine-readable envelope: a consumer
-  branches on `code`, a human/LLM reads `detail`. Seven codes:
+  branches on `code`, a human/LLM reads `detail`. Eight codes:
   `'unknown-key'`, `'reads-not-recorded'`, `'pre-run-origin'`,
   `'conservative-fed-edges'`, `'truncated'`, `'nested-rows'` (9.33.0 — a
-  write reached the key only through paths inside it), and `'concurrent-write'`
+  write reached the key only through paths inside it), `'concurrent-write'`
   (a key was written inside the read window of the step that read it, so that
-  read has possible sources only). What each code MEANS is
+  read has possible sources only), and `'partial-write'` (a write merged into
+  the key or appended to it, so the value is made of that write and of the
+  earlier ones). What each code MEANS is
   registered once, in `memory/honesty.ts · HONESTY_CODES` (served as
   `HONESTY_CODES` on `foottrace`): `HONESTY_CODES[note.code]` is the
   one-sentence explanation, and the `detail` is the per-instance sentence (it
