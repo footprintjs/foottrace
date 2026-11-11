@@ -53,7 +53,9 @@ So the writer says when a step looked at state, and only when that is not "just 
 | `beganAt` | another step committed in that time | the step's reads are dated at `beganAt`, not at its commit |
 | `beganAt` and `sawUntil` | the step also read LIVE state after such a commit | commits `beganAt` to `sawUntil - 1` are its window: a read may have seen them |
 
-`RecordFrame` has two read tiers: the view pinned at the first look, and live state for a key that view cannot answer. Every place the frame reads state notes the log's length (`RecordFrame · observe`, one door, pinned by a test), and `recordCommit · seenOf` decides what goes on the bundle.
+`RecordFrame` has two read tiers: the view pinned at the first look, and live state for a key that view cannot answer. Every read the frame itself makes of state notes the log's length (`RecordFrame · observe`, one door, pinned by a test), and `recordCommit · seenOf` decides what goes on the bundle. The door covers the frame's own reads only: `RecordFrame.state` is public, and a caller that reads it directly is not seen, so what it read is neither tracked nor dated.
+
+A reader places the window by the `idx` each bundle carries, not by counting positions back, so a log handed over as a slice, or without some of its bundles, still reads right (`readWindow.ts · windowOf`).
 
 One rule reads it (`readWindow.ts · readSourcesOf`): a read of a key saw the last write before the step began, or a write of that key inside its window.
 

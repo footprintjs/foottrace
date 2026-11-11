@@ -113,6 +113,39 @@ describe.each(Object.entries(ADAPTERS))('the cause graph over %s', (_name, graph
   });
 });
 
+describe('two writers inside one window', () => {
+  it.each(Object.entries(ADAPTERS))("%s: each edge points at its own writer's commit, once", async (_name, graphOf) => {
+    // seed, one and two each write x; slow began before one committed and looked again after two did.
+    const commitLog = [
+      commit('seed', 0, { x: [] }),
+      commit('one', 1, { x: [] }),
+      commit('two', 2, { x: [] }),
+      commit('slow', 3, { copy: ['x'] }, { beganAt: 1, sawUntil: 3 }),
+    ];
+    const g = graphOf(commitLog);
+    const node = (stage: string, idx: number, key: string) =>
+      g.nodeId(address, { runtimeStageId: `${stage}#${idx}`, commitIdx: idx, key });
+    const parents = (await g.parents(node('slow', 3, 'copy'), ctx())).edges.map((edge) => edge.nodeId);
+    expect(parents).toEqual([node('seed', 0, 'x'), node('one', 1, 'x'), node('two', 2, 'x')]);
+  });
+});
+
+describe('a record in memory handed over as part of a log', () => {
+  it('without the continuation bundles that sat in the window, the parent is the same', async () => {
+    // seed 0, fast 1, fast (exit) 2, fast (repeat) 3, slow 4 began at 1. Rows 2 and 3 are not handed over.
+    const commitLog = [
+      commit('seed', 0, { x: [] }),
+      commit('fast', 1, { x: [] }),
+      { ...commit('slow', 2, { copy: ['x'] }, { beganAt: 1 }), idx: 4 },
+    ];
+    const g = createRecordGraph([scope(commitLog) as never]);
+    const node = (stage: string, idx: number, key: string) =>
+      g.nodeId(address, { runtimeStageId: `${stage}#${idx}`, commitIdx: idx, key });
+    const parents = (await g.parents(node('slow', 2, 'copy'), ctx())).edges.map((edge) => edge.nodeId);
+    expect(parents).toEqual([node('seed', 0, 'x')]);
+  });
+});
+
 describe('a record in memory whose bundles are numbered by position', () => {
   it('keeps each stamp at its distance from the bundle', async () => {
     // The same three commits, as rows 7 to 9 of a longer log: handed over as a slice, re-numbered 0 to 2.

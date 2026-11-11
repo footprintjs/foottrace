@@ -37,7 +37,8 @@ One bundle is one stage's commit: what it wrote, as the log spells it.
 | `phase` | `'exit'` or `'repeat'` | no | Which continuation of a stage's execution this bundle is. The first bundle of a `runtimeStageId` is the stage's own and has no `phase`. `'exit'` is a subflow mount's exit after its merge-back bundle; `'repeat'` is a fork child's fan-out settle. Readers group bundles by `runtimeStageId` and read this field. |
 | `beganAt` | whole number | no | How many commits the log held when the stage first looked at state. Written only when another stage committed between that look and this commit. It dates the stage's reads: they saw state as it stood at `beganAt`, not at this commit. |
 | `sawUntil` | whole number | no | How many commits the log held when the stage last read live state. Written only with `beganAt` and only when greater. Commits `beganAt` to `sawUntil - 1` are the stage's read window: a read may have seen any of them. |
-| `idx`, `stage`, `stageId` | | no | Advisory. The reader derives the commit index from position. When `beganAt` is present, `idx` says how far before the bundle it lies; without `idx` the position is used. |
+| `stage`, `stageId` | | no | Advisory. |
+| `idx` | whole number | no | The bundle's commit index in the log it was written to. Replay and the cursor derive the commit index from position and do not read it. The read window does: the commits a stage had seen are the ones whose `idx` is below its `beganAt`, so a log handed over as a slice, or without some of its bundles, still reads right. A producer that writes `beganAt` writes `idx` on every bundle. A bundle without `idx` counts as sitting at its position. |
 
 A trace row's `verb` is one of exactly four: `set`, `merge`, `append`,
 `delete`. `path` must be a string: a top-level key or a nested path; a nested path uses
@@ -127,9 +128,11 @@ use, remote commitment or complete external ancestry.
   the key in the window the source is certain. With one, every source of that
   read is marked `overlap: 'replaced-while-running' | 'written-while-running'`
   and the answer carries a `'concurrent-write'` note: possible sources, the
-  real one among them. The fold does not read the stamps. A door that takes
-  records from outside (the cause graph, the PROV export) refuses a bundle
-  whose stamps cannot be stamps; it never drops them.
+  real one among them. The window is placed by the `idx` each bundle carries,
+  so a log handed over as a slice or without some of its bundles reads the
+  same. The fold does not read the stamps. A door that takes records from
+  outside (the cause graph, the PROV export) keeps each bundle's own `idx` and
+  refuses a bundle whose stamps cannot be stamps; it never drops them.
 - **One saved-row boundary.** `isCommitBundle(row)` applies the same checks as
   replay. Causal readers still accept typed `CommitBundle[]`, not unknown input.
   A consumer preparing a causal query from stored rows must validate every row
@@ -137,7 +140,7 @@ use, remote commitment or complete external ancestry.
   the result as complete. The whole unreadable bundle is one replay gap,
   including any otherwise valid writes within it. Existing envelope checks and
   a trace entry's verb refusal take precedence over that entry's path refusal.
-  Advisory `stage`, `stageId` and `idx` metadata remain optional.
+  `stage`, `stageId` and `idx` remain optional for replay.
 - **Same answer, any producer.** A record footprintjs wrote and the same
   record written by hand fold to the same state. The example below is that
   record.

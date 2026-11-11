@@ -20,9 +20,9 @@
  *             its key with a parent written inside it; an unmarked parent's key was not written there.
  *   FORWARD   the same judge, the other way: the step that read a value is listed among the readers of
  *             the write the value names (or of the value from before the run).
- *   NEEDED    the property is not vacuous, twice: with both stamps ignored (the walk as it was before)
- *             SOUND fails, and with only `sawUntil` ignored it fails too. Each counterexample is a read
- *             whose real writer the walk would leave out.
+ *   NEEDED    the property is not vacuous, three times: with both stamps ignored (the walk as it was
+ *             before) SOUND fails, and it fails with either one ignored alone. Each counterexample is a
+ *             read whose real writer the walk would leave out.
  */
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
@@ -240,6 +240,7 @@ describe('the walk back and interleaved steps', () => {
   it.each([
     ['both stamps', ['beganAt', 'sawUntil'] as const],
     ['sawUntil alone', ['sawUntil'] as const],
+    ['beganAt alone', ['beganAt'] as const],
   ])('NEEDED: with %s ignored, a read is found whose real writer the walk does not name', (_name, stamps) => {
     let found: string | undefined;
     fc.assert(

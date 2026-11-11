@@ -168,6 +168,22 @@ describe('when a step looked at state (windowOf)', () => {
     expect(windowOf(whole.slice(7), 0)).toEqual({ start: 0, end: 0 }); // nothing of it is left
   });
 
+  it('a log with bundles taken out keeps the right window: it is placed by idx, never by distance', () => {
+    // idx 0 to 7; the step at idx 7 began at 4 and last looked at 6, so its window is the commits 4 and 5.
+    const whole = log(8, { idx: 7, beganAt: 4, sawUntil: 6 });
+    const without = (...gone: number[]) => whole.filter((each) => !gone.includes(each.idx!));
+    expect(windowOf(without(5), 6)).toEqual({ start: 4, end: 5 }); // one commit of the window is gone
+    expect(windowOf(without(4, 5), 5)).toEqual({ start: 4, end: 4 }); // the whole window is gone
+    expect(windowOf(without(1, 2), 5)).toEqual({ start: 2, end: 4 }); // commits from before it are gone
+    expect(windowOf(without(6), 6)).toEqual({ start: 4, end: 6 }); // one after its last look is gone
+  });
+
+  it("bundles of another log placed before this one are not the step's history", () => {
+    const other = log(3, { idx: 2 });
+    const own = log(8, { idx: 7, beganAt: 0, sawUntil: 7 });
+    expect(windowOf([...other, ...own], 10)).toEqual({ start: 3, end: 10 });
+  });
+
   it('a hand-built bundle with no idx is read at its position', () => {
     expect(windowOf(log(5, { beganAt: 1, sawUntil: 3 }), 4)).toEqual({ start: 1, end: 3 });
   });
@@ -197,26 +213,22 @@ describe('when a step looked at state (windowOf)', () => {
   });
 });
 
-describe('admitting the stamps of a bundle from outside', () => {
-  it('no stamp is no stamp', () => {
-    expect(admitStamps(undefined, undefined, 4, 4)).toEqual({});
-    expect(admitStamps(undefined, undefined, undefined, 4)).toEqual({});
+describe('admitting the place of a bundle from outside', () => {
+  it("no stamp: the copy keeps the bundle's own index, or its position when it has none", () => {
+    expect(admitStamps(undefined, undefined, 4, 4)).toEqual({ idx: 4 });
+    expect(admitStamps(undefined, undefined, 9, 4)).toEqual({ idx: 9 }); // its own index, not where it sits
+    expect(admitStamps(undefined, undefined, undefined, 4)).toEqual({ idx: 4 });
+    // An idx that is not one is passed over on a bundle with no stamp, as before the stamps existed.
+    expect(admitStamps(undefined, undefined, 'junk', 4)).toEqual({ idx: 4 });
   });
 
-  it('good stamps are kept as they are when the copy keeps its index', () => {
-    expect(admitStamps(2, undefined, 5, 5)).toEqual({ beganAt: 2 });
-    expect(admitStamps(2, 4, 5, 5)).toEqual({ beganAt: 2, sawUntil: 4 });
-    expect(admitStamps(0, 5, 5, 5)).toEqual({ beganAt: 0, sawUntil: 5 });
-    expect(admitStamps(2, 4, undefined, 5)).toEqual({ beganAt: 2, sawUntil: 4 }); // no idx: read at its position
-  });
-
-  it('a copy numbered by its position keeps each stamp at the same distance from the bundle', () => {
-    // written at index 9 of its log, admitted at position 4 of a slice
-    expect(admitStamps(6, 8, 9, 4)).toEqual({ beganAt: 1, sawUntil: 3 });
-    expect(admitStamps(3, 8, 9, 4)).toEqual({ beganAt: 0, sawUntil: 3 }); // its start is before the slice: cut
-    expect(admitStamps(2, 4, 9, 4)).toEqual({ beganAt: 0 }); // every look was before the slice
-    expect(admitStamps(3, 5, 9, 4)).toEqual({ beganAt: 0 }); // its last look was at the slice's first commit
-    expect(admitStamps(2, 4, 9, 0)).toEqual({}); // the copy is the first commit: nothing is before it
+  it('good stamps are kept as they are, with the index they count against', () => {
+    expect(admitStamps(2, undefined, 5, 5)).toEqual({ idx: 5, beganAt: 2 });
+    expect(admitStamps(2, 4, 5, 5)).toEqual({ idx: 5, beganAt: 2, sawUntil: 4 });
+    expect(admitStamps(0, 5, 5, 5)).toEqual({ idx: 5, beganAt: 0, sawUntil: 5 });
+    // A bundle from a slice of its log: nothing is counted again from where the copy sits.
+    expect(admitStamps(6, 8, 9, 4)).toEqual({ idx: 9, beganAt: 6, sawUntil: 8 });
+    expect(admitStamps(2, 4, undefined, 5)).toEqual({ idx: 5, beganAt: 2, sawUntil: 4 }); // no idx: read at its position
   });
 
   it.each([
@@ -231,9 +243,9 @@ describe('admitting the stamps of a bundle from outside', () => {
     ['sawUntil past the bundle', [2, 6, 5]],
     ['sawUntil a fraction', [2, 3.5, 5]],
     ['sawUntil a string', [2, '3', 5]],
-    ['an idx that is not a whole number', [2, 4, 5.5]],
-    ['an idx that is not a number', [2, 4, '5']],
-    ['an idx too large to count with', [2, 4, 2 ** 60]],
+    ['a stamp beside an idx that is not a whole number', [2, 4, 5.5]],
+    ['a stamp beside an idx that is not a number', [2, 4, '5']],
+    ['a stamp beside an idx too large to count with', [2, 4, 2 ** 60]],
   ])('%s is refused, never dropped', (_name, [beganAt, sawUntil, idx]) => {
     expect(admitStamps(beganAt, sawUntil, idx, 5)).toBeUndefined();
   });
@@ -284,6 +296,31 @@ describe('the backward walk names what a step could have read, and nothing else'
       'one#0 (written-while-running)',
       'seed#0 (replaced-while-running)',
     ]);
+  });
+
+  it('a log handed over without its continuation bundles gives the same answer', () => {
+    // Found by the second reader: `log.filter((b) => !b.phase)` took bundles out of the step's window, a
+    // window placed by distance then started too early, and the step was left with no parent at all.
+    const { log, frame } = world();
+    const seed = frame();
+    writeRoot(seed, 'x', 'from-seed');
+    commit(seed, 'seed'); // 0
+    const slow = frame(['runs', 'slow']);
+    slow.read([], 'x'); // looks when the log holds 1 commit
+    const fast = frame();
+    writeRoot(fast, 'x', 'from-fast');
+    commit(fast, 'fast'); // 1
+    commit(fast, 'fast', 'exit'); // 2
+    commit(fast, 'fast', 'repeat'); // 3
+    slow.write(slow.at([], 'copy'), 1, 'set');
+    commit(slow, 'slow'); // 4, began at 1
+    const whole = log.list();
+    const filtered = whole.filter((bundle) => !bundle.phase);
+    expect(filtered.map((bundle) => bundle.idx)).toEqual([0, 1, 4]);
+    const reads = { 'slow#0': ['x'] };
+    expect(parentsVia(whole, 'slow#0', reads, 'x')).toEqual(['seed#0']);
+    expect(parentsVia(filtered, 'slow#0', reads, 'x')).toEqual(['seed#0']);
+    expect(causalChain(filtered, 'slow#0', keysReadFromMap(reads).lookup)!.preRunReads).toBeUndefined();
   });
 
   it('a step that began after the sibling committed has one source, and no mark', () => {

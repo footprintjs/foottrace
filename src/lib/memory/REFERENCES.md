@@ -7,7 +7,7 @@ Where the ideas in this folder come from, and what is ours. A source is listed o
 - Mark Weiser. *Program Slicing.* IEEE Transactions on Software Engineering SE-10(4), 352–357, 1984. https://doi.org/10.1109/TSE.1984.5010248
   Taken: the question. From one value, follow what it was computed from, backward.
 - Manu Sridharan, Stephen J. Fink, Rastislav Bodík. *Thin Slicing.* PLDI 2007, 112–122. https://doi.org/10.1145/1250734.1250748
-  Taken: follow by default only what produced the value (data edges), and keep the reasons a statement ran (control) as a separate, labelled kind of edge.
+  Taken: follow by default only what produced the value (data edges). The paper leaves the reasons a statement ran (control) out of the slice and adds them back on request; keeping them in the answer as a separate, labelled kind of edge is ours.
 
 ## When a step read (`readWindow.ts`, `RecordFrame.ts · observe`, `recordCommit.ts · seenOf`)
 

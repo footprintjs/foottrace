@@ -87,13 +87,34 @@ export type ReadOverlap = RegisteredCode<'replaced-while-running' | 'written-whi
 const NONE: readonly number[] = Object.freeze([]);
 const isCount = (value: unknown): value is number => typeof value === 'number' && Number.isInteger(value) && value >= 0;
 
+/** The commit index of the bundle at `position`: its own `idx`, or its position in a log built by hand. */
+function indexAt(log: readonly CommitBundle[], position: number): number {
+  const idx = log[position]?.idx;
+  return isCount(idx) ? idx : position;
+}
+
+/**
+ * Where the commits "from index `index` on" begin in this array, looking back from the step at
+ * `first`. It walks back over the step's own window, so it costs the window's width. It stops where
+ * the indices stop falling: bundles of another log placed before this one are not this step's history.
+ */
+function firstFrom(log: readonly CommitBundle[], first: number, index: number): number {
+  let at = first;
+  while (at > 0 && indexAt(log, at - 1) >= index && indexAt(log, at - 1) < indexAt(log, at)) at--;
+  return at;
+}
+
 /**
  * The window of the step whose FIRST bundle is `log[first]`.
  *
- * `beganAt`, `sawUntil` and `idx` count commits in the log the bundle was written to, so their
- * differences place the window wherever this array starts (a slice of a log, one leg of a chained
- * run). A hand-built bundle with no `idx` is read at its position. A window that reaches before the
- * array is cut at its start.
+ * WHY BY INDEX, NOT BY DISTANCE. `beganAt` and `sawUntil` count commits of the log the bundle was
+ * written to, and every bundle of that log carries its own `idx`. The array a reader is handed may be
+ * a slice of that log, or have bundles taken out of it (continuation bundles filtered away, a row
+ * that could not be read). The commits a step had seen are the ones whose `idx` is below `beganAt`,
+ * wherever they sit, so the window is placed by reading `idx` back from the step and never by
+ * subtracting. (The second reader of this change showed the subtraction: on a log with its
+ * continuation bundles filtered out, the window started too early and the real source was left out.)
+ * A bundle with no `idx`, in a log built by hand, counts as sitting at its position.
  *
  * A bundle with no stamp is dated at its own commit: the reading every log had before the fields.
  * A stamp that IS there but cannot be one (a typed log built by hand, a stored row that was damaged)
@@ -108,21 +129,21 @@ export function windowOf(log: readonly CommitBundle[], first: number): ReadWindo
   const beganAt = bundle?.beganAt;
   const sawUntil = bundle?.sawUntil;
   if (beganAt === undefined && sawUntil === undefined) return { start: first, end: first };
-  const own = isCount(bundle.idx) ? bundle.idx : first;
+  const own = indexAt(log, first);
   if (!isCount(beganAt) || beganAt >= own) return { start: 0, end: first };
-  const start = Math.max(0, first - (own - beganAt));
+  const start = firstFrom(log, first, beganAt);
   if (sawUntil === undefined) return { start, end: start };
   if (!isCount(sawUntil) || sawUntil <= beganAt || sawUntil > own) return { start, end: first };
-  return { start, end: Math.max(start, first - (own - sawUntil)) };
+  return { start, end: firstFrom(log, first, sawUntil) };
 }
 
-/** The stamps as an admitted copy of a bundle keeps them. */
-export type Stamps = Pick<CommitBundle, 'beganAt' | 'sawUntil'>;
+/** What an admitted copy of a bundle keeps of its place in its log: its commit index and its stamps. */
+export type Placed = Required<Pick<CommitBundle, 'idx'>> & Pick<CommitBundle, 'beganAt' | 'sawUntil'>;
 
 /**
- * Admit the stamps of a bundle that came from outside (a stored record, a record handed to a reader):
- * the three values as the caller read them off it, and `position`, the index the admitted copy takes.
- * Returns the stamps to put on the copy (none: `{}`), or `undefined` when they cannot be stamps.
+ * Admit the place of a bundle that came from outside (a stored record, a record handed to a reader):
+ * the three values as the caller read them off it, and `position`, where the copy sits. Returns what
+ * the copy keeps, or `undefined` when the stamps cannot be stamps.
  *
  * WHY REFUSE, NOT IGNORE. A stamp that is dropped reads as "this step saw everything before its own
  * commit": the dating the stamp exists to correct, and a narrower claim than the record made. So a
@@ -130,21 +151,20 @@ export type Stamps = Pick<CommitBundle, 'beganAt' | 'sawUntil'>;
  * before the bundle's own index, `sawUntil` a whole number after `beganAt` and not past that index,
  * and never present without `beganAt`.
  *
- * WHY `position`. A door may number the copy by where it sits (a slice of a log), not by the `idx`
- * the bundle was written with. The stamps keep their DISTANCE to the bundle, which is what the rule
- * reads ({@link windowOf}); looks from before the copy's first commit are cut there.
+ * WHY THE COPY KEEPS THE BUNDLE'S OWN `idx`. The stamps are read against the `idx` of the bundles
+ * around it ({@link windowOf}). A door that numbered every copy by its position would move the
+ * stamps into another count, and on a log handed over without some of its bundles that count is
+ * wrong. So the copy keeps the bundle's own `idx` when it is one and takes its position otherwise.
+ * An `idx` that is not a whole number is passed over on a bundle with no stamp, as before the stamps
+ * existed; beside a stamp it refuses the bundle, because the stamp then counts against nothing.
  */
-export function admitStamps(beganAt: unknown, sawUntil: unknown, idx: unknown, position: number): Stamps | undefined {
-  if (beganAt === undefined) return sawUntil === undefined ? {} : undefined;
-  const own = idx === undefined ? position : idx;
-  if (!isCount(own) || !Number.isSafeInteger(own) || !isCount(beganAt) || beganAt >= own) return undefined;
-  if (sawUntil !== undefined && (!isCount(sawUntil) || sawUntil <= beganAt || sawUntil > own)) return undefined;
-  const shift = own - position;
-  const from = Math.max(0, beganAt - shift);
-  if (from >= position) return {};
-  return sawUntil !== undefined && sawUntil - shift > from
-    ? { beganAt: from, sawUntil: sawUntil - shift }
-    : { beganAt: from };
+export function admitStamps(beganAt: unknown, sawUntil: unknown, idx: unknown, position: number): Placed | undefined {
+  const own = isCount(idx) && Number.isSafeInteger(idx) ? idx : undefined;
+  if (beganAt === undefined) return sawUntil === undefined ? { idx: own ?? position } : undefined;
+  const at = idx === undefined ? position : own;
+  if (at === undefined || !isCount(beganAt) || beganAt >= at) return undefined;
+  if (sawUntil === undefined) return { idx: at, beganAt };
+  return isCount(sawUntil) && sawUntil > beganAt && sawUntil <= at ? { idx: at, beganAt, sawUntil } : undefined;
 }
 
 /**

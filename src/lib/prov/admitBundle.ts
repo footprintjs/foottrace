@@ -117,14 +117,15 @@ export function admitBundle(
       phase = dataField(raw, 'phase', budget),
       untracked = dataField(raw, 'untrackedSources', budget);
     if (phase !== undefined && phase !== 'exit' && phase !== 'repeat') throw new ProvDataRefusal();
-    // A read is dated by its step's stamps (`memory/readWindow.ts`); ones that cannot be stamps refuse the bundle.
-    const stamps = admitStamps(
+    // A read is dated by its step's stamps, read against each bundle's own `idx` (`memory/readWindow.ts`).
+    // The copy keeps both; stamps that cannot be stamps refuse the bundle.
+    const placed = admitStamps(
       dataField(raw, 'beganAt', budget),
       dataField(raw, 'sawUntil', budget),
       dataField(raw, 'idx', budget),
       commitIdx,
     );
-    if (!stamps) throw new ProvDataRefusal();
+    if (!placed) throw new ProvDataRefusal();
     const untrackedSources = untracked === undefined ? undefined : dataNames(untracked, budget, 'fields');
     if (untrackedSources?.some((source) => source !== 'args' && source !== 'env' && source !== 'silent'))
       throw new ProvDataRefusal();
@@ -139,7 +140,7 @@ export function admitBundle(
       ...(tags === undefined ? {} : { tags: dataNames(tags, budget, 'fields') }),
       ...(phase === undefined ? {} : { phase: phase as CommitPhase }),
       ...(untrackedSources === undefined ? {} : { untrackedSources: untrackedSources as UntrackedSource[] }),
-      ...stamps,
+      ...placed,
     };
     return { commitIdx, bundle, rows };
   } catch (error) {

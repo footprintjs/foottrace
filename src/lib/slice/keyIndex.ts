@@ -77,6 +77,12 @@ export interface KeyIndex {
    * such step, which is every log of a run whose steps go one after another.
    */
   readonly windows: ReadonlyMap<number, ReadWindow>;
+  /**
+   * The steps among `readsOf(key)` that are in {@link windows}, ascending. Memoised, so a forward walk asks
+   * the rule once per such READER of the key and never once per stamped step of the whole log (a large
+   * fan-out stamps every branch, and few of them read any one key).
+   */
+  windowedReadsOf(key: string): number[];
   /** Every key this log knows BY NAME: written paths ∪ recorded read keys — the list an unknown-key note shows. */
   readonly knownKeys: Set<string>;
   /** Does the log know `key` — a write of it (the writer rule), or a read on, inside or around it? */
@@ -153,8 +159,18 @@ export function buildKeyIndex(commitLog: CommitBundle[], lookup: KeysReadLookup)
     return positions;
   };
   const knownKeys = new Set<string>([...pathsWritten(writers), ...readsByKey.keys()]);
+  const windowedReads = new Map<string, number[]>();
+  const windowedReadsOf = (key: string): number[] => {
+    let positions = windowedReads.get(key);
+    if (positions === undefined) {
+      positions = windows.size === 0 ? [] : readsOf(key).filter((position) => windows.has(position));
+      windowedReads.set(key, positions);
+    }
+    return positions;
+  };
+
   const isKnown = (key: string): boolean => writesOf(key).length > 0 || readsOf(key).length > 0;
-  return { writers, writesOf, closingWritesOf, readsByKey, readsOf, windows, knownKeys, isKnown };
+  return { writers, writesOf, closingWritesOf, readsByKey, readsOf, windows, windowedReadsOf, knownKeys, isKnown };
 }
 
 /** One step that read a value, and why it is only a possible reader when it is (`readWindow.ts · ReadOverlap`). */
@@ -177,19 +193,19 @@ export interface LifeReader {
  * key was written inside its window.
  */
 export function readersOfLife(
-  index: Pick<KeyIndex, 'windows' | 'readsOf' | 'writesOf'>,
+  index: Pick<KeyIndex, 'windows' | 'windowedReadsOf' | 'readsOf' | 'writesOf'>,
   key: string,
   writeIdx: number | undefined,
   nextWriteIdx: number | undefined,
 ): LifeReader[] {
-  const positions = index.readsOf(key);
-  const inLife = indicesInRange(positions, writeIdx === undefined ? 0 : writeIdx + 1, nextWriteIdx);
-  if (index.windows.size === 0) return inLife.map((position) => ({ position }));
+  const inLife = indicesInRange(index.readsOf(key), writeIdx === undefined ? 0 : writeIdx + 1, nextWriteIdx);
+  const stamped = index.windowedReadsOf(key);
+  if (stamped.length === 0) return inLife.map((position) => ({ position }));
   const readers: LifeReader[] = [];
   for (const position of inLife) if (!index.windows.has(position)) readers.push({ position });
   const writes = index.writesOf(key);
-  for (const [position, window] of index.windows) {
-    if (!holds(positions, position)) continue;
+  for (const position of stamped) {
+    const window = index.windows.get(position)!;
     const written = window.start < window.end && indicesInRange(writes, window.start, window.end - 1).length > 0;
     const read = readOfValue(window, writeIdx ?? -1, nextWriteIdx, written);
     if (read !== false) readers.push(read === true ? { position } : { position, overlap: read });
@@ -256,11 +272,6 @@ function lowerBound(sorted: number[], value: number): number {
     else hi = mid;
   }
   return lo;
-}
-
-/** Does the ascending array hold `value`? */
-function holds(sorted: number[], value: number): boolean {
-  return sorted[lowerBound(sorted, value)] === value;
 }
 
 /**

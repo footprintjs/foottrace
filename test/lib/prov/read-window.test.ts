@@ -70,9 +70,14 @@ describe('the candidate source of a read in the PROV export', () => {
     expect(gaps).toContainEqual({ code: 'invalid-data', commitIdx: 2, reason: 'unreadable commit bundle' });
   });
 
-  it('a bundle that says its own index keeps its stamps at their distance from it', async () => {
-    // Row 2 of this export was commit 9 of its log, and its step began when that log held 8 commits.
-    const { candidateCommit } = await exported({ idx: 9, beganAt: 8 });
-    expect(candidateCommit).toBe(0);
+  it('rows that say their own index are read by it: a slice of a log keeps its windows', async () => {
+    // Rows 0 to 2 of this export were commits 7 to 9 of their log; the last began when that log held 8.
+    const sliced = run({ beganAt: 8 });
+    sliced.commitLog.forEach((row, at) => Object.assign(row, { idx: 7 + at }));
+    const result = await exportProv(sliced, { base: 'urn:test:window/' });
+    const nodes = result.document['@graph'];
+    const read = nodes.find((node) => node['@type'] === 'ft:Read');
+    const candidate = nodes.find((node) => node['@id'] === (read?.['ft:candidateEntity'] as { '@id': string })['@id']);
+    expect(candidate?.['ft:commitIdx']).toBe(0);
   });
 });
