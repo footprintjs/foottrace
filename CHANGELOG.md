@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.14.0 — 2026-11-11
+
+### Added
+
+- `CausalEdge.builtOn` (`'partial-write'`): an edge no read is behind. The child's own write of the key did not replace the value, so the key still holds part of what the parent wrote. `sliceToJSON` carries it on its edges, and `formatCausalChain` prints `← built on <key>`.
+- `CausalNode.preRunBase` (`{ code: 'from-initial-state', keys }`): the node wrote these keys without replacing them and no commit before it had written them, so what it left rests on the value from before the run. `sliceToJSON` carries it on its nodes.
+- `KeyMoment.builtOnWriteIdx` and `KeyMoment.builtOnPreRun`, on a write moment of `keyTimeline`: the write this one was folded onto (the write moment just before it, an earlier commit of the same stage included), or that nothing in the log is under it. One number per write: follow it from the write a read names. `formatTimeline` prints `(added to the value of commit N)`.
+- The code `'partial-write'` in `HONESTY_CODES`. `forwardSliceForKey` and `keyTimeline` give it as a note (`HonestyNoteCode`) for a key that was merged into or appended to, naming the commits.
+- `foottrace/cause`: `GraphEdge.attribution` gains `'recorded-write'`, for a data edge that is read off the record's rows and commit order and has no read behind it. A node is named once among a node's parents: a certain read of the write underneath keeps its edge, a read that is only a possible source gives its place to this one. A graph of your own may return `'recorded-write'` on a data edge.
+
+### Changed
+
+- `overlapOf(sources, at)` throws a `RangeError` when `at` is not one of the sources (`sources.before` or a member of `sources.during`). It used to answer `'written-while-running'` for such a position: a mark on a commit the read could not have seen. A caller that passes each source it took from `sources` is not affected.
+
+### Fixed
+
+- Walk back for a value built in steps. A write that did not replace a key's value (a `merge`, an `append`, a row on a path inside the key) leaves the key holding that write and what was there before. Every reader stopped at such a write: a stage that read the key was answered with the stage that added to it, and the stage that wrote the rest was left out, with no note. `causalChain` and `sliceForKey` now go on from that write to the last write before it, in commit order, back to the write that replaced the value. `forwardSliceForKey` no longer ends a value's life at a write that only added to it, so the readers after it are listed as readers of the earlier write too. The cause graph gives a node whose write only added an edge to the write just before it, so `explain` reaches a marked stage through it. A stage that also read the key keeps its one edge, the read's, so the backward answer for a record whose walk was right does not change. The test is by verb and path, never by value: a `merge` that overwrote the only field a value had is still followed, which can name one writer too many and never one too few.
+- One consequence for `causalChain` and `sliceForKey`: when a stage commits a key between two commits of another stage that both add to that key, each of the two rests on the other, and the result holds an edge each way. It was always a DAG before. `flattenCausalDAG`, `formatCausalChain`, `sliceToJSON` and `formatSlice` visit a node once and end on such a result; code that follows `parents` itself must do the same. The cause graph has one node per commit and stays acyclic.
+- Not covered, and now stated: a `set` row that `RecordFrame` writes in place of rows that only added. Such a row says `set`, nothing in it says the value was built on what was there, and the walk stops at it. It happens under either encoding, the default one included, when a stage's rows would not fold back to what the stage read (for example one stage that merges into `a.x`, deletes `a.x` and merges into `a` is recorded as `set a.x`, `set a`), and under `commitValues: 'delta'` also for any stage that merged into a key and wrote a path inside it. Both are pinned as a known limit in `test/lib/memory/property/built-on.property.test.ts`; closing it needs the writer to mark such a row. The PROV export does not link a `merge` or an `append` row to the write it was folded onto; its guide says so.
+
 ## 1.13.0 — 2026-11-11
 
 ### Added
