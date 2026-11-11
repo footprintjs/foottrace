@@ -1,5 +1,6 @@
 import { prepareReadSources } from './recordSources.js';
 import type { LogAddress } from '../memory/eventPosition.js';
+import { placedAt } from '../memory/readWindow.js';
 import { RUN_EVIDENCE_LIMITS } from '../run-evidence/kinds.js';
 import type { PreparedRecordScope, RecordGraphOptions, RecordScope } from './recordTypes.js';
 import {
@@ -56,7 +57,12 @@ export function prepareRecordScope(
   if (addressKey(addressOf(recordOwn(value, 'address'))) !== addressKey(address)) throw new RecordRefusal();
   const rawLog = recordList(recordOwn(value, 'commitLog'), maximumCommits),
     budget = { left: maximumFields };
-  const log = rawLog.map((_, commitIndex) => bundleOf(recordOwn(rawLog, String(commitIndex)), commitIndex, budget));
+  let after = -1;
+  const log = rawLog.map((_, commitIndex) => {
+    const bundle = bundleOf(recordOwn(rawLog, String(commitIndex)), after, budget);
+    after = placedAt(bundle, after);
+    return bundle;
+  });
   const reads = mapOf(
     recordOwn(value, 'reads'),
     maximumCommits,

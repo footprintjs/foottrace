@@ -107,6 +107,16 @@ export class RecordFrame {
   private readAttempts?: Set<string>;
   private readAttemptsOmitted?: number;
   #sourceFrame?: SourceFrame;
+  /**
+   * What this round of the frame has READ of committed state (law 2): the log's length at the
+   * earliest moment one of its reads saw, and at the latest. Every read passes {@link sawAt}.
+   * `commit` hands both to `recordCommit`, which puts them on the bundle when they say something a
+   * reader needs (`CommitBundle.beganAt` / `sawUntil`).
+   */
+  #beganAt?: number;
+  #sawUntil?: number;
+  /** The log's length when the first-touch view was pinned: what a read answered from the view saw. */
+  #pinnedAt?: number;
   /** A commit ended the round of staging: the next write starts a new one ({@link getTransactionBuffer}). */
   #committed = false;
 
@@ -195,6 +205,7 @@ export class RecordFrame {
   private firstTouch(): Record<string, unknown> {
     if (!this.base) {
       this.base = this.state.getState();
+      this.#pinnedAt = this.log?.length;
       const capture = captureFor(this.state);
       if (capture && capture === captureFor(this.log)) {
         try {
@@ -402,8 +413,12 @@ export class RecordFrame {
     const fromSnapshot = this.buffer
       ? this.buffer.get(at, undefined, observation)
       : nativeGet(this.firstTouch(), at, undefined, observation);
-    if (typeof fromSnapshot !== 'undefined' || this.buffer?.hasHardWrite(at)) return fromSnapshot;
+    if (typeof fromSnapshot !== 'undefined' || this.buffer?.hasHardWrite(at)) {
+      this.sawAt(this.#pinnedAt);
+      return fromSnapshot;
+    }
     if (observation) observation.live = true;
+    this.sawAt(this.log?.length);
     const live = this.state.getValue(this._address, path, key, observation);
     // Tier 2 after the first write: keep the diff base exact (see above).
     if (this.buffer && live !== null && typeof live === 'object') this.buffer.detachBase(at);
@@ -436,12 +451,42 @@ export class RecordFrame {
    * view. Typed as `SharedMemory · getValue` types it, which `StageContext · getRoot` hands on.
    */
   readLive(key: string) {
+    this.sawAt(this.log?.length);
     return this.state.getValue(this._address, [], key);
   }
 
   /** Live committed state at `key` at the root — typed as `SharedMemory · getValue` (`StageContext · getGlobal`). */
   readGlobal(key: string) {
+    this.sawAt(this.log?.length);
     return this.state.getValue([], [], key);
+  }
+
+  /**
+   * Note what one READ of committed state saw: the log's length at the moment the value it was
+   * answered with was current. For a read answered from the first-touch view that is the moment the
+   * view was pinned, however much later the read is made; for a read of live state it is now.
+   *
+   * WHY ONE DOOR: a reader dates this step's reads from these two numbers alone (`readWindow.ts`).
+   * A read that did not pass here could be of a commit the record says the step never saw, and the
+   * walk back would leave out the step that really wrote what was read. So the places this frame
+   * hands out a value of `state` to be read are the callers, and
+   * `test/lib/memory/read-window-writer.test.ts` pins that there is no other.
+   *
+   * WHY A READ, NOT A TOUCH. The view is also pinned by the frame's first WRITE (the buffer diffs
+   * against it) and by a report that only compares (`peek`, `baseAt`). Neither is a read of the
+   * step. Counted as one, a step that read a key early and wrote late (a subflow mount: its input
+   * mapping reads when it starts, its output mapping writes when the subflow has run) looked as if
+   * it had read again at its write, and every sibling that committed in between became a possible
+   * source of what it had read before. Counted as one, a report that runs only in development would
+   * also change the bytes of the record.
+   *
+   * The reads are not always in the order of what they saw (a live read, then a read answered from
+   * a view pinned earlier by a write), so the earliest and the latest are kept as such.
+   */
+  private sawAt(length: number | undefined): void {
+    if (length === undefined) return;
+    if (this.#beganAt === undefined || length < this.#beganAt) this.#beganAt = length;
+    if (this.#sawUntil === undefined || length > this.#sawUntil) this.#sawUntil = length;
   }
 
   /** Did a staged op touch `path` — on it, above it or below it? (A report's question; never the hot path.) */
@@ -471,7 +516,8 @@ export class RecordFrame {
    */
   commit(stampOf: () => CommitStamp): void {
     const payload = this.buffer?.commit();
-    recordCommit(payload, stampOf(), { state: this.state, mirror: this._mirror, log: this.log });
+    const into = { state: this.state, mirror: this._mirror, log: this.log };
+    recordCommit(payload, stampOf(), into, this.#beganAt, this.#sawUntil);
     this.#committed = true;
   }
 
@@ -497,6 +543,9 @@ export class RecordFrame {
     }
     this.buffer = undefined;
     this.base = undefined;
+    this.#pinnedAt = undefined;
+    this.#beganAt = undefined;
+    this.#sawUntil = undefined;
     this.#committed = false;
   }
 

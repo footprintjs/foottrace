@@ -13,11 +13,16 @@
  * disagree. The value of this function is that they can't.
  */
 
-import { type CausalChainOptions, type KeysReadLookup, causalChainFromCommit } from '../memory/backtrack.js';
+import {
+  type CausalChainOptions,
+  type KeysReadLookup,
+  causalChainFromCommit,
+  flattenCausalDAG,
+} from '../memory/backtrack.js';
 import { commitValueAtWithBasis, findLastWriterWithBasis } from '../memory/commitLogUtils.js';
 import type { CommitBundle } from '../memory/types.js';
 import { normaliseStateKey } from '../record-paths/codec.js';
-import { fromInitialStateNote, nestedRowsNote, redactedValueNote } from './keyIndex.js';
+import { concurrentWriteNote, fromInitialStateNote, nestedRowsNote, redactedValueNote } from './keyIndex.js';
 import { resolveKeysReadSource } from './keysReadSources.js';
 import type { KeysReadSource, StateKey, VariableSlice } from './types.js';
 
@@ -100,5 +105,11 @@ export function sliceForKey(
     edgeAttribution: options?.edgeAttribution ?? 'per-write',
     rootLinkKeys: options?.rootLinkKeys ?? [normalisedKey],
   })!;
+  // Steps side by side: say how many reads have only possible sources (one read = one step and one key).
+  let contested = 0;
+  for (const node of flattenCausalDAG(root)) {
+    contested += new Set(node.parentEdges.filter((edge) => edge.overlap).map((edge) => edge.key)).size;
+  }
+  if (contested > 0) notes.push(concurrentWriteNote(contested));
   return { ...base, writer, root, ...(notes.length > 0 && { notes }) };
 }

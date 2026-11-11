@@ -118,7 +118,8 @@ export function createStoredRecordGraph(host: StoredRecordHost, options: RecordG
                 kind,
                 address: a,
                 at,
-                bundle: bundleOf(b, idx as number, budget),
+                // A stored commit sits at its own index (checked above), wherever its entry arrived.
+                bundle: bundleOf(b, (idx as number) - 1, budget),
                 ...(about === undefined ? {} : { about }),
               });
             } else if (kind === 'opened') {

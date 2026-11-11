@@ -25,6 +25,7 @@
 import type { CausalNode, KeysReadLookup } from '../memory/backtrack.js';
 import type { ValueBasis } from '../memory/commitLogUtils.js';
 import type { RegisteredCode } from '../memory/honesty.js';
+import type { ReadOverlap } from '../memory/readWindow.js';
 import type { CommitBundle, TraceEntry, UntrackedSource } from '../memory/types.js';
 
 // ── Keys ───────────────────────────────────────────────────────────────────
@@ -211,6 +212,7 @@ export type FedBasis = RegisteredCode<'per-write' | 'stage'>;
  */
 export type HonestyNoteCode = RegisteredCode<
   | 'conservative-fed-edges'
+  | 'concurrent-write'
   | 'nested-rows'
   | 'pre-run-origin'
   | 'reads-not-recorded'
@@ -238,6 +240,16 @@ export interface ForwardRead {
   stageName: string;
   /** Commit ARRAY position of the READING stage's own commit bundle. */
   commitIdx: number;
+  /**
+   * Present when the key was written inside the reading step's window (`CommitBundle.beganAt` /
+   * `sawUntil`: steps side by side, and the step looked at state again after a sibling committed). The
+   * step may have read this value or another one written in that time, so it is a possible reader of
+   * this value, not a certain one (`memory/readWindow.ts`):
+   *   - `'replaced-while-running'`: this value is the one the key held when the step began;
+   *   - `'written-while-running'`: this value was written inside the step's window.
+   * Absent on a certain read, which is every read of a step with no window.
+   */
+  overlap?: ReadOverlap;
 }
 
 /**
@@ -368,9 +380,18 @@ export interface KeyMoment {
    * `'read'` moments only: the `commitIdx` of the write whose live range
    * this read sits in — which value it saw. ABSENT when the read precedes
    * every write of the key (pre-run origin: initial state / `input` /
-   * closure).
+   * closure). For a step whose read window holds writes of the key it is the
+   * last write BEFORE the step began, and {@link orWriteIdxs} lists the rest.
    */
   fromWriteIdx?: number;
+  /**
+   * `'read'` moments only, and only for a step whose read window holds
+   * writes of the key (`CommitBundle.beganAt` / `sawUntil`): the `commitIdx`
+   * of each of them, ascending. The read saw the value of `fromWriteIdx` (or
+   * the value from before the run when that is absent) or of one of these;
+   * the record does not say which (`memory/readWindow.ts`).
+   */
+  orWriteIdxs?: number[];
 }
 
 /**
@@ -589,6 +610,8 @@ export interface SliceJSON {
     weight: number;
     /** Copied from `CausalEdge.basis` (9.33.0); absent for an exact edge. */
     basis?: RegisteredCode<'nested-rows'>;
+    /** Why this edge is a possible source and not a certain one (`CausalEdge.overlap`). Absent on a certain edge. */
+    overlap?: ReadOverlap;
   }>;
   /** Copied from the root when a budget cut the slice — registered as `'truncated'` in `HONESTY_CODES`. */
   truncated?: { byDepth: boolean; byNodes: boolean };

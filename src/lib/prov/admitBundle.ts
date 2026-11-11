@@ -1,5 +1,6 @@
 import { readAttemptWindow } from '../evidence/readAttempts.js';
 import { parseAttemptId } from '../ids/attemptId.js';
+import { admitStamps } from '../memory/readWindow.js';
 import type { CommitBundle, CommitPhase, TraceEntry, UntrackedSource } from '../memory/types.js';
 import { bundleRefusal, isCommitBundle } from '../time-travel/bundles.js';
 import {
@@ -38,6 +39,8 @@ export function admitBundle(
   commitIdx: number,
   redactions: readonly string[],
   budget: ProvBudget,
+  /** The index of the copy before this row in the log (-1 for the first): this copy's own rises past it. */
+  after: number,
 ): AdmittedCommit | undefined {
   try {
     // Preserve the canonical primitive-envelope refusal without touching any untrusted property.
@@ -116,6 +119,21 @@ export function admitBundle(
       phase = dataField(raw, 'phase', budget),
       untracked = dataField(raw, 'untrackedSources', budget);
     if (phase !== undefined && phase !== 'exit' && phase !== 'repeat') throw new ProvDataRefusal();
+    // A read is dated by its step's stamps, read against each bundle's own `idx` (`memory/readWindow.ts`).
+    // The copy keeps both; stamps that cannot be stamps refuse the bundle.
+    const placed = admitStamps(
+      dataField(raw, 'beganAt', budget),
+      dataField(raw, 'sawUntil', budget),
+      dataField(raw, 'idx', budget),
+      after,
+    );
+    if (!placed) {
+      // Said apart from a bundle that cannot be read: this one reads, but its stamps count against an index
+      // that cannot be its own (not a whole number, or not past the row before it, whichever of the two is
+      // the damaged one). The row is left out, never dated by guess.
+      budget.addGap({ code: 'invalid-data', commitIdx, reason: 'read stamps do not fit the commit index' });
+      return undefined;
+    }
     const untrackedSources = untracked === undefined ? undefined : dataNames(untracked, budget, 'fields');
     if (untrackedSources?.some((source) => source !== 'args' && source !== 'env' && source !== 'silent'))
       throw new ProvDataRefusal();
@@ -130,6 +148,7 @@ export function admitBundle(
       ...(tags === undefined ? {} : { tags: dataNames(tags, budget, 'fields') }),
       ...(phase === undefined ? {} : { phase: phase as CommitPhase }),
       ...(untrackedSources === undefined ? {} : { untrackedSources: untrackedSources as UntrackedSource[] }),
+      ...placed,
     };
     return { commitIdx, bundle, rows };
   } catch (error) {

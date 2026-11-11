@@ -305,13 +305,25 @@ with the names it recorded (`test/lib/slice/nested-rows.test.ts`).
   never a silent empty object.
 - `ElementBirth.basis` — exact vs inferred vs reset, on every record;
   `ForwardEdge.basis` — exact vs conservative, on every edge.
+- `CausalEdge.overlap` (backward), `ForwardRead.overlap` (forward),
+  `KeyMoment.orWriteIdxs` (timeline) — steps side by side. A read is dated
+  where its step LOOKED at state, not where it committed
+  (`memory/readWindow.ts`, the one rule; `memory/README.md` has the why and an
+  example). A step that only read what it saw when it began has one certain
+  source however many siblings committed first. Only a step that read live
+  state again after a sibling committed the key gets several, and each is
+  marked `'replaced-while-running'` or `'written-while-running'`: possible, not
+  certain, the real one among them. Text says `maybe read by` and
+  `(written while the reader ran)`.
 - `keysReadKind` + `readsCoverage` — a slice can always be traced to its reads
   provider, and a reads-less provider is detectable, not silent.
 - `HonestyNote[]` (forward, timeline) — the machine-readable envelope: a consumer
-  branches on `code`, a human/LLM reads `detail`. Six codes:
+  branches on `code`, a human/LLM reads `detail`. Seven codes:
   `'unknown-key'`, `'reads-not-recorded'`, `'pre-run-origin'`,
-  `'conservative-fed-edges'`, `'truncated'`, and `'nested-rows'` (9.33.0 — a
-  write reached the key only through paths inside it). What each code MEANS is
+  `'conservative-fed-edges'`, `'truncated'`, `'nested-rows'` (9.33.0 — a
+  write reached the key only through paths inside it), and `'concurrent-write'`
+  (a key was written inside the read window of the step that read it, so that
+  read has possible sources only). What each code MEANS is
   registered once, in `memory/honesty.ts · HONESTY_CODES` (served as
   `HONESTY_CODES` on `foottrace`): `HONESTY_CODES[note.code]` is the
   one-sentence explanation, and the `detail` is the per-instance sentence (it

@@ -29,6 +29,7 @@
  */
 
 import { flattenCausalDAG, formatCausalChain } from '../memory/backtrack.js';
+import type { ReadOverlap } from '../memory/readWindow.js';
 import type {
   ForwardNode,
   ForwardSlice,
@@ -80,6 +81,7 @@ export function sliceToJSON(slice: VariableSlice): SliceJSON {
         ...(edge.key !== undefined && { key: edge.key }),
         weight: edge.weight,
         ...(edge.basis !== undefined && { basis: edge.basis }),
+        ...(edge.overlap !== undefined && { overlap: edge.overlap }),
       });
     }
   }
@@ -229,6 +231,12 @@ export function forwardSliceToJSON(slice: ForwardSlice): ForwardSliceJSON {
  * edge is conservative, which is why edges print `[exact]` / `[conservative]`
  * rather than looking alike.
  */
+/** Why a forward read is only possible, in a tree line. The full sentence is the registry's. */
+const MAYBE_READ_WORDS: Record<ReadOverlap, string> = {
+  'replaced-while-running': 'the key was written again while it ran',
+  'written-while-running': 'it began before this write',
+};
+
 export function formatForwardSlice(slice: ForwardSlice): string {
   const lines: string[] = [];
   const anchor = slice.before !== undefined ? ` (as of before commit ${slice.before})` : '';
@@ -260,7 +268,10 @@ export function formatForwardSlice(slice: ForwardSlice): string {
       lines.push(`${pad}  (no recorded read of this value)`);
     }
     for (const read of node.reads.slice(0, READS_RENDERED)) {
-      lines.push(`${pad}  read by ${read.stageName} (${read.runtimeStageId}) @${read.commitIdx}`);
+      // `maybe read by`: the key was written inside that step's window, so it may have read another value.
+      const verb = read.overlap !== undefined ? 'maybe read by' : 'read by';
+      const why = read.overlap !== undefined ? ` — ${MAYBE_READ_WORDS[read.overlap]}` : '';
+      lines.push(`${pad}  ${verb} ${read.stageName} (${read.runtimeStageId}) @${read.commitIdx}${why}`);
     }
     if (node.reads.length > READS_RENDERED) {
       lines.push(`${pad}  … and ${node.reads.length - READS_RENDERED} more reads`);
@@ -305,7 +316,11 @@ export function formatTimeline(timeline: KeyTimeline): string {
     } else {
       const from =
         moment.fromWriteIdx !== undefined ? `value from commit ${moment.fromWriteIdx}` : 'value from BEFORE the run';
-      lines.push(`@${moment.commitIdx} read  — ${where} (${from})`);
+      // A step that ran while the key was written saw that value or one written in that time.
+      const or = moment.orWriteIdxs?.length
+        ? `, or from commit ${moment.orWriteIdxs.join(' or ')} written while it ran`
+        : '';
+      lines.push(`@${moment.commitIdx} read  — ${where} (${from}${or})`);
     }
   }
   if (moments.length > MOMENTS_RENDERED) {

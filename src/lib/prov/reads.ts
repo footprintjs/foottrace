@@ -1,3 +1,4 @@
+import { readSourcesOf } from '../memory/readWindow.js';
 import { buildKeyIndex, lastIndexBefore, writeEntry } from '../slice/keyIndex.js';
 import { pathSegments } from '../record-paths/codec.js';
 import { reference } from './translation.js';
@@ -9,7 +10,13 @@ function lastRow(rows: readonly AdmittedRow[], key: string): AdmittedRow | undef
   return undefined;
 }
 
-/** Canonical temporal writer lookup is a candidate source, never proof of an intra-stage read version. */
+/**
+ * Canonical temporal writer lookup is a candidate source, never proof of an intra-stage read version.
+ *
+ * WHICH writer is the one rule's answer (`memory/readWindow.ts`): the last write before the step began.
+ * When the key was also written inside the step's read window there is no one candidate (the read may be
+ * of any of them), and this export has one slot: it names none and says `read-basis`, never a guess.
+ */
 export function mapReads(mapping: ProvMapping): void {
   const { record, budget, ids, output } = mapping;
   if (![...mapping.reads.values()].some((keys) => keys.length)) return;
@@ -30,6 +37,9 @@ export function mapReads(mapping: ProvMapping): void {
     if (output.full || !mapping.activities.has(runtimeStageId)) continue;
     const keys = mapping.reads.get(runtimeStageId) ?? [],
       readIds = new Map<string, string>();
+    // When this step looked at state: placed once per step by the index, never once per key.
+    const first = commits[0].commitIdx;
+    const window = index.windows.get(first) ?? { start: first, end: first };
     for (let ordinal = 0; ordinal < keys.length; ordinal++) {
       if (output.full) break;
       const key = keys[ordinal];
@@ -39,17 +49,19 @@ export function mapReads(mapping: ProvMapping): void {
         hidden = mapping.hidden(key);
       const writes = index.writesOf(key);
       if (!budget.spend('work', writes.length + Math.ceil(Math.log2(writes.length + 1)))) return;
-      const previous = lastIndexBefore(writes, commits[0].commitIdx);
+      const sources = readSourcesOf(key, window, (_key, before) => lastIndexBefore(writes, before) ?? -1);
+      const contested = sources.during.length > 0;
+      const previous = sources.before < 0 ? undefined : sources.before;
       if (previous !== undefined && !budget.spend('work', record.log[previous].trace.length)) return;
       const entry = previous === undefined ? undefined : writeEntry(record.log[previous], key);
       const source =
-        previous === undefined || !entry || entry.path !== key
+        contested || previous === undefined || !entry || entry.path !== key
           ? undefined
           : lastRow(byCommitIndex.get(previous)?.rows ?? [], key);
       const candidate = source
         ? ids.write(source.commitIdx, source.rowIdx, mapping.hidden(source.path) ? undefined : source.path)
         : undefined;
-      if (previous !== undefined && !candidate) budget.summarizeGap('read-basis');
+      if ((previous !== undefined || contested) && !candidate) budget.summarizeGap('read-basis');
       budget.summarizeGap('read-version');
       if (hidden) budget.summarizeGap('redacted-read');
       if (

@@ -138,6 +138,35 @@ export interface CommitBundle {
    * see `inferLegacyPhases` (foottrace) for how it is still read.
    */
   phase?: CommitPhase;
+  /**
+   * How many commits the log held at the EARLIEST moment one of this step's reads saw — stamped by
+   * the writer (`RecordFrame`). A read answered from the view the step pinned saw the moment the view
+   * was pinned; a read of live state saw the moment it was made. ABSENT when the step read nothing,
+   * or when nothing was committed between that moment and this commit: then the step saw every
+   * commit before its own, which is every step of a run whose steps go one after another, so such a
+   * log keeps its bytes.
+   *
+   * PRESENT means other steps committed while this one ran, and it DATES THE STEP'S READS: what the
+   * step read is state as it stood at `beganAt`, not as it stood at this commit, unless
+   * {@link sawUntil} says it looked again later. A reader must never date such a read at the step's
+   * own commit: a sibling that committed first would be named as its source although the read
+   * happened earlier (`readWindow.ts · readSourcesOf`, the one rule).
+   *
+   * A log written before this field existed carries it nowhere; for such a log a read is dated at
+   * the step's first commit, as before.
+   */
+  beganAt?: number;
+  /**
+   * How many commits the log held at the LATEST moment one of this step's reads saw. Present only
+   * together with `beganAt` and only when greater: a read of the step saw state as it stood after
+   * another step had committed. Commits `beganAt` to `sawUntil - 1` are the step's READ WINDOW: the
+   * ones such a read may have seen and the earliest did not. The record keeps which keys a step
+   * read, not when it read each, so a read of a key saw the last write before `beganAt` or one of
+   * the writes of that key in the window.
+   *
+   * ABSENT with `beganAt` present: every read of the step saw state as it stood at `beganAt`.
+   */
+  sawUntil?: number;
 }
 
 /** The continuation a bundle records — see {@link CommitBundle.phase}. */

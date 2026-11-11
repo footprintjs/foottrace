@@ -24,9 +24,11 @@
  */
 
 import type { KeysReadLookup } from '../memory/backtrack.js';
+import { readSourcesOf } from '../memory/readWindow.js';
 import type { CommitBundle } from '../memory/types.js';
 import {
   buildKeyIndex,
+  concurrentReadsNote,
   hasRecordedReads,
   lastIndexBefore,
   nestedOnlyWrites,
@@ -104,21 +106,29 @@ export function keyTimeline(
   let w = 0;
   let r = 0;
   let sawPreRunRead = false;
+  let concurrentReads = 0;
   while (w < writes.length || r < reads.length) {
     const takeRead = r < reads.length && (w >= writes.length || reads[r] <= writes[w]);
     if (takeRead) {
       const idx = reads[r++];
       const bundle = commitLog[idx];
-      // The live range this read sits in: the last write STRICTLY earlier.
-      const fromWriteIdx = lastIndexBefore(allWrites, idx);
-      if (fromWriteIdx === undefined) sawPreRunRead = true;
+      // The value this read saw is the one rule's answer (`memory/readWindow.ts`): the last write before
+      // the step began, or a write inside its read window (none for a step with no window).
+      const sources = readSourcesOf(
+        normalisedKey,
+        index.windows.get(idx) ?? { start: idx, end: idx },
+        (_key, before) => lastIndexBefore(allWrites, before) ?? -1,
+      );
+      if (sources.before < 0) sawPreRunRead = true;
+      if (sources.during.length > 0) concurrentReads++;
       moments.push({
         kind: 'read',
         commitIdx: idx,
         runtimeStageId: bundle.runtimeStageId,
         stageId: bundle.stageId,
         stageName: bundle.stage,
-        ...(fromWriteIdx !== undefined && { fromWriteIdx }),
+        ...(sources.before >= 0 && { fromWriteIdx: sources.before }),
+        ...(sources.during.length > 0 && { orWriteIdxs: [...sources.during] }),
       });
     } else {
       const idx = writes[w++];
@@ -138,5 +148,6 @@ export function keyTimeline(
   if (sawPreRunRead) notes.push(preRunOriginNote(normalisedKey));
   const nested = nestedOnlyWrites(commitLog, normalisedKey, writes);
   if (nested.length > 0) notes.push(nestedRowsNote(normalisedKey, nested));
+  if (concurrentReads > 0) notes.push(concurrentReadsNote(concurrentReads));
   return { ...base, moments, notes };
 }

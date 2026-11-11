@@ -1,6 +1,8 @@
 import { inspectSourceParents } from './recordSourceEdges.js';
 import { causalChain, type CausalEdge } from '../memory/backtrack.js';
-import { findLastWriter } from '../memory/commitLogUtils.js';
+import { lastWriterPosition } from '../memory/commitLogUtils.js';
+import { type ReadWindow, readSourcesOf } from '../memory/readWindow.js';
+import { windowOf } from '../memory/windowPlacement.js';
 import { sliceForKey } from '../slice/sliceForKey.js';
 import { collectControlParentCoverage, controlParentLookup } from './recordControl.js';
 import {
@@ -15,6 +17,22 @@ import { readKeysForStage } from './recordScope.js';
 import type { AddRecordGap, PreparedRecordScope, RecordInspection, ResolvedRecordNode } from './recordTypes.js';
 import type { Gap, GraphEdge } from './types.js';
 
+/**
+ * The commits one causal edge points at. An edge names an EXECUTION; a graph node is one commit of it. The
+ * rule that made a data edge says which (`memory/readWindow.ts`): the last writer before the step began, or,
+ * for an edge marked `'written-while-running'`, each commit of that execution that wrote the key inside
+ * the step's read window.
+ */
+function writerPositions(scope: PreparedRecordScope, edge: CausalEdge, window: ReadWindow): number[] {
+  if (edge.kind !== 'data' || !edge.key) {
+    const at = scope.log.findIndex((bundle) => bundle.runtimeStageId === edge.parent.runtimeStageId);
+    return at < 0 ? [] : [at];
+  }
+  const sources = readSourcesOf(edge.key, window, (key, before) => lastWriterPosition(scope.log, key, before));
+  if (edge.overlap !== 'written-while-running') return sources.before < 0 ? [] : [sources.before];
+  return sources.during.filter((at) => scope.log[at].runtimeStageId === edge.parent.runtimeStageId);
+}
+
 /** Anchor writers before the execution so later commits cannot rewrite the recorded causal edge. */
 function projectParentEdges(
   scope: PreparedRecordScope,
@@ -25,31 +43,36 @@ function projectParentEdges(
   addGap: AddRecordGap,
 ): GraphEdge[] {
   const edges: GraphEdge[] = [];
+  // When this step looked at state: placed once for the node, then asked per edge.
+  const window = windowOf(scope.log, firstCommitIndex);
   for (const edge of parentEdges) {
     if (edges.length >= maximumEdges) {
       addGap('edge-limit');
       break;
     }
-    const writer =
-      edge.kind === 'data' && edge.key
-        ? findLastWriter(scope.log, edge.key, firstCommitIndex)
-        : scope.log.find((bundle) => bundle.runtimeStageId === edge.parent.runtimeStageId);
-    if (!writer) {
+    const positions = writerPositions(scope, edge, window);
+    if (positions.length === 0) {
       addGap('untracked-input');
       continue;
     }
-    const writerIndex = scope.log.indexOf(writer);
-    edges.push({
-      nodeId: nodeIdFor(scope.address, {
-        runtimeStageId: writer.runtimeStageId,
-        commitIdx: writerIndex,
-        ...(edge.kind === 'data' && edge.key ? { key: edge.key } : {}),
-      }),
-      kind: edge.kind,
-      attribution: edge.kind === 'control' ? 'recorded-control' : precise ? 'per-write' : 'stage',
-      evidence: ['commit:' + writerIndex],
-    });
-    if (edge.basis) addGap('conservative');
+    for (const writerIndex of positions) {
+      if (edges.length >= maximumEdges) {
+        addGap('edge-limit');
+        return edges;
+      }
+      edges.push({
+        nodeId: nodeIdFor(scope.address, {
+          runtimeStageId: scope.log[writerIndex].runtimeStageId,
+          commitIdx: writerIndex,
+          ...(edge.kind === 'data' && edge.key ? { key: edge.key } : {}),
+        }),
+        kind: edge.kind,
+        attribution: edge.kind === 'control' ? 'recorded-control' : precise ? 'per-write' : 'stage',
+        evidence: ['commit:' + writerIndex],
+      });
+    }
+    // A source that is only possible (`CausalEdge.overlap`): the ancestry is a superset, as for a nested row.
+    if (edge.basis || edge.overlap) addGap('conservative');
   }
   return edges;
 }

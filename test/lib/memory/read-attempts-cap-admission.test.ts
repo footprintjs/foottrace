@@ -155,7 +155,7 @@ it.each([33, 0])('PROV refuses a capped list whose admitted length changes from3
   });
   const f = fixture(changing, 1);
   const budget = new ProvBudget(provOptions({ base: 'urn:example:cap/' }));
-  expect(admitBundle(f.bundle, 0, [], budget)).toBeUndefined();
+  expect(admitBundle(f.bundle, 0, [], budget, -1)).toBeUndefined();
   expect(budget.gaps.some((g) => g.code === 'invalid-data')).toBe(true);
 });
 
