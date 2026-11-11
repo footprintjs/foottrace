@@ -1,7 +1,0 @@
----
-type: fixed
-bump: patch
----
-
-- Walk back for a value built in steps. A write that did not replace a key's value (a `merge`, an `append`, a row on a path inside the key) leaves the key holding that write and what was there before. Every reader stopped at such a write: a stage that read the key was answered with the stage that added to it, and the stage that wrote the rest was left out, with no note. `causalChain` and `sliceForKey` now go on from that write to the last write before it, in commit order, back to the write that replaced the value. `forwardSliceForKey` no longer ends a value's life at a write that only added to it, so the readers after it are listed as readers of the earlier write too. The cause graph gives a node whose write only added an edge to the write just before it, so `explain` reaches a marked stage through it. A stage that also read the key keeps its one edge, the read's, so the backward answer for a record whose walk was right does not change. The test is by verb and path, never by value: a `merge` that overwrote the only field a value had is still followed, which can name one writer too many and never one too few.
-- Not covered by this note: a `set` row that `RecordFrame` writes in place of rows that only added (the note on `builtOnView` closes it), and the PROV export, which does not link a `merge` or an `append` row to the write it was folded onto; its guide says so.
