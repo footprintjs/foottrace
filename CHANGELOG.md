@@ -1,22 +1,5 @@
 # Changelog
 
-## 1.12.1 — 2026-11-11
-
-### Fixed
-
-- Run evidence: the writer no longer stores `about` content its own reader refuses. A read name with a control character is left out and counted in `readsOmitted`; an `about` whose `parent` or `resumes` is not a runtimeStageId is dropped and counted. Before this the reader refused the whole `about` and its parent link was lost. An id longer than the `text` cap now reads `truncated`, not `invalid-data`. `RunControl.why` and `EvidenceChannel.why` are typed as a union of the nine reasons the code returns, `unknown-execution` among them.
-- PROV export: each read is charged for its own lookup, not for the whole index, so a record of a thousand commits keeps its `ft:Read` evidence under the `maxWork` ceiling. Output bytes are no longer also charged as work: the default `maxWork` used to stop an export near 240 KB, below the default `maxOutputBytes`. "export output limit reached" is reported only when the byte ceiling refused a node. A mark carried by both the attention map and the execution tree is one `ft:Attention` node.
-- Cause: a source identity past the ID ceiling is reported as `invalid-data` and the remaining source edges are kept. It was reported as `edge-limit`, and the remaining edges were dropped.
-
-### Security
-
-- `EventLog.note(kind, data)` refuses a kind that takes the reserved `run.` prefix: the entry is counted in `sinkFailures` and reported to `sink.onFailure`, as any other refused entry is. Only `noteRun` writes those kinds. Before this, a writer's own note could be read back as run evidence, including a decision the run never made.
-
-### Documentation
-
-- The record contract guide lists `phase` and `untrackedSources` on a bundle. The time-travel README points at the examples and tests that live in the FootPrint repository. Stale notes are gone from two example headers, the script headers and the `CommitRangeIndex` header, and `docs/design/prov-p2-contract.md` is marked as not shipped.
-- New example `examples/post-execution/metadata/01-trace-metadata.ts`. Every runnable example now runs in the test suite and is checked against the output its own comments give.
-
 ## 1.12.0 — 2026-11-07
 
 ### Added
