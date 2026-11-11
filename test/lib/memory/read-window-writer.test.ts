@@ -334,16 +334,9 @@ describe('every read of shared state in the frame notes what it saw', () => {
     }
   });
 
-  it('the read answered from the view notes when the view was pinned, and so does a commit that carries the view into the record', () => {
-    // Two places say "the step saw the state its view was pinned on". One is the read answered from the
-    // view. The other is a commit whose payload holds a `set` row the WRITER built on the view
-    // (`TraceEntry.builtOnView`): what the view held is in that row, so it was read for the step, and it
-    // is dated like any read of the view. No third place: pinning the view for a write is not a look.
+  it('the read answered from the view notes when the view was pinned, once', () => {
     const view = at(/this\.sawAt\(this\.#pinnedAt\);/);
-    expect(view).toHaveLength(2);
+    expect(view).toHaveLength(1);
     expect(source[view[0] + 1]).toMatch(/return fromSnapshot;/);
-    expect(source[view[1]]).toMatch(
-      /^\s*if \(payload\?\.trace\.some\(\(row\) => row\.builtOnView\)\) this\.sawAt\(this\.#pinnedAt\);$/,
-    );
   });
 });

@@ -48,6 +48,21 @@ function commit(id: string, idx: number, rows: Row[], extra: object = {}) {
   };
 }
 type Log = ReturnType<typeof commit>[];
+/** A bundle that says no index: its place is known only from the bundles around it. */
+const unplaced = (id: string, at: number, rows: Row[], extra: object = {}) => {
+  const { idx: _said, ...bundle } = commit(id, at, rows, extra);
+  return bundle as unknown as Log[number];
+};
+/**
+ * A record that does not show where a view sits. `start` says index 10, `other` says none, `fill`
+ * says 13 and that its view was pinned when the log held 12 commits. `other` sits at 11 or at 12:
+ * inside that view, or not.
+ */
+const placeNotShown = (fillRows: Row[] = [viewed('box')], extra: object = {}): Log => [
+  { ...commit('start', 0, [set('box')]), idx: 10 },
+  unplaced('other', 1, [set('box')]),
+  { ...commit('fill', 2, fillRows, { viewAt: 12, ...extra }), idx: 13 },
+];
 /** start sets the box; fill's `set` of the box was built on its view (it read nothing); use reads the box. */
 const builtOnTheView = (): Log => [
   commit('start', 0, [set('box')]),
@@ -84,25 +99,28 @@ const ADAPTERS = {
 };
 const failure = { kind: 'error', reason: 'ERROR_RECORDED', evidence: ['test:failure'] } as const;
 
-describe.each(Object.entries(ADAPTERS))('the cause graph over %s', (_name, graphOf) => {
-  const ask = (commitLog: Log, options?: object) => {
-    const g = graphOf(commitLog, undefined, options);
-    const node = (at: number, key: string) =>
-      g.nodeId(address, { runtimeStageId: commitLog[at].runtimeStageId, commitIdx: at, key });
-    const named = (id: string) => {
-      for (let at = 0; at < commitLog.length; at++)
-        for (const row of commitLog[at].trace)
-          if (id === node(at, row.path)) return `${commitLog[at].stageId}.${row.path}`;
-      return id;
-    };
-    const edges = (list: { edges: readonly { nodeId: string; attribution: string }[] }) =>
-      list.edges.map((edge) => `${named(edge.nodeId)} (${edge.attribution})`);
-    return {
-      parents: async (at: number, key: string) => edges(await g.parents(node(at, key), ctx())),
-      children: async (at: number, key: string) => edges(await g.children(node(at, key), ctx())),
-      gaps: async (at: number, key: string) => (await g.gaps(node(at, key), ctx())).map((gap) => gap.code),
-    };
+/** Ask one graph about a record: parents, children and gaps, each node named `step.key`. */
+const askOf = (graphOf: (typeof ADAPTERS)[keyof typeof ADAPTERS]) => (commitLog: Log, options?: object) => {
+  const g = graphOf(commitLog, undefined, options);
+  const node = (at: number, key: string) =>
+    g.nodeId(address, { runtimeStageId: commitLog[at].runtimeStageId, commitIdx: at, key });
+  const named = (id: string) => {
+    for (let at = 0; at < commitLog.length; at++)
+      for (const row of commitLog[at].trace)
+        if (id === node(at, row.path)) return `${commitLog[at].stageId}.${row.path}`;
+    return id;
   };
+  const edges = (list: { edges: readonly { nodeId: string; attribution: string }[] }) =>
+    list.edges.map((edge) => `${named(edge.nodeId)} (${edge.attribution})`);
+  return {
+    parents: async (at: number, key: string) => edges(await g.parents(node(at, key), ctx())),
+    children: async (at: number, key: string) => edges(await g.children(node(at, key), ctx())),
+    gaps: async (at: number, key: string) => (await g.gaps(node(at, key), ctx())).map((gap) => gap.code),
+  };
+};
+
+describe.each(Object.entries(ADAPTERS))('the cause graph over %s', (_name, graphOf) => {
+  const ask = askOf(graphOf);
 
   it('the finding: the box Fill left has the box Start wrote as its parent, for certain', async () => {
     const answer = ask(builtOnTheView());
@@ -139,34 +157,18 @@ describe.each(Object.entries(ADAPTERS))('the cause graph over %s', (_name, graph
 
   it('a view from before a sibling committed: the write the VIEW held is the parent, not the sibling', async () => {
     // start sets the box, other replaces it, fill commits a row built on a view pinned before other
-    // committed (`beganAt: 1`: the log held one commit). In the fold fill's row replaced what other
+    // committed (`viewAt: 1`: the log held one commit). In the fold fill's row replaced what other
     // wrote, and nothing of other's is in the box.
     const log = [
       commit('start', 0, [set('box')]),
       commit('other', 1, [set('box')]),
-      commit('fill', 2, [viewed('box')], { beganAt: 1 }),
+      commit('fill', 2, [viewed('box')], { viewAt: 1 }),
     ];
     const answer = ask(log);
     expect(await answer.parents(2, 'box')).toEqual(['start.box (recorded-write)']);
     expect(await answer.gaps(2, 'box')).toEqual([]);
     expect(await answer.children(0, 'box')).toEqual(['fill.box (recorded-write)']);
     expect(await answer.children(1, 'box')).toEqual([]);
-  });
-
-  it('a view with a write of the key in its window: each write it could have held is a possible parent', async () => {
-    // The same run, and fill's step looked at state again after other committed (`sawUntil: 2`). The
-    // record does not say which look the row was built on, so both writes are named and the node says
-    // that neither is certain.
-    const log = [
-      commit('start', 0, [set('box')]),
-      commit('other', 1, [set('box')]),
-      commit('fill', 2, [viewed('box')], { beganAt: 1, sawUntil: 2 }),
-    ];
-    const answer = ask(log);
-    expect(await answer.parents(2, 'box')).toEqual(['start.box (recorded-write)', 'other.box (recorded-write)']);
-    expect(await answer.gaps(2, 'box')).toEqual(['conservative']);
-    expect(await answer.children(0, 'box')).toEqual(['fill.box (recorded-write)']);
-    expect(await answer.children(1, 'box')).toEqual(['fill.box (recorded-write)']);
   });
 
   it("a step that also READ the key keeps the edge it always had: one edge, the read's", async () => {
@@ -181,17 +183,17 @@ describe.each(Object.entries(ADAPTERS))('the cause graph over %s', (_name, graph
     expect(await answer.children(0, 'box')).toEqual(['fill.box (per-write)']);
   });
 
-  it('a step that also read the key, with a write of it in its window: the possible reads keep their edges', async () => {
-    // Fill read the box, and looked at state again after other committed. Its read already names both
-    // writes as possible sources. The view names the same two and nothing more certain, so the read's
-    // edges stay as they are.
+  it('a step whose read is only possible and whose view is certain: the certain edge takes the place of the possible read', async () => {
+    // Fill read the box and looked at state again after other committed, so its READ names both writes
+    // as possible. Its view was pinned before other committed, so its ROW holds what start wrote, for
+    // certain. The certain edge stands for start; other stays a possible source of the read.
     const log = [
       commit('start', 0, [set('box')]),
       commit('other', 1, [set('box')]),
-      commit('fill', 2, [viewed('box', ['box'])], { beganAt: 1, sawUntil: 2 }),
+      commit('fill', 2, [viewed('box', ['box'])], { beganAt: 1, sawUntil: 2, viewAt: 1 }),
     ];
     const answer = ask(log);
-    expect(await answer.parents(2, 'box')).toEqual(['start.box (per-write)', 'other.box (per-write)']);
+    expect(await answer.parents(2, 'box')).toEqual(['start.box (recorded-write)', 'other.box (per-write)']);
     expect(await answer.gaps(2, 'box')).toEqual(['conservative']);
   });
 
@@ -206,35 +208,34 @@ describe.each(Object.entries(ADAPTERS))('the cause graph over %s', (_name, graph
     expect(await answer.parents(1, 'box')).toEqual(['start.box (recorded-write)']);
   });
 
-  it('the cap on edges counts these parents and children, and a cut is said', async () => {
-    // Five writes of the box sit in fill's window: six possible parents, and room for two.
-    const log = [
-      ...[0, 1, 2, 3, 4, 5].map((at) => commit(`w${at}`, at, [set('box')])),
-      commit('fill', 6, [viewed('box')], { beganAt: 1, sawUntil: 6 }),
-    ];
-    const answer = ask(log, { maxEdges: 2 });
-    expect(await answer.parents(6, 'box')).toEqual(['w0.box (recorded-write)', 'w1.box (recorded-write)']);
-    expect(await answer.gaps(6, 'box')).toContain('edge-limit');
-    // Four of the possible parents are commits of ONE step. Counted in steps that is two parents, which
-    // fits. The graph answers in commits: five, with room for two, and it says that it cut.
-    const sameStep = [
-      commit('w0', 0, [set('box')]),
-      commit('m', 1, [set('box')]),
-      ...[2, 3, 4].map((at) => ({ ...commit('m', at, [set('box')]), runtimeStageId: 'm#1', phase: 'repeat' })),
-      commit('fill', 5, [viewed('box')], { beganAt: 1, sawUntil: 5 }),
-    ];
-    const cut = ask(sameStep, { maxEdges: 2 });
-    expect(await cut.parents(5, 'box')).toHaveLength(2);
-    expect(await cut.gaps(5, 'box')).toContain('edge-limit');
+  it('the cap on edges counts these children, and a cut is said', async () => {
     // Forward: three later commits each hold w0's box in a view pinned right after it, with room for two.
     const fan = [
       commit('w0', 0, [set('box')]),
       commit('v1', 1, [viewed('box')]),
-      ...[2, 3].map((at) => commit(`v${at}`, at, [viewed('box')], { beganAt: 1 })),
+      ...[2, 3].map((at) => commit(`v${at}`, at, [viewed('box')], { viewAt: 1 })),
     ];
     const forward = ask(fan, { maxEdges: 2 });
     expect(await forward.children(0, 'box')).toEqual(['v1.box (recorded-write)', 'v2.box (recorded-write)']);
     expect(await forward.gaps(0, 'box')).toContain('edge-limit');
+  });
+
+  it('a row inside the key, held by three later commits, with room for five: every edge is there and nothing is called cut', async () => {
+    // The row's path (`box.in`) is not the node's key (`box`). Counted once as the forward walk's own
+    // edge and once as this rule's, three children looked like six and the node said `edge-limit`
+    // although every edge was listed (found by the second reader of this change).
+    const inside = 'box\u001fin';
+    const log = [
+      commit('start', 0, [set('box')]),
+      commit('v1', 1, [viewed(inside)]),
+      ...[2, 3].map((at) => commit(`v${at}`, at, [viewed(inside)], { viewAt: 1 })),
+    ];
+    const g = graphOf(log, undefined, { maxEdges: 5 });
+    const start = g.nodeId(address, { runtimeStageId: 'start#0', commitIdx: 0, key: 'box' });
+    const children = await g.children(start, ctx());
+    expect(children.edges).toHaveLength(3);
+    expect(children.complete).toBe(true);
+    expect((await g.gaps(start, ctx())).map((gap) => gap.code)).toEqual([]);
   });
 
   it.each([
@@ -247,6 +248,70 @@ describe.each(Object.entries(ADAPTERS))('the cause graph over %s', (_name, graph
     const answer = ask(log);
     expect(await answer.parents(1, 'box')).toEqual([]);
     expect(await answer.gaps(1, 'box')).toEqual(['invalid-data']);
+  });
+
+  it.each([
+    ['a view stamp that is not a whole number', [viewed('box')], { viewAt: '1' }],
+    ['a view stamp at the commit itself', [viewed('box')], { viewAt: 2 }],
+    ['a view stamp past the commit', [viewed('box')], { viewAt: 7 }],
+    ['a view stamp on a bundle with no row built on the view', [set('box')], { viewAt: 1 }],
+  ])('%s refuses the record: a stamp is never dropped', async (_name, rows, stamp) => {
+    const log = [
+      commit('start', 0, [set('box')]),
+      commit('other', 1, [set('box')]),
+      commit('fill', 2, rows as Row[], stamp),
+    ];
+    const answer = ask(log);
+    expect(await answer.parents(2, 'box')).toEqual([]);
+    expect(await answer.gaps(2, 'box')).toEqual(['invalid-data']);
+  });
+});
+
+describe('a record in memory that does not show where a view sits', () => {
+  // A stored record says the index of every bundle (its reader refuses one that does not), so a view
+  // always has one place there. A record handed over in memory may hold bundles that say none: a
+  // slice, or rows taken out. Then the place of a view is a range, and a write inside that range is a
+  // possible source: never the certain one, never left out.
+  const ask = askOf(ADAPTERS['a record in memory']);
+
+  it('a record that does not show where the view sits: each write it could have held is a possible parent', async () => {
+    // The view is one moment, so in an unbroken record it has one source. Here a bundle says no index
+    // and could sit on either side of that moment. Both writes are named, and the node says that
+    // neither is certain.
+    const answer = ask(placeNotShown());
+    expect(await answer.parents(2, 'box')).toEqual(['start.box (recorded-write)', 'other.box (recorded-write)']);
+    expect(await answer.gaps(2, 'box')).toEqual(['conservative']);
+    expect(await answer.children(0, 'box')).toEqual(['fill.box (recorded-write)']);
+    expect(await answer.children(1, 'box')).toEqual(['fill.box (recorded-write)']);
+  });
+
+  it('a step whose read and whose view are both only possible: the reads keep their edges', async () => {
+    // The view names the same two writes as the read and nothing more certain, so nothing takes a place.
+    const answer = ask(placeNotShown([viewed('box', ['box'])], { beganAt: 11, sawUntil: 13 }));
+    expect(await answer.parents(2, 'box')).toEqual(['start.box (per-write)', 'other.box (per-write)']);
+    expect(await answer.gaps(2, 'box')).toEqual(['conservative']);
+  });
+
+  it('the cap on edges counts these parents, and a cut is said', async () => {
+    // Four bundles say no index and sit where fill's view may or may not reach (indices 10, four
+    // unknown, 20; the view at 15): five possible parents, and room for two.
+    const hidden = (between: Log): Log => [
+      { ...commit('w0', 0, [set('box')]), idx: 10 },
+      ...between,
+      { ...commit('fill', 5, [viewed('box')], { viewAt: 15 }), idx: 20 },
+    ];
+    const answer = ask(hidden([1, 2, 3, 4].map((at) => unplaced(`w${at}`, at, [set('box')]))), { maxEdges: 2 });
+    expect(await answer.parents(5, 'box')).toEqual(['w0.box (recorded-write)', 'w1.box (recorded-write)']);
+    expect(await answer.gaps(5, 'box')).toContain('edge-limit');
+    // The same with four commits of ONE step in that place. Counted in steps that is two parents, which
+    // fits. The graph answers in commits: five, with room for two, and it says that it cut.
+    const sameStep = hidden([
+      unplaced('m', 1, [set('box')]),
+      ...[2, 3, 4].map((at) => ({ ...unplaced('m', at, [set('box')]), runtimeStageId: 'm#1', phase: 'repeat' })),
+    ]);
+    const cut = ask(sameStep, { maxEdges: 2 });
+    expect(await cut.parents(5, 'box')).toHaveLength(2);
+    expect(await cut.gaps(5, 'box')).toContain('edge-limit');
   });
 });
 
@@ -289,19 +354,15 @@ describe('with exact read sources, which know of reads only', () => {
       } as unknown as RecordScope,
     ]);
 
-  it('a view with a write of the key in its window: both writes are parents, and the node says neither is certain', async () => {
-    const windowed = [
-      commit('start', 0, [set('box')]),
-      commit('other', 1, [set('box')]),
-      commit('fill', 2, [viewed('box')], { beganAt: 1, sawUntil: 2 }),
-    ];
+  it('a record that does not show where the view sits: both writes are parents, and the node says neither is certain', async () => {
+    const hidden = placeNotShown();
     const g = createRecordGraph([
       {
-        ...scope(windowed),
+        ...scope(hidden),
         initialState: {},
         readSources: {
           record: { ...book, occurrences: [] },
-          executions: windowed.map((bundle) => ({
+          executions: hidden.map((bundle) => ({
             runtimeStageId: bundle.runtimeStageId,
             stateAddress: [],
             attemptIds: [`${bundle.runtimeStageId}@1`],
@@ -310,7 +371,7 @@ describe('with exact read sources, which know of reads only', () => {
       } as unknown as RecordScope,
     ]);
     const node = (at: number) =>
-      g.nodeId(address, { runtimeStageId: windowed[at].runtimeStageId, commitIdx: at, key: 'box' });
+      g.nodeId(address, { runtimeStageId: hidden[at].runtimeStageId, commitIdx: at, key: 'box' });
     expect((await g.parents(node(2), ctx())).edges.map((edge) => [edge.nodeId, edge.attribution])).toEqual([
       [node(0), 'recorded-write'],
       [node(1), 'recorded-write'],
@@ -332,19 +393,20 @@ describe('with exact read sources, which know of reads only', () => {
 });
 
 describe('the cost of one question on a record made to be expensive', () => {
-  // Every commit after the first carries a marked row on one key and a window over the whole log. That
-  // is the widest answer the rule can be asked for: every earlier write is a possible source of every
-  // later row. One question must still cost the size of the log, not its square. Counted, not timed.
+  // The widest answer the rule can be asked for. Every commit after the first holds a row built on the
+  // view, and none but the first and the last says its index: nobody can tell where any of those views
+  // sits, so every earlier write is a possible source of every later row. One question must still cost
+  // the size of the log, not its square. Counted, not timed.
   const expensive = (size: number): Log => [
     commit('w0', 0, [set('k')]),
-    ...Array.from({ length: size - 1 }, (_, at) =>
-      commit(`w${at + 1}`, at + 1, [viewed('k')], { beganAt: 0, sawUntil: at + 1 }),
-    ),
+    ...Array.from({ length: size - 2 }, (_, at) => unplaced(`w${at + 1}`, at + 1, [viewed('k')], { viewAt: at })),
+    { ...commit(`w${size - 1}`, size - 1, [viewed('k')], { viewAt: size - 2 }), idx: 10 * size },
   ];
   const workOf = async (size: number, question: 'parents' | 'children') => {
     const log = expensive(size);
     const g = createRecordGraph([scope(log) as never], { maxCommits: 4096, maxFields: 1_000_000 });
-    const at = question === 'children' ? 0 : size - 1;
+    // The second commit is in every later view's reach; the last commit's view could hold all before it.
+    const at = question === 'children' ? 1 : size - 1;
     const id = g.nodeId(address, { runtimeStageId: log[at].runtimeStageId, commitIdx: at, key: 'k' });
     // The first question loads the scope. Ask once to have that done, then count the second.
     await g[question](id, ctx());

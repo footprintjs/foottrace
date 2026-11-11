@@ -6,8 +6,9 @@
  *   - the write did not replace the key (a merge, an append, a row inside it): it was FOLDED onto
  *     what the write just before it had left, in commit order;
  *   - the writer built a `set` row on the step's VIEW (`TraceEntry.builtOnView`): the row holds what
- *     the view held, so the commit read the key from its view. Its sources are the read rule's
- *     (`memory/readWindow.ts`), asked with that commit's own window.
+ *     the view held, so the commit read the key from its view. Its source is the read rule's
+ *     (`memory/readWindow.ts`), asked with the moment that commit's view was pinned
+ *     (`CommitBundle.viewAt`).
  * No read of the step is behind either dependence, so neither of the graph's two ways of finding
  * parents sees it: not the walk over recorded reads, and not the exact read sources. Both ask here.
  *
@@ -21,19 +22,21 @@
  * The edges carry `attribution: 'recorded-write'`: the record's own rows say it.
  *
  * WHAT ONE QUESTION MAY COST. The record comes from outside, so its shape is the sender's choice:
- * every commit can carry a marked row and a window over the whole log. One question (the parents or
- * the children of one node) therefore costs the size of the log and no more: one model of the log
- * (the door's copy is not frozen, so nothing keeps a model between lookups), one pass for the
- * windows, and one halving per write of the key. Both functions also stop at the number of
- * edges the caller can use (`limit`). The work is counted (`queryWork`) and pinned by a counted test
- * (`test/cause/built-on-view.test.ts`).
+ * every commit can carry a marked row, and bundles that say no index can leave the place of a view
+ * open over a long stretch of the log. One question about ONE KEY of a node (its parents or its
+ * children through these edges) therefore costs the size of the log and no more: one model of the
+ * log (the door's copy is not frozen, so nothing keeps a model between lookups), one pass to place
+ * the views, and one halving per write of the key. Both functions also stop at the number of edges
+ * the caller can use (`limit`). The work is counted (`queryWork`) and pinned by a counted test
+ * (`test/cause/built-on-view.test.ts`). A node that names no key is asked once per key its commit
+ * wrote, here as in the callers' older code.
  */
 import { builtDirectlyOn, builtOnBefore, readFromView } from '../memory/builtOn.js';
 import { lastWriterPosition, writersOf } from '../memory/commitLogUtils.js';
 import { lowerBound, queryWork } from '../memory/keyPaths.js';
 import { logModel } from '../memory/logModel.js';
 import { readOfValue, readSourcesOf } from '../memory/readWindow.js';
-import { windowOf, windowsOf } from '../memory/windowPlacement.js';
+import { placesOf } from '../memory/windowPlacement.js';
 import { nodeIdFor } from './recordIdentity.js';
 import type { PreparedRecordScope } from './recordTypes.js';
 import type { GraphEdge } from './types.js';
@@ -63,9 +66,10 @@ export interface BuiltOnParents {
  * once, ascending, at most `limit` of them:
  *   - the write just before it, when this one did not replace the value (certain; it may be an
  *     earlier commit of the same step);
- *   - what its view could have seen, when the writer built a `set` row of it on the view: the last
- *     write before the view, for certain, unless the key was also written inside the commit's
- *     window; then each of those writes is a possible source.
+ *   - what its view held, when the writer built a `set` row of it on the view: the last write
+ *     before the moment the view was pinned, for certain. Only where the array does not show where
+ *     that moment sits (bundles around it say no index) can a write lie inside the range it could
+ *     be in; then each of those writes is a possible source.
  *
  * @param limit  How many edges the caller can use. Pass one more than its cap, so that it still sees
  *               that there were too many.
@@ -93,7 +97,7 @@ export function builtOnParents(
     // The sources of a window are every write of the key inside it, one writer lookup each. ONE model
     // answers them all; asked one by one, each lookup could build a model of its own.
     const model = logModel(scope.log);
-    const seen = readSourcesOf(key, windowOf(scope.log, commitIndex), (path, before) =>
+    const seen = readSourcesOf(key, placesOf(scope.log).view(commitIndex), (path, before) =>
       model.lastWriterBefore(path, before),
     );
     queryWork.units += 1 + seen.during.length;
@@ -137,7 +141,7 @@ export function builtOnChildPositions(
   // The write that ends this one's time as the LAST write of the key: a view pinned after it holds a later one.
   const next = from < writes.length ? writes[from] : undefined;
   const folded = builtDirectlyOn(key, commitIndex, writes, (position) => scope.log[position]);
-  const windowAt = windowsOf(scope.log);
+  const viewAt = placesOf(scope.log).view;
   const found: number[] = [];
   for (let at = from; at < writes.length && found.length < limit; at++) {
     const position = writes[at];
@@ -148,9 +152,9 @@ export function builtOnChildPositions(
       continue;
     }
     if (!readFromView(bundle, key)) continue;
-    // Could a look inside this commit's window see the write? Whether it is then the certain source or
-    // a possible one is the parent side's to say; a child is listed either way.
-    if (readOfValue(windowAt(position), commitIndex, next, false) !== false) found.push(position);
+    // Could this commit's view hold the write? Whether it is then the certain source or a possible
+    // one is the parent side's to say; a child is listed either way.
+    if (readOfValue(viewAt(position), commitIndex, next, false) !== false) found.push(position);
   }
   return found;
 }

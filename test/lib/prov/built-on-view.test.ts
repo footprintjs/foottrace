@@ -41,4 +41,45 @@ describe('the PROV export and a row the writer built on the view', () => {
     expect(damaged.gaps).toContainEqual({ code: 'invalid-data', commitIdx: 1, reason: 'unreadable commit bundle' });
     expect(damaged.document['@graph'].length).toBeLessThan(plain.document['@graph'].length);
   });
+
+  // `viewAt` says when the view behind such a row was pinned. `fill` is the third commit here (index 2).
+  const withView = (row: object, stamp: object) =>
+    exportProv(
+      {
+        commitLog: [
+          { runtimeStageId: 'start#0', trace: [{ path: 'a', verb: 'set' }] },
+          { runtimeStageId: 'other#1', trace: [{ path: 'a', verb: 'set' }] },
+          { runtimeStageId: 'fill#2', trace: [{ path: 'a', verb: 'set', ...row }], ...stamp },
+        ],
+      },
+      { base: 'urn:test:view/' },
+    );
+
+  it('a view stamp on a commit with a marked row exports exactly as the same commit without it', async () => {
+    const plain = await withView({ builtOnView: true }, {});
+    const stamped = await withView({ builtOnView: true }, { viewAt: 1 });
+    expect(stamped.document).toEqual(plain.document);
+    expect(stamped.gaps).toEqual(plain.gaps);
+  });
+
+  it.each([
+    ['a view stamp at the commit', { viewAt: 2 }],
+    ['a view stamp that is not a whole number', { viewAt: '1' }],
+  ])('%s: the commit is left out, and the gap names the stamps', async (_name, stamp) => {
+    const damaged = await withView({ builtOnView: true }, stamp);
+    expect(damaged.gaps).toContainEqual({
+      code: 'invalid-data',
+      commitIdx: 2,
+      reason: 'read stamps do not fit the commit index',
+    });
+  });
+
+  it('a view stamp on a commit with no row built on the view: left out, with its own reason', async () => {
+    const damaged = await withView({}, { viewAt: 1 });
+    expect(damaged.gaps).toContainEqual({
+      code: 'invalid-data',
+      commitIdx: 2,
+      reason: 'a view stamp with no row built on the view',
+    });
+  });
 });

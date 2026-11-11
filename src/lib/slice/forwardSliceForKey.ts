@@ -51,11 +51,13 @@
  *
  * A `set` row the WRITER built on its step's view (`TraceEntry.builtOnView`,
  * `memory/builtOn.ts`) holds what the view held of the key. Its commit is a
- * reader of that value, dated by its own stamps, and the one write it feeds
- * is that row (`basis: 'built-on-view'`, exact: the row says it). No code of
- * the step read the key, so the read is marked (`ForwardRead.builtOnView`)
- * and nothing else the commit wrote is fed by it. Where the step ALSO read
- * the key, that read keeps the edge and the basis it always had.
+ * reader of that value, dated by the moment its view was pinned
+ * (`CommitBundle.viewAt`), and the one write it feeds is that row
+ * (`basis: 'built-on-view'`, exact: the row says it). No read by the step's
+ * code is behind it at this commit, so the read is marked
+ * (`ForwardRead.builtOnView`) and nothing else the commit wrote is fed by
+ * it. Where the step's code ALSO read this value at this commit, that read
+ * keeps the edge and the basis it always had.
  *
  * Budgets mirror `causalChain`'s (maxDepth 20, maxNodes 100) and a cut is
  * STATED — `root.truncated` plus a `'truncated'` note.

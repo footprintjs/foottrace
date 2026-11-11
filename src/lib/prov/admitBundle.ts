@@ -1,5 +1,6 @@
 import { readAttemptWindow } from '../evidence/readAttempts.js';
 import { parseAttemptId } from '../ids/attemptId.js';
+import { viewStampFits } from '../memory/builtOn.js';
 import { admitStamps } from '../memory/readWindow.js';
 import type { CommitBundle, CommitPhase, TraceEntry, UntrackedSource } from '../memory/types.js';
 import { bundleRefusal, isCommitBundle } from '../time-travel/bundles.js';
@@ -133,12 +134,19 @@ export function admitBundle(
       dataField(raw, 'sawUntil', budget),
       dataField(raw, 'idx', budget),
       after,
+      dataField(raw, 'viewAt', budget),
     );
     if (!placed) {
       // Said apart from a bundle that cannot be read: this one reads, but its stamps count against an index
       // that cannot be its own (not a whole number, or not past the row before it, whichever of the two is
       // the damaged one). The row is left out, never dated by guess.
       budget.addGap({ code: 'invalid-data', commitIdx, reason: 'read stamps do not fit the commit index' });
+      return undefined;
+    }
+    // `viewAt` dates the rows the writer built on the step's view. Without such a row it dates nothing, and
+    // the producer and this reader do not agree about the bundle: left out, with its own reason.
+    if (!viewStampFits(placed, rows)) {
+      budget.addGap({ code: 'invalid-data', commitIdx, reason: 'a view stamp with no row built on the view' });
       return undefined;
     }
     const untrackedSources = untracked === undefined ? undefined : dataNames(untracked, budget, 'fields');

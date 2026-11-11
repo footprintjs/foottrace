@@ -33,9 +33,10 @@
  * grows with the square of a loop that appends and reads. The link is one
  * number per write, found with one look at one bundle; a reader follows it
  * from the write a read names. One more case: a `set` row the WRITER built on
- * the step's view (`TraceEntry.builtOnView`) holds what the view held. With
- * one certain source it is linked like any other write; when the key was
- * also written while that step ran, the view's possible sources are listed
+ * the step's view (`TraceEntry.builtOnView`) holds what the view held, as of
+ * the moment the view was pinned (`CommitBundle.viewAt`). That is one write,
+ * and it is linked like any other. Only where the array does not show where
+ * that moment sits are there several possible ones, and they are listed
  * (`builtOnViewIdxs`).
  *
  * DAG position: memory ← slice. Imports memory/ only (see README.md).
@@ -161,11 +162,12 @@ export function keyTimeline(
       // every read would grow with the square of a key that is appended to and read in a loop.)
       const under = builtOnBefore(normalisedKey, idx, bundleAt, writeBefore);
       // A `set` row the WRITER built on the step's view still holds what the view held: its sources
-      // are the read rule's, asked with this commit's own window (`memory/builtOn.ts · readFromView`).
-      // One certain source and no fold link: it is the write this one was built on, said like any
-      // other. Otherwise the view's possible sources are listed beside the fold link.
+      // are the read rule's, asked with the moment this commit's view was pinned (`CommitBundle.viewAt`,
+      // `memory/builtOn.ts · readFromView`). One certain source and no fold link: it is the write this
+      // one was built on, said like any other. Otherwise the view's possible sources are listed beside
+      // the fold link.
       const seen = readFromView(bundle, normalisedKey)
-        ? readSourcesOf(normalisedKey, index.windows.get(idx) ?? { start: idx, end: idx }, writeBefore)
+        ? readSourcesOf(normalisedKey, index.views.get(idx) ?? { start: idx, end: idx }, writeBefore)
         : undefined;
       const viewCertain = seen !== undefined && seen.during.length === 0;
       const link = under ?? (viewCertain ? seen.before : undefined);

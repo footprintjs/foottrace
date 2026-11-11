@@ -27,7 +27,7 @@ import {
 import type { CommitBundle } from '../../../src';
 import { lastWriterPosition } from '../../../src/lib/memory/commitLogUtils';
 import { admitStamps, placedAt, readOfValue, readSourcesOf } from '../../../src/lib/memory/readWindow';
-import { windowOf } from '../../../src/lib/memory/windowPlacement';
+import { placesOf, windowOf } from '../../../src/lib/memory/windowPlacement';
 import { EventLog, memorySink, RecordFrame, SharedMemory } from '../../../src/write';
 
 function world(seed: Record<string, unknown> = {}) {
@@ -476,6 +476,82 @@ describe('admitting the place of a bundle from outside', () => {
     ['a sawUntil past the lowest index a bundle with no idx can have', [2, 6, undefined]],
   ])('%s is refused, never dropped', (_name, [beganAt, sawUntil, idx]) => {
     expect(admitStamps(beganAt, sawUntil, idx, 4)).toBeUndefined();
+  });
+
+  // `viewAt` says when the view behind a row the writer built on it was pinned (`CommitBundle.viewAt`).
+  // It is held to the rule of `beganAt`, alone or beside the read stamps.
+  it('a good view stamp is kept, alone and beside the read stamps', () => {
+    expect(admitStamps(undefined, undefined, 5, 4, 2)).toEqual({ idx: 5, viewAt: 2 });
+    expect(admitStamps(undefined, undefined, 5, 4, 0)).toEqual({ idx: 5, viewAt: 0 });
+    expect(admitStamps(3, undefined, 5, 4, 2)).toEqual({ idx: 5, beganAt: 3, viewAt: 2 });
+    expect(admitStamps(1, 4, 5, 4, 3)).toEqual({ idx: 5, beganAt: 1, sawUntil: 4, viewAt: 3 });
+    // No idx: admitted when it fits the lowest index the bundle can have (5 here).
+    expect(admitStamps(undefined, undefined, undefined, 4, 4)).toEqual({ viewAt: 4 });
+    // No view stamp: what the copy keeps is what it kept before the stamp existed.
+    expect(admitStamps(2, 4, 5, 4, undefined)).toEqual({ idx: 5, beganAt: 2, sawUntil: 4 });
+  });
+
+  it.each([
+    ['a view stamp at the bundle', [undefined, undefined, 5, 5]],
+    ['a view stamp after the bundle', [undefined, undefined, 5, 7]],
+    ['a view stamp that is negative', [undefined, undefined, 5, -1]],
+    ['a view stamp that is a fraction', [undefined, undefined, 5, 1.5]],
+    ['a view stamp that is a string', [undefined, undefined, 5, '1']],
+    ['a view stamp that is null', [undefined, undefined, 5, null]],
+    ['a view stamp beside an idx that is not past the copy before', [undefined, undefined, 4, 2]],
+    ['a view stamp beside an idx that is not a number', [undefined, undefined, '5', 2]],
+    [
+      'a view stamp that does not fit the lowest index a bundle with no idx can have',
+      [undefined, undefined, undefined, 5],
+    ],
+    ['a good view stamp beside a read stamp that cannot be one', [5, undefined, 5, 2]],
+    ['a bad view stamp beside good read stamps', [2, 4, 5, 9]],
+    ['a view stamp beside a sawUntil with no beganAt', [undefined, 3, 5, 2]],
+  ])('%s is refused, never dropped', (_name, [beganAt, sawUntil, idx, viewAt]) => {
+    expect(admitStamps(beganAt, sawUntil, idx, 4, viewAt)).toBeUndefined();
+  });
+});
+
+describe('where a view sits (placesOf · view)', () => {
+  const bundle = (extra: Partial<CommitBundle> = {}): CommitBundle => ({
+    stage: 's',
+    stageId: 's',
+    runtimeStageId: 's#0',
+    trace: [],
+    redactedPaths: [],
+    overwrite: {},
+    updates: {},
+    ...extra,
+  });
+  const log = (count: number, last: Partial<CommitBundle>) =>
+    Array.from({ length: count }, (_, i) => (i === count - 1 ? bundle(last) : bundle({ idx: i })));
+
+  it('no view stamp: the view was the state just before the commit', () => {
+    expect(placesOf(log(5, { idx: 4 })).view(4)).toEqual({ start: 4, end: 4 });
+  });
+
+  it('a view stamp is one moment: every commit before it, and no window', () => {
+    expect(placesOf(log(5, { idx: 4, viewAt: 2 })).view(4)).toEqual({ start: 2, end: 2 });
+    expect(placesOf(log(5, { idx: 4, viewAt: 0 })).view(4)).toEqual({ start: 0, end: 0 });
+  });
+
+  it("the read stamps do not move it, and it does not move the step's read window", () => {
+    const places = placesOf(log(6, { idx: 5, beganAt: 3, sawUntil: 5, viewAt: 1 }));
+    expect(places.view(5)).toEqual({ start: 1, end: 1 });
+    expect(places.window(5)).toEqual({ start: 3, end: 5 });
+  });
+
+  it('a bundle that says no index, in a hole the said indices show, may or may not be in the view', () => {
+    // Indices 10, ?, 13. The silent bundle sits at 11 or at 12. A view pinned at 12 holds it or not.
+    const hole = [bundle({ idx: 10 }), bundle(), bundle({ idx: 13, viewAt: 12 })];
+    expect(placesOf(hole).view(2)).toEqual({ start: 1, end: 2 });
+    // Pinned at 11, the silent bundle is surely not in it; pinned at 13 is not a view stamp at all.
+    expect(placesOf([hole[0], hole[1], bundle({ idx: 13, viewAt: 11 })]).view(2)).toEqual({ start: 1, end: 1 });
+  });
+
+  it('a stamp that cannot be one opens the view over everything before the commit', () => {
+    // A typed log built by hand. (A door that takes records from outside refuses such a bundle.)
+    expect(placesOf(log(5, { idx: 4, viewAt: 9 })).view(4)).toEqual({ start: 0, end: 4 });
   });
 });
 

@@ -259,12 +259,16 @@ export interface ForwardRead {
    */
   overlap?: ReadOverlap;
   /**
-   * Present (`true`) when no code of the step read the key: this commit holds a `set` row the WRITER
-   * built on the step's view (`TraceEntry.builtOnView`), and that row holds what the view held of the
-   * key. The value went on into that row and into nothing else the commit wrote (the fed edge to it
-   * says `basis: 'built-on-view'`). Absent on a read the step made, also when its commit holds such a
-   * row too. WHY SAID: a list of "who read this key" that counts this commit names a step that never
-   * asked for the key.
+   * Present (`true`) when no read by the step's code is behind this entry AT THIS COMMIT: the commit
+   * holds a `set` row the WRITER built on the step's view (`TraceEntry.builtOnView`), and that row
+   * holds this value. The value went on into that row and into nothing else the commit wrote (the fed
+   * edge to it says `basis: 'built-on-view'`). Absent where the step's code read this value at this
+   * commit, also when the commit holds such a row too.
+   *
+   * It speaks of the COMMIT, not of the step: a step's own reads belong to its first commit, so a
+   * later commit of a step whose code did read the key is listed with this mark when its row holds
+   * the value. WHY SAID: a list of "who read this key" that counts this entry names a read no code
+   * made.
    */
   builtOnView?: true;
 }
@@ -433,11 +437,12 @@ export interface KeyMoment {
   /**
    * `'write'` moments only, and only for a commit with a `set` row the
    * WRITER built on its step's view (`TraceEntry.builtOnView`) when one
-   * number cannot say it: the key was also written while the step ran, or
-   * the commit has a fold link as well. The `commitIdx` of each write the
-   * view could have held, ascending; one of them is under this value. With
-   * one certain source and no fold link, `builtOnWriteIdx` says it and this
-   * field is absent.
+   * number cannot say it: the array does not show where that view sits
+   * (bundles around it say no index, `CommitBundle.viewAt`), or the commit
+   * has a fold link as well. The `commitIdx` of each write the view could
+   * have held, ascending; one of them is under this value. With one certain
+   * source and no fold link, `builtOnWriteIdx` says it and this field is
+   * absent, which is every such commit of an unbroken log.
    */
   builtOnViewIdxs?: number[];
 }

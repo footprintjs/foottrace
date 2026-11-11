@@ -85,6 +85,9 @@ describe('which rows the writer marks', () => {
     const { list, state } = mergedAndInside('delta');
     expect(state.getState().a).toEqual({ s: 1, m: 1, in: 1 });
     expect(rowsOf(list[1])).toEqual(['set a.in', 'set a (built on view)']);
+    // Nothing was committed between Fill's first touch of state and its commit: its view was the state
+    // just before the commit, which is what a reader takes a bundle with no stamp to say.
+    expect(list[1].viewAt).toBeUndefined();
   });
 
   it('full: the same step keeps its verbs, and nothing is marked', () => {
@@ -213,9 +216,11 @@ describe('the walk back through a row the writer built on the view', () => {
     commit(fill, 'fill');
     expect(w.state.getState().a).toEqual({ s: 1, m: 1, in: 1 });
     const list = w.log.list();
-    // Fill read nothing itself. Its row carries the view into the record, so the pin is dated like a look.
-    expect(list[2]).toMatchObject({ runtimeStageId: 'fill#0', beganAt: 1 });
-    expect(list[2].sawUntil).toBeUndefined();
+    // The commit says when its view was pinned. Fill read nothing itself, so it has no read stamps.
+    expect(list[2]).toMatchObject({ runtimeStageId: 'fill#0', viewAt: 1 });
+    expect([list[2].beganAt, list[2].sawUntil]).toEqual([undefined, undefined]);
+    // Start's commit and Other's carry no stamp at all: nothing landed between their view and their commit.
+    expect(list.slice(0, 2).map((bundle) => bundle.viewAt)).toEqual([undefined, undefined]);
     const use = w.frame();
     use.read([], 'a');
     use.write(['out'], 1, 'set');
@@ -225,11 +230,12 @@ describe('the walk back through a row the writer built on the view', () => {
     expect(edgesOf(root)).toEqual(['use <- fill via a', 'fill <- start via a [built-on-view]']);
   });
 
-  it('a step that looked at state twice, with the key written in between: both writes are possible sources, and each says so', () => {
+  it('a step that pinned its view by a write and read live state later: the row has ONE source, and the read keeps its own date', () => {
     // Fill's first write pins its view (the log holds one commit). Other replaces `a` and writes `flag`.
-    // Fill then reads `flag`, which its view does not hold: that is a look at state as it stands now.
-    // The row was built on the pinned view. The bundle says when the step first and last looked, not
-    // which look the row was built on, so the reader names both writes and calls neither certain.
+    // Fill then reads `flag`, which its view does not hold: a look at state as it stands now. The row
+    // was built on the pinned view, and the commit says when that was (`viewAt`), apart from when
+    // Fill's code read. So the row has one certain source, and so has the read. (Dated by one pair of
+    // stamps, as the first form of this change did, both answers became "possible": Start or Other.)
     const w = world('delta');
     const start = w.frame();
     start.write(['a'], { s: 1 }, 'set');
@@ -245,13 +251,51 @@ describe('the walk back through a row the writer built on the view', () => {
     commit(fill, 'fill');
     expect(w.state.getState().a).toEqual({ s: 1, m: 1, in: 1 });
     const list = w.log.list();
-    expect(list[2]).toMatchObject({ runtimeStageId: 'fill#0', beganAt: 1, sawUntil: 2 });
+    // The read saw state just before the commit: no read stamp. The view was pinned one commit earlier.
+    expect(list[2]).toMatchObject({ runtimeStageId: 'fill#0', viewAt: 1 });
+    expect([list[2].beganAt, list[2].sawUntil]).toEqual([undefined, undefined]);
     const use = w.frame();
     use.read([], 'a');
     use.write(['out'], 1, 'set');
     commit(use, 'use');
     const all = w.log.list();
-    expect(edgesOf(walk(all, 'use', { 'use#0': ['a'] })).sort()).toEqual(
+    expect(edgesOf(walk(all, 'use', { 'use#0': ['a'], 'fill#0': ['flag'] })).sort()).toEqual(
+      ['use <- fill via a', 'fill <- start via a [built-on-view]', 'fill <- other via flag'].sort(),
+    );
+    const timeline = keyTimeline(all, 'a', keysReadFromMap({ 'use#0': ['a'] }).lookup);
+    const writes = (timeline.moments ?? []).filter((moment) => moment.kind === 'write');
+    expect(writes.map((moment) => [moment.commitIdx, moment.builtOnWriteIdx, moment.builtOnViewIdxs])).toEqual([
+      [0, undefined, undefined],
+      [1, undefined, undefined],
+      [2, 0, undefined],
+    ]);
+    expect(formatTimeline(timeline)).toContain('@2 write set — fill (fill#0) (added to the value of commit 0)');
+  });
+
+  it('an array that does not show where the view sits: each write it could have held is a possible source', () => {
+    // A record handed over with one bundle that says no index, in a hole of the indices (10, ?, 13).
+    // Fill's view was pinned when the log held 12 commits. The bundle with no index sits at 11 or at
+    // 12: inside the view, or not. The reader cannot know, names both writes, and calls neither certain.
+    const row = (path: string, extra: object = {}) => ({ path, verb: 'set' as const, ...extra });
+    const bundle = (id: string, idx: number | undefined, trace: CommitBundle['trace'], extra: object = {}) =>
+      ({
+        ...(idx !== undefined && { idx }),
+        stage: id,
+        stageId: id,
+        runtimeStageId: `${id}#0`,
+        trace,
+        redactedPaths: [],
+        overwrite: Object.fromEntries(trace.map((entry) => [entry.path, 1])),
+        updates: {},
+        ...extra,
+      } as CommitBundle);
+    const log = [
+      bundle('start', 10, [row('a')]),
+      bundle('other', undefined, [row('a')]),
+      bundle('fill', 13, [row('a', { builtOnView: true })], { viewAt: 12 }),
+      bundle('use', 14, [row('out')]),
+    ];
+    expect(edgesOf(walk(log, 'use', { 'use#0': ['a'] })).sort()).toEqual(
       [
         'use <- fill via a',
         'fill <- start via a [built-on-view] (replaced-while-running)',
@@ -259,7 +303,7 @@ describe('the walk back through a row the writer built on the view', () => {
       ].sort(),
     );
     // The timeline says it on the write: one number cannot, so it lists the writes the view could have held.
-    const timeline = keyTimeline(all, 'a', keysReadFromMap({ 'use#0': ['a'] }).lookup);
+    const timeline = keyTimeline(log, 'a', keysReadFromMap({ 'use#0': ['a'] }).lookup);
     const writes = (timeline.moments ?? []).filter((moment) => moment.kind === 'write');
     expect(writes.map((moment) => [moment.commitIdx, moment.builtOnWriteIdx, moment.builtOnViewIdxs])).toEqual([
       [0, undefined, undefined],
@@ -269,6 +313,12 @@ describe('the walk back through a row the writer built on the view', () => {
     expect(formatTimeline(timeline)).toContain(
       "@2 write set — fill (fill#0) (built on the value its step's view held: commit 0 or 1)",
     );
+    // With the index said, the same record has one answer.
+    const said = [log[0], { ...log[1], idx: 12 }, log[2], log[3]];
+    expect(edgesOf(walk(said, 'use', { 'use#0': ['a'] }))).toEqual([
+      'use <- fill via a',
+      'fill <- start via a [built-on-view]',
+    ]);
   });
 
   it('where the fold and the view name one parent there is one edge, and it says the fold', () => {
@@ -310,7 +360,7 @@ describe('the walk back through a row the writer built on the view', () => {
     commit(fill, 'fill');
     const bundle = w.log.list()[2];
     expect(rowsOf(bundle)).toEqual(['merge a']);
-    expect(bundle.beganAt).toBeUndefined();
+    expect([bundle.beganAt, bundle.viewAt]).toEqual([undefined, undefined]);
   });
 
   it("a step's LATER commit has a view of its own: a write between its two commits is under the row, and is named", () => {
@@ -399,11 +449,44 @@ describe('forward, the timeline and the cause graph', () => {
     commit(later, 's', 'exit');
     expect(w.state.getState().a).toEqual({ s1: 1, s2: 1, in: 1 });
     const list = w.log.list();
-    expect(list[2]).toMatchObject({ runtimeStageId: 's#0', phase: 'exit', beganAt: 1 });
+    expect(list[2]).toMatchObject({ runtimeStageId: 's#0', phase: 'exit', viewAt: 1 });
+    expect(list[2].beganAt).toBeUndefined();
     const readersOf = (before: number) =>
       forwardSliceForKey(list, 'a', keysReadFromMap({}).lookup, { before }).root?.reads.map((read) => read.commitIdx);
     expect(readersOf(1)).toEqual([2]);
     expect(readersOf(2)).toEqual([]);
+  });
+
+  it('forward: a commit whose step possibly read a value and whose row certainly holds it is a certain reader', () => {
+    // Fill read `a` and looked at state again after Other replaced it, so its READ of Start's value is
+    // only possible. Its view was pinned before Other committed, so its ROW holds Start's value for
+    // sure. Either way of reading is enough: the commit holds the value, for certain. Other's value is
+    // not in the row, and Fill's code may have read it: a possible reader, by its read alone.
+    const row = (path: string, extra: object = {}) => ({ path, verb: 'set' as const, ...extra });
+    const bundle = (id: string, idx: number, trace: CommitBundle['trace'], extra: object = {}): CommitBundle => ({
+      idx,
+      stage: id,
+      stageId: id,
+      runtimeStageId: `${id}#0`,
+      trace,
+      redactedPaths: [],
+      overwrite: Object.fromEntries(trace.map((entry) => [entry.path, idx])),
+      updates: {},
+      ...extra,
+    });
+    const log = [
+      bundle('start', 0, [row('a')]),
+      bundle('other', 1, [row('a')]),
+      bundle('fill', 2, [row('a', { builtOnView: true })], { beganAt: 1, sawUntil: 2, viewAt: 1 }),
+    ];
+    const readersOf = (before: number) =>
+      forwardSliceForKey(log, 'a', keysReadFromMap({ 'fill#0': ['a'] }).lookup, { before }).root?.reads.map((read) => [
+        read.commitIdx,
+        read.overlap,
+        read.builtOnView,
+      ]);
+    expect(readersOf(1)).toEqual([[2, undefined, undefined]]);
+    expect(readersOf(2)).toEqual([[2, 'written-while-running', undefined]]);
   });
 
   it('the timeline lists no read by Fill: its code read nothing, and reads were not recorded for it', () => {

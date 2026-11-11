@@ -135,27 +135,41 @@ A reader takes the mark as a READ of the path, made for the step, at the commit 
 
 | Question | Answer | Why |
 |---|---|---|
-| What is under the row? | the sources of a read of the path, by the read rule (`readWindow.ts`) | the row holds what the VIEW held, and the view was pinned before the commit. A fold is dated at the commit: it would name what a sibling committed in between, and the row replaced that |
-| Dated by which stamps? | those of the commit that carries the row | a later commit of a step has a view of its own, pinned after the earlier one |
+| What is under the row? | the source of a read of the path, by the read rule (`readWindow.ts`) | the row holds what the VIEW held, and the view was pinned before the commit. A fold is dated at the commit: it would name what a sibling committed in between, and the row replaced that |
+| Dated by what? | the moment the view was pinned: `viewAt` on the commit that carries the row | a later commit of a step has a view of its own, pinned after the earlier one. And the view is not a read of the step's code: see below |
 | Is it a read by the step? | no | no code of the step asked for the key, so a forward answer and the timeline keep it apart from the steps' reads |
 
 WHY the mark is absent on a `set` the step made itself: such a row replaced the value because the step said so, and nothing older is in it. The writer knows which is which. It marks a row only when no `set` or `delete` of the step covers the path (`hardWriteCoverage.ts · viewMark`).
 
+WHY `viewAt` is a stamp of its own, and not part of the read window (`beganAt`, `sawUntil`). Those two date the reads of the step's CODE, on its first bundle. The view is pinned by the frame's first touch of state, which may be a write. The first form of this change counted the pin as one more look. Then a step that wrote first and read live state later had that read dated as if it could have seen older writes: one certain source became two possible ones, and a row's own source was only "possible" whenever its step had looked twice. Both answers were weaker than what the writer knew. Said on its own, a row has one exact source, and no read is dated differently than before:
+
+```ts
+// Fill writes `a` first (that pins its view), Other then replaces `a` and writes `flag`, Fill reads `flag`.
+log[2];   // fill: { ..., viewAt: 1 }        no beganAt: its one read saw state just before its commit
+causalChain(log, 'use#0', reads);
+//   fill <- start via a      builtOn: 'built-on-view'     one source, certain
+//   fill <- other via flag                                the read, certain as before
+```
+
 WHAT changes in the record, and nothing else does:
 
 - `builtOnView: true` on such a row;
-- `beganAt` on a commit that holds one, when another commit landed between the step's first touch of state and its own commit. Pinning the view for a write is not a look at state (a step that only wrote stays undated), but a row that carries the view into the record is one, so the frame counts the pin when its commit holds such a row (`RecordFrame · commit`).
+- `viewAt` on a commit that holds one, when another commit landed between the moment the view was pinned and that commit. A commit whose view was the state just before it says nothing.
+
+`beganAt` and `sawUntil` are byte for byte what they were, on every bundle.
 
 What each reader says:
 
 | Reader | A write that only added | A `set` row the writer built on the view |
 |---|---|---|
-| `causalChain`, `sliceForKey` | `CausalEdge.builtOn: 'partial-write'` on the edge to the write underneath; `CausalNode.preRunBase` when nothing in the log is underneath. Text: `← built on box` | `builtOn: 'built-on-view'` on the edge to the write the view held. With the key also written inside the commit's window, one edge to each write it could have held, each with `overlap` |
+| `causalChain`, `sliceForKey` | `CausalEdge.builtOn: 'partial-write'` on the edge to the write underneath; `CausalNode.preRunBase` when nothing in the log is underneath. Text: `← built on box` | `builtOn: 'built-on-view'` on the edge to the write the view held |
 | `forwardSliceForKey` | a value's life does not end at a write that only added, so the readers after it are readers of this value too. A `'partial-write'` note names the commits it crossed | the commit is a reader of the value its view held, marked `ForwardRead.builtOnView`, and it feeds that row alone (`basis: 'built-on-view'`) |
-| `keyTimeline` | on the WRITE moment: `builtOnWriteIdx`, or `builtOnPreRun`. One number per write: a list on every read would grow with the square of a loop that appends and reads | `builtOnWriteIdx` when one write is under it for certain; `builtOnViewIdxs` when the view could have held several. No read moment: the step read nothing |
-| `foottrace/cause` | an edge with `attribution: 'recorded-write'` from a node to the write just before it, and from that write forward. Its nodes are commits, so it asks the rule for each node by its own commit and names a node once | the same edge to each write the view could have held, and `conservative` on the node when there are several |
+| `keyTimeline` | on the WRITE moment: `builtOnWriteIdx`, or `builtOnPreRun`. One number per write: a list on every read would grow with the square of a loop that appends and reads | `builtOnWriteIdx`, the write the view held. No read moment: the step read nothing |
+| `foottrace/cause` | an edge with `attribution: 'recorded-write'` from a node to the write just before it, and from that write forward. Its nodes are commits, so it asks the rule for each node by its own commit and names a node once | the same edge to the write the view held |
 
-What the rule does not cover is listed at the top of `builtOn.ts`. Two that matter: a producer other than `RecordFrame` that writes a `set` of an earlier value plus a change and neither marks it nor records a read (the record contract says what a producer owes), and a commit whose step looked at state at two different times with the key written in between (the bundle says when the step first and last looked, not which look a row was built on, so each write in between is a possible source). Where the idea comes from, and what is ours: [REFERENCES.md](REFERENCES.md).
+One case has more than one write under such a row: an array that does not show where the view sits. `viewAt` is an index of the log, and a log handed over as a slice, or with rows taken out, can hold bundles that say no index. The place of the view is then a range (`windowPlacement.ts`, as for a read). Each write inside it is named as a POSSIBLE source: an edge with `overlap` from the walk, `builtOnViewIdxs` on the timeline's write moment, `conservative` on the cause graph's node. None is called certain and none is left out.
+
+What the rule does not cover is listed at the top of `builtOn.ts`. The one that matters: a producer other than `RecordFrame` that writes a `set` of an earlier value plus a change and neither marks it nor records a read (the record contract says what a producer owes). Where the idea comes from, and what is ours: [REFERENCES.md](REFERENCES.md).
 
 ## Run evidence rides the same doors
 

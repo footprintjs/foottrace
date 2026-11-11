@@ -97,7 +97,7 @@ export const HONESTY_CODES = /* @__PURE__ */ Object.freeze({
     "A write this answer rests on did not replace the key's value but merged into it or appended to it, so the value is made of that write and of what the earlier writes had left: a walk back goes on to the commit that wrote the key before it (an edge marked builtOn, which no read by the step is behind), and a reader after it read all of them.",
   // ── a set row the writer built on its step's view — `ForwardEdge.basis`, `ForwardRead.builtOnView`, `CausalEdge.builtOn` (builtOn.ts) ─
   'built-on-view':
-    "No read by the step's code is behind this link, and the record's own row says it: the write is a set row the writer built on its step's view (TraceEntry.builtOnView), so it holds what the view held of the key with the step's own writes folded in, and the write the view held is under it (one of the writes it could have held, when the key was also written inside that commit's window).",
+    "No read by the step's code is behind this link, and the record's own row says it: the write is a set row the writer built on its step's view (TraceEntry.builtOnView), so it holds what the view held of the key with the step's own writes folded in, and the write the view held is under it (one of the writes it could have held, where the record does not show where that view sits).",
   // ── how an element's birth was attributed — `ElementBirth.basis` (slice/: AttributionBasis) ─
   'append-verb':
     "The engine recorded the element in an append row's tail (how commitValues: 'delta' records an array's growth), so the commit that added it is known exactly, not inferred.",

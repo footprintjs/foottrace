@@ -52,10 +52,12 @@
  * fold such a row does replace the value, so nothing a sibling committed in between is under it.
  * What IS in it is the value as the step's VIEW held it, with the step's own writes folded in. The
  * writer marks the row, and a reader takes the mark as a READ of the path, made for the step, at the
- * commit that carries the row ({@link readFromView}): its sources are the read rule's
- * (`readWindow.ts`), asked with that commit's own window. WHY A READ AND NOT A FOLD: a fold is dated
- * at the commit; the view was pinned before it. A step that ran beside others and then wrote such a
- * row holds what was there when its view was pinned, not what a sibling committed since.
+ * commit that carries the row ({@link readFromView}): its source is the read rule's
+ * (`readWindow.ts`), asked with the moment that commit's view was pinned (`CommitBundle.viewAt`).
+ * WHY A READ AND NOT A FOLD: a fold is dated at the commit; the view was pinned before it. A step
+ * that ran beside others and then wrote such a row holds what was there when its view was pinned,
+ * not what a sibling committed since. WHY A STAMP OF ITS OWN FOR THAT MOMENT, and not the step's
+ * read stamps: `CommitBundle.viewAt` says it.
  * Until the writer marked these rows they were read as plain replacements and the walk stopped at
  * them (found by this rule's own property test, and under the default encoding by its second reader).
  *
@@ -68,13 +70,10 @@
  *     tell (the record contract says what a producer owes here);
  *   - which FIELDS a merge reached. The walk follows every write back to the last one that replaced
  *     the value, so it can name a step whose field has since been overwritten;
- *   - which of a step's LOOKS at state a marked row was built on. A bundle says when its step first
- *     and last looked (`beganAt`, `sawUntil`), not when its view was pinned. With the key written
- *     between those two, each of those writes is a possible source of the row and none is the
- *     certain one. The other way round too: on a step's first bundle the pin of the view joins the
- *     step's read window, so a step that pinned its view by a write and read live state later has
- *     that read dated by the wider window. A stamp of its own for the pin would make both exact; it
- *     is not in the record;
+ *   - an array that does not show where a view sits. `viewAt` is an index of the log the bundle
+ *     was written to. In an array handed over with bundles that say no index (a slice, rows taken
+ *     out) the place of that index can be a range (`windowPlacement.ts`). A write inside the range
+ *     is then a possible source of the row, never the certain one and never left out;
  *   - the PROV export does not link a write to the write it was folded onto. It exports a `merge`
  *     or an `append` row as that write alone, and counts it under "final value reconstruction is
  *     outside stage one" (`prov/gaps.ts`).
@@ -92,9 +91,10 @@ type Written = Pick<CommitBundle, 'trace'>;
 /**
  * Does this commit hold a `set` row the WRITER built on the step's view (`TraceEntry.builtOnView`) on
  * `key`, around it or inside it? Then part of what `key` holds after the commit is what the VIEW
- * held there: the commit read the key from its view, for its step, and a reader owes it the sources
- * of that read (`readWindow.ts · readSourcesOf`, with THIS commit's window: a later commit of a step
- * has a view of its own, pinned after the earlier one).
+ * held there: the commit read the key from its view, for its step, and a reader owes it the source
+ * of that read (`readWindow.ts · readSourcesOf`, asked with THIS commit's view,
+ * `windowPlacement.ts · Places.view`: a later commit of a step has a view of its own, pinned after
+ * the earlier one).
  */
 export function readFromView(bundle: Written, key: string): boolean {
   for (const row of bundle.trace) if (isViewRow(row) && relation(row.path, key) !== undefined) return true;
@@ -108,6 +108,19 @@ export function readFromView(bundle: Written, key: string): boolean {
  */
 export function isViewRow(row: Pick<TraceEntry, 'verb' | 'builtOnView'>): boolean {
   return row.builtOnView === true && row.verb === 'set';
+}
+
+/**
+ * Does a bundle's `viewAt` have a row to date? The stamp dates the `set` rows the writer built on
+ * the step's view and nothing else. On a bundle with no such row it says something no reader can
+ * use, and no writer of ours puts it there, so a door that takes records from outside refuses that
+ * bundle as it refuses any stamp that cannot be one (`readWindow.ts · admitStamps`).
+ */
+export function viewStampFits(
+  placed: Pick<CommitBundle, 'viewAt'>,
+  rows: readonly Pick<TraceEntry, 'verb' | 'builtOnView'>[],
+): boolean {
+  return placed.viewAt === undefined || rows.some(isViewRow);
 }
 
 /**

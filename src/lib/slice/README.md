@@ -205,7 +205,8 @@ note. A conservative edge is never presented as an exact one.
 alone.** The writer sometimes stores a `set` of a whole value where the step
 only added, and marks it (`TraceEntry.builtOnView`; `memory/README.md` says
 when and why). The row holds what the view held of the key, so its commit is a
-reader of that value, dated by its own stamps:
+reader of that value, dated by the moment its view was pinned
+(`CommitBundle.viewAt`):
 
 ```
 a (written @0 by start)
@@ -214,12 +215,14 @@ a (written @0 by start)
       read by use (use#0) @2
 ```
 
-- the read is marked `builtOnView: true`. WHY: no code of the step read the
-  key, and a list of "who read this key" must be able to leave it out;
+- the read is marked `builtOnView: true`. WHY: no read by the step's code is
+  behind it at this commit, and a list of "who read this key" must be able
+  to leave it out. It speaks of the commit: a later commit of a step is
+  listed with the mark also when the step's code read the key at its first;
 - the one edge goes to that row, `basis: 'built-on-view'`: exact, because the
   row says it. Nothing else the commit wrote is fed by it;
-- where the step ALSO read the key, the step's read keeps the edge and the
-  basis it always had, and nothing is marked.
+- where the step's code ALSO read this value at this commit, that read keeps
+  the edge and the basis it always had, and nothing is marked.
 
 ### `keyTimeline(commitLog, key, keysRead, options?)` → `KeyTimeline`
 
@@ -247,16 +250,20 @@ on every read grows with the square of a key that is appended to and read in
 a loop. This is one number per write.
 
 A `set` row the writer built on its step's view (`TraceEntry.builtOnView`)
-says what that view held the same way: `builtOnWriteIdx` when one write is
-under it for certain. When the key was also written while that step ran, the
-record does not say which of those writes the view held, and
-`builtOnViewIdxs` lists them:
+says what that view held the same way: `builtOnWriteIdx`, the last write
+before the moment the view was pinned (`CommitBundle.viewAt`). Here Fill's
+view was pinned before Other committed:
 
 ```
 @0 write set — start (start#0)
 @1 write set — other (other#0)
-@2 write set — fill (fill#0) (built on the value its step's view held: commit 0 or 1)
+@2 write set — fill (fill#0) (added to the value of commit 0)
 ```
+
+Only an array that does not show where that moment sits (a slice, or rows
+taken out, so that bundles around it say no index) leaves several writes the
+view could have held. `builtOnViewIdxs` then lists them, and the line reads
+`(built on the value its step's view held: commit 0 or 1)`.
 
 Such a commit is a write moment only. Its step read nothing, so the timeline
 shows no read for it.

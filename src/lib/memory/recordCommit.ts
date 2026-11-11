@@ -16,8 +16,9 @@ import { captureFor } from '../read-sources/bindings.js';
  *      `stage`, `stageId`, `runtimeStageId`, then `untrackedSources`, `tags` and `phase`, each only
  *      when it has something to say (absent, never empty). `EventLog · record` appends `idx`. The
  *      names are names: no redaction reads them, and no encoding (`commitValues`) changes them.
- *      Last come `beganAt` and `sawUntil`, what the frame saw of the log ({@link seenOf}), each only
- *      when it says something: the frame knows them, the engine does not supply them.
+ *      Last come `beganAt` and `sawUntil`, what the frame saw of the log ({@link seenOf}), and
+ *      `viewAt`, when its view was pinned ({@link viewOf}), each only when it says something: the
+ *      frame knows them, the engine does not supply them.
  *   4. `about` goes to the log BESIDE the bundle, read with the names; it is never in the bundle, so
  *      it moves no byte of the log, the mirror or live state.
  *
@@ -60,7 +61,8 @@ type Names = Pick<CommitBundle, 'stage' | 'stageId' | 'runtimeStageId' | 'untrac
 /**
  * Record one commit (the module law). `payload` absent = the empty commit. `beganAt` and `sawUntil`
  * are the log's length at the earliest moment a read of the committing frame saw and at the latest,
- * when it read at all.
+ * when it read at all. `viewAt` is the log's length when the frame's view was pinned, handed over
+ * only for a payload that holds a row built on that view.
  */
 export function recordCommit(
   payload: CommitPayload | undefined,
@@ -68,12 +70,13 @@ export function recordCommit(
   into: CommitTargets,
   beganAt?: number,
   sawUntil?: number,
+  viewAt?: number,
 ): void {
   const names = namesOf(stamp);
   const about = stamp.about;
   const seen = seenOf(into.log?.length, beganAt, sawUntil);
   if (payload === undefined) {
-    into.log?.record(bundleOf({}, {}, [], [], names, seen), about);
+    into.log?.record(bundleOf({}, {}, [], [], names, seen, undefined), about);
     return;
   }
   const { redactedPaths, trace } = payload;
@@ -84,7 +87,7 @@ export function recordCommit(
   const updates = scrubPatch(payload.updates, redactedPaths);
   into.mirror?.applyPatch(overwrite, updates, trace);
   if (!into.log) return;
-  const bundle = bundleOf(overwrite, updates, [...redactedPaths], trace, names, seen);
+  const bundle = bundleOf(overwrite, updates, [...redactedPaths], trace, names, seen, viewOf(into.log.length, viewAt));
   into.log.record(bundle, about);
   if (capture && capture === captureFor(into.log) && sourceClock !== undefined && bundle.idx !== undefined) {
     capture.confirm(sourceClock, bundle.idx, trace, redactedPaths);
@@ -115,6 +118,15 @@ function seenOf(
   return sawUntil !== undefined && sawUntil > beganAt ? { beganAt, sawUntil } : { beganAt };
 }
 
+/**
+ * What the bundle about to take index `length` says of when its frame's view was pinned, or nothing.
+ * Kept only when a commit landed since: a view pinned on the state just before this commit is what a
+ * reader assumes of a bundle that says nothing, so such a bundle keeps its bytes.
+ */
+function viewOf(length: number, viewAt: number | undefined): number | undefined {
+  return viewAt === undefined || viewAt >= length ? undefined : viewAt;
+}
+
 /** THE bundle (law 3): the payload's four keys, the three names, then each optional name that has something to say. */
 function bundleOf(
   overwrite: MemoryPatch,
@@ -123,6 +135,7 @@ function bundleOf(
   trace: TraceEntry[],
   names: Names,
   seen: Seen | undefined,
+  viewAt: number | undefined,
 ): CommitBundle {
   const { stage, stageId, runtimeStageId, untrackedSources, tags, phase } = names;
   const bundle: CommitBundle = { overwrite, updates, redactedPaths, trace, stage, stageId, runtimeStageId };
@@ -133,6 +146,7 @@ function bundleOf(
     bundle.beganAt = seen.beganAt;
     if (seen.sawUntil !== undefined) bundle.sawUntil = seen.sawUntil;
   }
+  if (viewAt !== undefined) bundle.viewAt = viewAt;
   return bundle;
 }
 
