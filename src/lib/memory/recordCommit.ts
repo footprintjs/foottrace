@@ -59,7 +59,8 @@ type Names = Pick<CommitBundle, 'stage' | 'stageId' | 'runtimeStageId' | 'untrac
 
 /**
  * Record one commit (the module law). `payload` absent = the empty commit. `beganAt` and `sawUntil`
- * are the log's length at the committing frame's first look at state and at its latest, when it looked.
+ * are the log's length at the earliest moment a read of the committing frame saw and at the latest,
+ * when it read at all.
  */
 export function recordCommit(
   payload: CommitPayload | undefined,
@@ -97,12 +98,13 @@ type Seen = Required<Pick<CommitBundle, 'beganAt'>> & Pick<CommitBundle, 'sawUnt
  * What the bundle about to take index `length` says of its frame's looks at state, or nothing.
  *
  * WHY EACH IS KEPT ONLY SOMETIMES. A reader dates a step's reads at its own commit unless the bundle
- * says otherwise, and that is right whenever nothing was committed since the frame's first look: a
+ * says otherwise, and that is right whenever nothing was committed since the frame's earliest look: a
  * run whose steps go one after another says nothing here and keeps its bytes. `beganAt` is kept when
- * a commit did land since that first look: the step's reads are then dated there. `sawUntil` is kept
- * when the frame also looked at live state after such a commit: the commits from `beganAt` up to it
- * are the ones a read may have seen. A frame that only read what it saw when it began says
- * `beganAt` alone, and its reads stay exact however many siblings committed first.
+ * a commit did land since that look: the step's reads are then dated there. `sawUntil` is kept when
+ * a read of the frame also saw state after such a commit: the commits from `beganAt` up to it are
+ * the ones a read may have seen. A frame that only read what it saw when it began says `beganAt`
+ * alone, and its reads stay exact however many siblings committed first. A frame that read nothing
+ * says neither.
  */
 function seenOf(
   length: number | undefined,

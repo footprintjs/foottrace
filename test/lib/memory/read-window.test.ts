@@ -318,13 +318,27 @@ describe('when a step looked at state (windowOf)', () => {
     });
   });
 
-  it('a silent step at the end of its log is read in its own log, whatever log comes behind it', () => {
-    // The step is commit 2 of the first log (nothing after it there says otherwise). The second log's
-    // first commit says nothing about it.
-    const step = bundle({ beganAt: 1, sawUntil: 2 });
-    const joined = [bundle({ idx: 0 }), bundle({ idx: 1 }), step, bundle({ idx: 0 }), bundle({ idx: 1 })];
-    expect(windowOf(joined, 2)).toEqual({ start: 1, end: 2 });
-    expect(windowOf(joined.slice(0, 3), 2)).toEqual({ start: 1, end: 2 });
+  it('a silent step right before another log may belong to either: its window opens', () => {
+    // Found by the second reader (round 5). Two logs joined. The second: s0 (commit 0), the step (commit
+    // 2, began at 0, looked again until 2), its exit (commit 3). Only the exit says its index, so the
+    // join shows there, and the two silent bundles before it looked like commits 2 and 3 of the FIRST
+    // log: the step's window then ended before s0, and s0, its real source, was left out.
+    const step = bundle({ beganAt: 0, sawUntil: 2 });
+    const joined = [bundle({ idx: 0 }), bundle({ idx: 1 }), bundle({}), step, bundle({ idx: 3, phase: 'exit' })];
+    expect(windowOf(joined, 3)).toEqual({ start: 0, end: 3 });
+    // With the join shown before the step (s0 says 0), the step is placed in its own log.
+    const shown = joined.map((each, at) => (at === 2 ? bundle({ idx: 0 }) : each));
+    expect(windowOf(shown, 3)).toEqual({ start: 2, end: 3 });
+    // At the END of an array nothing says another log follows: the silent bundles follow the last index.
+    expect(windowOf(joined.slice(0, 4), 3)).toEqual({ start: 0, end: 2 });
+    const last = [bundle({ idx: 0 }), bundle({ idx: 1 }), bundle({ beganAt: 1, sawUntil: 2 })];
+    expect(windowOf(last, 2)).toEqual({ start: 1, end: 2 });
+    // The same step with a whole second log behind it: it could be that log's missing head.
+    expect(windowOf([...last, bundle({ idx: 0 }), bundle({ idx: 1 })], 2)).toEqual({ start: 0, end: 2 });
+    // A step that says its index after such a run is placed by it: the run before it is its log's head
+    // or the other log's tail, seen by the step either way.
+    const later = [...joined, bundle({ idx: 4, beganAt: 3 })];
+    expect(windowOf(later, 5)).toEqual({ start: 4, end: 4 });
   });
 
   it('more silent bundles than a hole can hold are not one log: the window opens', () => {
@@ -554,6 +568,38 @@ describe('the backward walk names what a step could have read, and nothing else'
       .list()
       .map((bundle) => (bundle.runtimeStageId === 'fast#0' && !bundle.phase ? silent[1] : bundle));
     expect(parentsVia(whole, 'slow#0', reads, 'x')).toEqual(['seed#0']);
+  });
+
+  it('two logs joined, the second with a silent head: its writer is not left out', () => {
+    // The second reader's case on the real writer. Leg 1: P0 writes b. Leg 2 starts from leg 1's state:
+    // s0 writes b, the step reads b before and after that, then commits twice.
+    const one = world();
+    const p0 = one.frame();
+    writeRoot(p0, 'b', 'from-P0');
+    commit(p0, 'P0');
+    const two = world({ b: 'from-P0' });
+    const step = two.frame(['runs', 'step']);
+    const seen = [step.read([], 'b')];
+    const s0 = two.frame();
+    writeRoot(s0, 'b', 'from-s0');
+    commit(s0, 's0');
+    seen.push(step.readLive('b'));
+    step.write(step.at([], 'copy'), seen.join('+'), 'set');
+    commit(step, 'step');
+    commit(step, 'step', 'exit');
+    expect(seen).toEqual(['from-P0', 'from-s0']);
+    const silent = (bundle: CommitBundle): CommitBundle => {
+      const { idx: _idx, ...rest } = bundle;
+      return rest as CommitBundle;
+    };
+    const [first, reader, exit] = two.log.list();
+    const reads = { 'step#0': ['b'] };
+    const both = ['P0#0 (replaced-while-running)', 's0#0 (written-while-running)'];
+    expect(parentsVia([...one.log.list(), first, reader, exit], 'step#0', reads, 'b')).toEqual(both);
+    // The head of leg 2 says no index, and neither does the step: both real sources are still named.
+    const joined = [...one.log.list(), silent(first), silent(reader), exit];
+    const named = parentsVia(joined, 'step#0', reads, 'b');
+    expect(named).toEqual(['P0#0 (written-while-running)', 's0#0 (written-while-running)']);
   });
 
   it("one damaged index in the step's own log: every earlier writer is possible, none is certain, none is left out", () => {

@@ -1,15 +1,19 @@
 /**
  * The writer's half of the read window: `CommitBundle.beganAt` and `CommitBundle.sawUntil`.
  *
- * A frame pins its view of state at its first look. When other frames commit between that look and its
- * own commit, the bundle says how many commits the log held at the look (`beganAt`): the step's reads
- * are dated there. When the frame also looks at LIVE state after such a commit, the bundle says how
- * many commits the log held at its latest look (`sawUntil`): the commits in between are the ones a read
- * may have seen. A run with no such overlap, which is every run whose steps go one after another,
- * keeps its bytes.
+ * A frame reads state from the view it pins at its first touch, and from live state for a key that
+ * view cannot answer. When other frames commit between the earliest moment one of its reads saw and
+ * its own commit, the bundle says how many commits the log held at that moment (`beganAt`): the
+ * step's reads are dated there. When a read of its saw a later moment too, the bundle says how many
+ * commits the log held at the latest (`sawUntil`): the commits in between are the ones a read may
+ * have seen. A run with no such overlap, which is every run whose steps go one after another, keeps
+ * its bytes.
+ *
+ * What counts is a READ. Pinning the view for a write, or for a report that only compares, is not
+ * one: a step that read early and wrote late did not read again at its write.
  *
  * Test types: unit (the real `RecordFrame`, `SharedMemory` and `EventLog`), boundary, and one source
- * pin (every read of shared state in the frame notes its look).
+ * pin (every read of shared state in the frame notes what it saw).
  */
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -93,15 +97,62 @@ describe('a commit bundle says when its step began, only when that matters', () 
     expect(bundle.beganAt).toBe(0);
   });
 
-  it('a step whose first act is a write is dated at that write', () => {
+  it('a read answered from a view that a write pinned is dated where the view was pinned', () => {
     const { log, frame } = world({ x: 0 });
     const writer = frame();
-    write(writer, 'y', 1); // first look: the log holds 0 commits
+    write(writer, 'y', 1); // the view is pinned: the log holds 0 commits
     otherCommits(frame, 'x', 1);
-    expect(writer.read([], 'x')).toBe(0); // its own view, pinned at the write
+    expect(writer.read([], 'x')).toBe(0); // answered from that view, however late it is asked
     commit(writer, 'writer');
     expect(log.list()[1]).toMatchObject({ beganAt: 0 });
     expect(stamps(log.list()[1])).toEqual(['beganAt']);
+  });
+
+  it('a step that only wrote read nothing: no stamp, whatever was committed while it ran', () => {
+    const { log, frame } = world({ x: 0 });
+    const writer = frame();
+    write(writer, 'y', 1);
+    otherCommits(frame, 'x', 1);
+    write(writer, 'z', 2);
+    commit(writer, 'writer');
+    expect(stamps(log.list()[1])).toEqual([]);
+    expect(Object.keys(log.list()[1])).toEqual([...KEYS, 'idx']);
+  });
+
+  it('a step that read early and wrote late did not read again at its write', () => {
+    // A subflow mount: its input mapping reads live state when it starts, and its output mapping
+    // writes when the subflow has run. The write pins the view; nothing is read from it.
+    const { log, frame } = world({ x: 'old' });
+    const mount = frame();
+    expect(mount.readGlobal('x')).toBe('old'); // the log holds 0 commits
+    otherCommits(frame, 'x', 'new');
+    write(mount, 'result', 'from-old');
+    commit(mount, 'mount');
+    expect(log.list()[1]).toMatchObject({ beganAt: 0 });
+    expect(stamps(log.list()[1])).toEqual(['beganAt']);
+  });
+
+  it('the reads are not always in the order of what they saw: the earliest and the latest are kept', () => {
+    const { log, frame } = world({ x: 0, y: 0 });
+    const step = frame();
+    write(step, 'z', 1); // pins the view: the log holds 0 commits
+    otherCommits(frame, 'x', 1);
+    expect(step.readLive('x')).toBe(1); // a live read: the log holds 1
+    expect(step.read([], 'y')).toBe(0); // then a read from the view pinned at 0
+    commit(step, 'step');
+    expect(log.list()[1]).toMatchObject({ beganAt: 0, sawUntil: 1 });
+  });
+
+  it('a report that only compares is not a read', () => {
+    const { log, frame } = world({ x: 'old' });
+    const step = frame();
+    expect(step.readGlobal('x')).toBe('old'); // the log holds 0 commits
+    otherCommits(frame, 'x', 'new');
+    expect(step.peek(['x'])).toBe('new'); // pins the view at 1, as a development-only check does
+    expect(step.baseAt(['x'])).toBe('new');
+    commit(step, 'step');
+    expect(stamps(log.list()[1])).toEqual(['beganAt']);
+    expect(log.list()[1].beganAt).toBe(0);
   });
 
   it('each round of a frame has its own first look: a continuation after a release starts again', () => {
@@ -254,23 +305,38 @@ describe('what a step can read while another commits (the reason a window is nee
   });
 });
 
-describe('every read of shared state in the frame notes its look', () => {
-  // A reader dates a step's reads from the two stamps alone. A read of `this.state` that did not note its
-  // look could show the step a commit the record says it never saw: the walk back would then leave out
-  // the real writer. So the frame's source is pinned: four reads, each beside an `observe()`.
+describe('every read of shared state in the frame notes what it saw', () => {
+  // A reader dates a step's reads from the two stamps alone. A read of `this.state` that noted nothing
+  // could show the step a commit the record says it never saw: the walk back would then leave out the
+  // real writer. So the frame's source is pinned: one place pins the view and notes when, three read live
+  // state and note "now", and the one read answered from the view notes when the view was pinned.
   const source = readFileSync(resolve(__dirname, '../../../src/lib/memory/RecordFrame.ts'), 'utf8').split('\n');
-  const reads = source.flatMap((line, at) => (/this\.state\.get(State|Value)\(/.test(line) ? [at] : []));
+  const at = (pattern: RegExp) => source.flatMap((line, index) => (pattern.test(line) ? [index] : []));
 
-  it('there are exactly four, and none reaches state another way', () => {
-    expect(reads).toHaveLength(4);
+  it('there are exactly four reads of state, and none reaches state another way', () => {
+    expect(at(/this\.state\.get(State|Value)\(/)).toHaveLength(4);
     const others = source.filter((line) => /this\.state\./.test(line) && !/this\.state\.get(State|Value)\(/.test(line));
     expect(others).toEqual([]);
   });
 
-  it('each sits beside a call to observe()', () => {
-    for (const at of reads) {
-      const around = source.slice(at - 1, at + 2).join('\n');
-      expect(around, `RecordFrame.ts line ${at + 1}`).toMatch(/this\.observe\(\);/);
+  it('the one place that pins the view notes when, and that alone is not a read', () => {
+    const pins = at(/this\.state\.getState\(\)/);
+    expect(pins).toHaveLength(1);
+    expect(source[pins[0] + 1]).toMatch(/this\.#pinnedAt = this\.log\?\.length;/);
+    expect(source[pins[0] + 1]).not.toMatch(/sawAt/);
+  });
+
+  it('each read of live state notes "now" on the line before it', () => {
+    const live = at(/this\.state\.getValue\(/);
+    expect(live).toHaveLength(3);
+    for (const line of live) {
+      expect(source[line - 1], `RecordFrame.ts line ${line + 1}`).toMatch(/this\.sawAt\(this\.log\?\.length\);/);
     }
+  });
+
+  it('the read answered from the view notes when the view was pinned, once', () => {
+    const view = at(/this\.sawAt\(this\.#pinnedAt\);/);
+    expect(view).toHaveLength(1);
+    expect(source[view[0] + 1]).toMatch(/return fromSnapshot;/);
   });
 });

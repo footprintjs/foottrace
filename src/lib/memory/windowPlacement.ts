@@ -23,7 +23,9 @@
  *      in index than in position, or a first said index larger than its position) the silent
  *      bundles there could sit anywhere in the hole, and the two readings differ. Nothing after it
  *      says an index: it is taken to follow the bundle before it directly, so a log where no bundle
- *      says an index (built by hand) is read by position.
+ *      says an index (built by hand) is read by position. One case is not taken on trust: silent
+ *      bundles right before a new stretch may be the last of their log or the first of the next. A
+ *      step that sits there has its window opened over everything before it.
  *   3. PLACING. When the array is unbroken around the step, positions and indices move together: the
  *      place is one subtraction away and one look confirms it. Otherwise the indices still rise along
  *      the stretch, and the place is found by halving. The window STARTS at the first bundle that
@@ -59,17 +61,24 @@
  *
  * NOT COVERED, because nothing in the array shows it:
  *   - a bundle that says a wrong index which still rises is believed;
- *   - bundles that say no index AFTER the last one that does (or a log where none does) are taken to
- *     follow one another directly. If bundles were taken out among them, they are older or newer
- *     than they are read;
+ *   - bundles that say no index at the END OF THE ARRAY, after the last one that does (or an array
+ *     where none does), are taken to follow one another directly. If bundles were taken out among
+ *     them, or they are the first bundles of another log whose later bundles were cut away, they are
+ *     older or newer than they are read;
  *   - the array is taken to hold the step's history. A reader names the last writer that is IN the
  *     array: a writer that was taken out, or that sits in a part of another log that was cut away
  *     before the logs were joined, cannot be named, and indices that still rise across such a join
  *     do not show it. That is so with or without a window; it is the caller's claim, not checked here;
  *   - the stamps sit on a step's FIRST bundle. An array without that bundle has lost them, and the
  *     step's later bundles are read as any bundle with no stamp.
- * A door that takes records from outside keeps a bundle's index only when it rises past the copy
- * before it, so every admitted log is one stretch (`readWindow.ts · admitStamps`).
+ *
+ * WHY A DOOR READS STRICTER THAN THIS FILE. An array of typed bundles may be several logs one after
+ * another (the legs of a paused run), so here an index that does not rise starts a new stretch, and a
+ * stretch that holds the step's start is trusted as its log. A door that takes a record from outside
+ * (the cause graph, the PROV export) is handed ONE log by contract. There an index that does not rise
+ * is damage, never a join: the door leaves it off its copy, the bundles around it pin the place, and
+ * every admitted log is one stretch (`readWindow.ts · admitStamps`). The same damaged array given to
+ * this file as typed bundles is read as two logs; that cannot be told apart here.
  */
 
 import { isCount, isIndex, type ReadWindow } from './readWindow.js';
@@ -128,16 +137,22 @@ function layoutOf(log: readonly CommitBundle[]): Layout {
 /**
  * The latest reading of every position (step 2 of the file header): a silent bundle sits before the
  * bundle after it in its stretch. Walked from the end, so a run of silent bundles counts back from
- * the bundle that says an index after them; a run with none after it keeps its earliest reading.
+ * the bundle that says an index after them.
+ *
+ * A run with nothing after it in its stretch has no such bound. At the end of the ARRAY it keeps its
+ * earliest reading: the bundles are taken to follow one another directly. Where ANOTHER STRETCH
+ * follows, they cannot be told from the first bundles of that next log, which would give them other
+ * indices altogether: their latest reading is `Infinity`, which says "no place a stamp can be
+ * counted against" (`windowsOf` opens the window for a step that sits there).
  */
 function latestOf(earliest: readonly number[], starts: readonly number[], silent: readonly number[]): number[] {
   const latest = earliest.slice();
   let stretch = starts.length - 1;
   for (let k = silent.length - 1; k >= 0; k--) {
     const at = silent[k];
+    if (at + 1 === latest.length) continue;
     while (starts[stretch] > at + 1) stretch--;
-    const endsItsStretch = at + 1 === latest.length || starts[stretch] === at + 1;
-    if (!endsItsStretch) latest[at] = latest[at + 1] - 1;
+    latest[at] = starts[stretch] === at + 1 ? Infinity : latest[at + 1] - 1;
   }
   return latest;
 }
@@ -200,7 +215,9 @@ export function windowsOf(log: readonly CommitBundle[]): (first: number) => Read
     const own = latest[first];
     // Step 4: can the stretch be trusted to hold the step's history from index `from` on?
     const heldFrom = (from: number) => low === 0 || latest[low] <= from;
-    if (!isCount(beganAt) || beganAt >= own) return { start: heldFrom(0) ? low : 0, end: first };
+    // A stamp that fits no place the step can have, or a step with no place at all: it says no index and
+    // another log follows it, so it may be the last bundle of this log or one of the first of that one.
+    if (!isCount(beganAt) || beganAt >= own || own === Infinity) return { start: heldFrom(0) ? low : 0, end: first };
     if (!heldFrom(beganAt)) return { start: 0, end: first };
     // Could sit at `beganAt` or later: from here on a commit may not have been in the step's first view.
     const start = firstFrom(latest, low, first, beganAt);

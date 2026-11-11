@@ -9,13 +9,15 @@
  * source and leaves out the step whose value was actually read.
  *
  * WHAT THE RECORD SAYS. A step reads state in two ways (`RecordFrame`): from the view it pins at its
- * first look, which never changes under it, and, for a key that view cannot answer, from live state
- * as it stands at that moment. The writer notes the log's length at the step's first look and at its
- * latest look at live state, and puts them on the step's first bundle when they say more than
- * "everything before my own commit":
- *   - `beganAt`: other steps committed between the step's first look and its own commit. The step's
- *     reads are dated at `beganAt`.
- *   - `sawUntil`: the step looked at live state again after such a commit. Commits `beganAt` to
+ * first touch, which never changes under it, and, for a key that view cannot answer, from live state
+ * as it stands at that moment. Each read is a LOOK at the log as it stood when the value it returned
+ * was current: for a read from the view, when the view was pinned; for a read of live state, now.
+ * (Pinning the view for a write is not a look: nothing was read.) The writer notes the log's length
+ * at the step's earliest look and at its latest, and puts them on the step's first bundle when they
+ * say more than "everything before my own commit":
+ *   - `beganAt`: other steps committed between the step's earliest look and its own commit. The
+ *     step's reads are dated at `beganAt`.
+ *   - `sawUntil`: the step also looked later, after such a commit. Commits `beganAt` to
  *     `sawUntil - 1` are its WINDOW: the ones a later look may have read.
  *
  * THE RULE. A read of `key` by a step saw

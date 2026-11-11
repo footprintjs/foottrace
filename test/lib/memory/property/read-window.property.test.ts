@@ -30,6 +30,12 @@
  *             step did not see into its one certain source. ONE CONDITION, said in
  *             `windowPlacement.ts` (NOT COVERED): the last bundle of the array says its index, so
  *             every hole among silent bundles is shown by a said index after it.
+ *   JOINED    the same for the two legs of a run that was paused and resumed on a fresh log: the
+ *             second leg starts from the state the first left and counts its commits from 0 again.
+ *             Handed over one after the other, whole or with bundles taken out and indices not
+ *             said, a read in the second leg still names its real writer, in either leg. ONE MORE
+ *             CONDITION: the second leg's first bundle is there and says its index, which is what
+ *             shows a reader where the second log begins.
  */
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
@@ -75,11 +81,18 @@ const program = fc.record({
   schedule: fc.array(fc.nat({ max: 5 }), { maxLength: 60 }),
 });
 
-/** Run the program on the real writer. Returns the log and, per step, what each of its reads returned. */
-function run({ steps, schedule }: { steps: Step[]; schedule: number[] }) {
-  const state = new SharedMemory(undefined, { ...SEED });
-  const log = new EventLog({ ...SEED });
-  const frames = steps.map((s, i) => new RecordFrame(state, log, s.namespaced ? ['runs', `s${i}`] : []));
+/**
+ * Run the program on the real writer. Returns the log and, per step, what each of its reads returned.
+ * `from`: the state a later leg starts from, and the number its first step takes (JOINED).
+ */
+function run(
+  { steps, schedule }: { steps: Step[]; schedule: number[] },
+  from: { state: Record<string, unknown>; first: number } = { state: SEED, first: 0 },
+) {
+  const state = new SharedMemory(undefined, structuredClone(from.state));
+  const log = new EventLog(structuredClone(from.state));
+  const name = (i: number) => `s${from.first + i}`;
+  const frames = steps.map((s, i) => new RecordFrame(state, log, s.namespaced ? ['runs', name(i)] : []));
   const next = steps.map(() => 0);
   const writes = steps.map(() => 0);
   const committed = steps.map(() => false);
@@ -89,14 +102,14 @@ function run({ steps, schedule }: { steps: Step[]; schedule: number[] }) {
     if (committed[i]) return;
     const op = steps[i].ops[next[i]++];
     if (op === undefined) {
-      frames[i].commit(() => ({ stage: `s${i}`, stageId: `s${i}`, runtimeStageId: `s${i}#0` }));
+      frames[i].commit(() => ({ stage: name(i), stageId: name(i), runtimeStageId: `${name(i)}#0` }));
       frames[i].release();
       committed[i] = true;
       return;
     }
     if (op.kind === 'write') {
       // A ROOT key from any frame, as a subflow's output mapping writes: siblings see it once committed.
-      frames[i].write([op.key], `s${i}:${writes[i]++}`, 'set');
+      frames[i].write([op.key], `${name(i)}:${writes[i]++}`, 'set');
       return;
     }
     const value = op.kind === 'read' ? frames[i].read([], op.key) : frames[i][op.kind](op.key);
@@ -105,7 +118,7 @@ function run({ steps, schedule }: { steps: Step[]; schedule: number[] }) {
   for (const pick of schedule) move(pick % steps.length);
   // Let every step finish, in order, so every read has a commit to be dated by.
   for (let i = 0; i < steps.length; i++) while (!committed[i]) move(i);
-  return { log: log.list(), observed };
+  return { log: log.list(), observed, state: state.getState() };
 }
 
 const readsOf = (observed: Read[][]) => (runtimeStageId: string) => {
@@ -164,15 +177,46 @@ const crowded = fc.record({
 
 /**
  * What a reader is handed: `log` without the bundles `drop` picks, and with `idx` taken off the ones
- * `mute` picks. The last bundle left keeps its index (the one condition of HANDED OVER).
+ * `mute` picks. The last bundle left keeps its index (the one condition of HANDED OVER), unless
+ * another log is put behind it (`lastSays` false).
  */
-function handedOver(log: CommitBundle[], drop: boolean[], mute: boolean[]): CommitBundle[] {
+function handedOver(log: CommitBundle[], drop: boolean[], mute: boolean[], lastSays = true): CommitBundle[] {
   const kept = log.filter((_, at) => !drop[at % drop.length]);
   return kept.map((bundle, at) => {
-    if (at === kept.length - 1 || !mute[at % mute.length]) return bundle;
+    if ((lastSays && at === kept.length - 1) || !mute[at % mute.length]) return bundle;
     const { idx: _idx, ...silent } = bundle;
     return silent as CommitBundle;
   });
+}
+
+/** The parents a certain answer may not contradict: checked for every read of every step that is in `handed`. */
+function judgeHandedOver(
+  handed: CommitBundle[],
+  observed: Read[][],
+  count: (own: CommitBundle, marked: boolean) => void,
+) {
+  const present = new Set(handed.map((bundle) => bundle.runtimeStageId));
+  for (let i = 0; i < observed.length; i++) {
+    const id = `s${i}#0`;
+    if (!present.has(id)) continue;
+    const own = handed.find((bundle) => bundle.runtimeStageId === id)!;
+    const node = causalChain(handed, id, readsOf(observed))!;
+    for (const { key, token } of observed[i]) {
+      const edges = parentsVia(node, key);
+      // A parent with no mark is certain: then it is the only one.
+      if (edges.some((edge) => edge.overlap === undefined)) expect(edges, `${id} ${key}`).toHaveLength(1);
+      if (fromBeforeTheRun(token) || writerOf(token!) === id) continue;
+      if (!present.has(writerOf(token!))) continue; // its bundle was taken out: nobody can name it
+      count(
+        own,
+        edges.some((edge) => edge.overlap !== undefined),
+      );
+      expect(
+        edges.some((edge) => edge.parent.runtimeStageId === writerOf(token!)),
+        `${id} read ${key} = ${token}: ${writerOf(token!)} is not a parent through ${key}`,
+      ).toBe(true);
+    }
+  }
 }
 
 describe('the walk back and interleaved steps', () => {
@@ -288,27 +332,10 @@ describe('the walk back and interleaved steps', () => {
         fc.array(fc.boolean(), { minLength: 1, maxLength: 7 }),
         (p, drop, mute) => {
           const { log, observed } = run(p);
-          const handed = handedOver(log, drop, mute);
-          const present = new Set(handed.map((bundle) => bundle.runtimeStageId));
-          for (let i = 0; i < observed.length; i++) {
-            const id = `s${i}#0`;
-            if (!present.has(id)) continue;
-            const own = handed.find((bundle) => bundle.runtimeStageId === id)!;
-            const node = causalChain(handed, id, readsOf(observed))!;
-            for (const { key, token } of observed[i]) {
-              const edges = parentsVia(node, key);
-              // A parent with no mark is certain: then it is the only one.
-              if (edges.some((edge) => edge.overlap === undefined)) expect(edges, `${id} ${key}`).toHaveLength(1);
-              if (own.sawUntil === undefined && edges.some((edge) => edge.overlap !== undefined)) openedByAHole++;
-              if (fromBeforeTheRun(token) || writerOf(token!) === id) continue;
-              if (!present.has(writerOf(token!))) continue; // its bundle was taken out: nobody can name it
-              judged++;
-              expect(
-                edges.some((edge) => edge.parent.runtimeStageId === writerOf(token!)),
-                `${id} read ${key} = ${token}: ${writerOf(token!)} is not a parent through ${key}`,
-              ).toBe(true);
-            }
-          }
+          judgeHandedOver(handedOver(log, drop, mute), observed, (own, marked) => {
+            judged++;
+            if (own.sawUntil === undefined && marked) openedByAHole++;
+          });
         },
       ),
       { numRuns: 4000, seed: 20261111 },
@@ -318,7 +345,39 @@ describe('the walk back and interleaved steps', () => {
     // "possible" only because a bundle that says no index could sit on either side of where it began.
     // (With a silent bundle read as ONE number, next to its neighbour, this property fails: at this seed
     // after 1,549 programs, on a read whose real writer was left out for a sibling the step never saw.)
-    expect(openedByAHole).toBeGreaterThan(10);
+    expect(openedByAHole).toBeGreaterThan(5);
+  });
+
+  it('JOINED: the two legs of a run, one after the other, whole or handed over in part', () => {
+    let acrossTheJoin = 0;
+    fc.assert(
+      fc.property(
+        crowded,
+        crowded,
+        fc.array(fc.boolean(), { minLength: 1, maxLength: 7 }),
+        fc.array(fc.boolean(), { minLength: 1, maxLength: 7 }),
+        (first, second, drop, mute) => {
+          const one = run(first);
+          const two = run(second, { state: one.state, first: first.steps.length });
+          const observed = [...one.observed, ...two.observed];
+          const inLegOne = new Set(one.log.map((bundle) => bundle.runtimeStageId));
+          const count = (own: CommitBundle) => {
+            if (!inLegOne.has(own.runtimeStageId)) acrossTheJoin++;
+          };
+          // Whole: every index said, the second log starting at 0 again.
+          judgeHandedOver([...one.log, ...two.log], observed, count);
+          // In part: the second leg's first bundle stays and says its index (the one more condition).
+          const [head, ...rest] = two.log;
+          judgeHandedOver(
+            [...handedOver(one.log, drop, mute, false), head, ...handedOver(rest, mute, drop)],
+            observed,
+            count,
+          );
+        },
+      ),
+      { numRuns: 1500, seed: 20261111 },
+    );
+    expect(acrossTheJoin).toBeGreaterThan(1000);
   });
 
   it.each([

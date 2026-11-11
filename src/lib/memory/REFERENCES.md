@@ -9,7 +9,7 @@ Where the ideas in this folder come from, and what is ours. A source is listed o
 - Manu Sridharan, Stephen J. Fink, Rastislav Bodík. *Thin Slicing.* PLDI 2007, 112–122. https://doi.org/10.1145/1250734.1250748
   Taken: follow by default only what produced the value (data edges). The paper leaves the reasons a statement ran (control) out of the slice and adds them back on request; keeping them in the answer as a separate, labelled kind of edge is ours.
 
-## When a step read (`readWindow.ts`, `RecordFrame.ts · observe`, `recordCommit.ts · seenOf`)
+## When a step read (`readWindow.ts`, `RecordFrame.ts · sawAt`, `recordCommit.ts · seenOf`)
 
 The problem: a log is ordered by commit, and steps that run side by side do not read in that order.
 
@@ -26,6 +26,6 @@ The problem: a log is ordered by commit, and steps that run side by side do not 
 Ours, not taken from a source:
 
 - The two numbers go on the commit record only when they say something, so a run whose steps go one after another keeps its bytes.
-- The window ends at the step's last look at LIVE state, not at its commit. The two read tiers of `RecordFrame` make that possible, and it is why a step that only read its first view answers exactly however many siblings committed before it.
+- The window ends at the latest moment one of the step's READS saw, not at its commit, and a write is not a read. The two read tiers of `RecordFrame` make that possible, and it is why a step that only read its first view answers exactly however many siblings committed before it.
 - Every source of a read whose key was written in the window is marked as possible on the edge itself (`ReadOverlap`), with the reason.
 - One rule serves the backward walk, the forward walk, the key timeline, the cause graph and the PROV export.

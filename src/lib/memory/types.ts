@@ -139,11 +139,12 @@ export interface CommitBundle {
    */
   phase?: CommitPhase;
   /**
-   * How many commits the log held when this step FIRST LOOKED at state (its first read or write) —
-   * stamped by the writer (`RecordFrame`), which pins its view of state at that moment. ABSENT when
-   * nothing was committed between that first look and this commit: then the step saw every commit
-   * before its own, which is every step of a run whose steps go one after another, so such a log
-   * keeps its bytes.
+   * How many commits the log held at the EARLIEST moment one of this step's reads saw — stamped by
+   * the writer (`RecordFrame`). A read answered from the view the step pinned saw the moment the view
+   * was pinned; a read of live state saw the moment it was made. ABSENT when the step read nothing,
+   * or when nothing was committed between that moment and this commit: then the step saw every
+   * commit before its own, which is every step of a run whose steps go one after another, so such a
+   * log keeps its bytes.
    *
    * PRESENT means other steps committed while this one ran, and it DATES THE STEP'S READS: what the
    * step read is state as it stood at `beganAt`, not as it stood at this commit, unless
@@ -156,13 +157,12 @@ export interface CommitBundle {
    */
   beganAt?: number;
   /**
-   * How many commits the log held when this step LAST LOOKED at committed state as it then stood: a
-   * read answered from live state, not from the view the step pinned when it began. Present only
-   * together with `beganAt` and only when greater: the step looked again after another step had
-   * committed. Commits `beganAt` to `sawUntil - 1` are the step's READ WINDOW: the ones such a look
-   * may have read and the first view did not hold. The record keeps which keys a step read, not when
-   * it read each, so a read of a key saw the last write before `beganAt` or one of the writes of
-   * that key in the window.
+   * How many commits the log held at the LATEST moment one of this step's reads saw. Present only
+   * together with `beganAt` and only when greater: a read of the step saw state as it stood after
+   * another step had committed. Commits `beganAt` to `sawUntil - 1` are the step's READ WINDOW: the
+   * ones such a read may have seen and the earliest did not. The record keeps which keys a step
+   * read, not when it read each, so a read of a key saw the last write before `beganAt` or one of
+   * the writes of that key in the window.
    *
    * ABSENT with `beganAt` present: every read of the step saw state as it stood at `beganAt`.
    */

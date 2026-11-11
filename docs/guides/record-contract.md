@@ -35,8 +35,8 @@ One bundle is one stage's commit: what it wrote, as the log spells it.
 | `tags` | array of strings | no | Names declared for the stage at build time. Never a value. |
 | `untrackedSources` | array of `'args'`, `'env'`, `'silent'` | no | Read paths the stage consumed without read tracking. Absent when the stage used none. The causal readers report the slice as possibly incomplete at such a stage. |
 | `phase` | `'exit'` or `'repeat'` | no | Which continuation of a stage's execution this bundle is. The first bundle of a `runtimeStageId` is the stage's own and has no `phase`. `'exit'` is a subflow mount's exit after its merge-back bundle; `'repeat'` is a fork child's fan-out settle. Readers group bundles by `runtimeStageId` and read this field. |
-| `beganAt` | whole number | no | How many commits the log held when the stage first looked at state. Written only when another stage committed between that look and this commit. It dates the stage's reads: they saw state as it stood at `beganAt`, not at this commit. |
-| `sawUntil` | whole number | no | How many commits the log held when the stage last read live state. Written only with `beganAt` and only when greater. Commits `beganAt` to `sawUntil - 1` are the stage's read window: a read may have seen any of them. |
+| `beganAt` | whole number | no | How many commits the log held at the earliest moment one of the stage's reads saw. Written only when the stage read state and another stage committed between that moment and this commit. It dates the stage's reads: they saw state as it stood at `beganAt`, not at this commit. |
+| `sawUntil` | whole number | no | How many commits the log held at the latest moment one of the stage's reads saw. Written only with `beganAt` and only when greater. Commits `beganAt` to `sawUntil - 1` are the stage's read window: a read may have seen any of them. |
 | `stage`, `stageId` | | no | Advisory. |
 | `idx` | whole number | no | The bundle's commit index in the log it was written to. Replay and the cursor derive the commit index from position and do not read it. The read window does: the commits a stage had seen are the ones whose `idx` is below its `beganAt`, so a log handed over as a slice, or without some of its bundles, still reads right. A producer that writes `beganAt` writes `idx` on every bundle, rising along the log, each a whole number up to 2^52. A bundle without `idx` is placed by the bundles around it that have one: past the bundle before it, and before the next one that says an index. Where those two show that bundles are missing, it can be any commit in the hole, and a reader counts it inside a stage's window whenever it could be there. A log where no bundle has one is read by position. |
 
@@ -93,9 +93,10 @@ use, remote commitment or complete external ancestry.
    before its commit".** A log is ordered by commit, and stages that run side
    by side do not read in that order. A producer whose stages run one after
    another writes neither `beganAt` nor `sawUntil`. A producer that runs
-   stages side by side writes `beganAt` on a stage that another stage
-   committed under, and `sawUntil` when that stage read live state again after
-   such a commit. `RecordFrame` does both for a writer that uses it. A producer
+   stages side by side writes `beganAt` on a stage that read state and that
+   another stage committed under, and `sawUntil` when a read of that stage saw
+   state again after such a commit. What counts is a read: a stage that only
+   wrote says neither. `RecordFrame` does both for a writer that uses it. A producer
    that leaves them out gets every read dated at its stage's commit: a read
    made before a sibling's commit is then attributed to that sibling.
 
