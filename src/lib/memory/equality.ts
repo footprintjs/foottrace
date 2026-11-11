@@ -351,7 +351,9 @@ function equalMaps(a: Map<unknown, unknown>, b: Map<unknown, unknown>, seen: See
  * worst case, each pair of members compared once. One shape costs more, and
  * the answers stay exact: a member that leads back to ITSELF, tried against a
  * candidate that does not match, takes the `LEANING` answers found inside that
- * try with it, and the next candidate compares those parts again.
+ * try with it, and the next candidate compares those parts again. Nested, this
+ * repeats at each level, so the cost can grow exponentially with the depth of
+ * such sets.
  */
 function equalSets(a: Set<unknown>, b: Set<unknown>, seen: SeenPairs, opaque: OpaqueRule): boolean {
   if (a.size !== b.size) return false;
