@@ -148,6 +148,29 @@ describe('deepEqual — values that point back at themselves', () => {
     expect(deepEqual(a.inner, b.inner)).toBe(false);
   });
 
+  it('a "different" that rested on a wrong guess about a pair above it is not kept as a fact', () => {
+    // A and B are equal: A = { {p: h1}, {p: h2x} }, B = { {p: h2}, {p: h1x} }, where h1 ~ h1x and
+    // h2x ~ h2 exactly because A ~ B. But h1 and h2 differ (their `tail`).
+    const A = new Set<unknown>();
+    const B = new Set<unknown>();
+    const h1 = { s: A, tail: 1 };
+    const h2 = { s: B, tail: 2 };
+    const h1x = { s: B, tail: 1 };
+    const h2x = { s: A, tail: 2 };
+    A.add({ p: h1 }).add({ p: h2x });
+    B.add({ p: h2 }).add({ p: h1x });
+    expect(deepEqual(A, B)).toBe(true);
+    expect(deepEqual(h1, h2)).toBe(false);
+
+    // Comparing h1 with h2 walks into (A, B) while (h1, h2) is still assumed equal. Under that wrong
+    // assumption the set search pairs {p: h1} with {p: h2}, cannot pair the rest, and answers
+    // "different" for (A, B). That answer must not be remembered: (A, B) is asked again below,
+    // where the right answer is "equal".
+    const a = new Set<unknown>([{ probe: h1 }, { probe: h2x }, { w: A }]);
+    const b = new Set<unknown>([{ probe: h2 }, { probe: h1x }, { w: B }]);
+    expect(deepEqual(a, b)).toBe(true);
+  });
+
   it('a map that holds a set that holds the map', () => {
     const make = (extra: number) => {
       const map = new Map<string, unknown>();

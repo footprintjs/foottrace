@@ -107,21 +107,23 @@ export type OpaqueRule = 'identity' | 'copies';
  *   - **still being compared** (its depth on the stack, `>= 0`). Meeting it
  *     again is a cycle: the pair is taken as equal BY ASSUMPTION, and the
  *     comparison that met it remembers how far up the assumption reaches
- *     ({@link low}).
- *   - **`PROVEN`** equal: compared to the end with no assumption left open
- *     above it. A fact — true whatever happens to the comparisons around it.
- *   - **`DISPROVEN`**: found different. Also a fact: an assumption can only
- *     make two values look MORE equal, never less.
+ *     ({@link SeenPairs.low}).
+ *   - **`PROVEN`** equal, or **`DISPROVEN`**: compared to the end with nothing
+ *     in the comparison leaning on a pair above it. A fact — true whatever
+ *     happens to the comparisons around it.
  *
- * A pair found equal only under an assumption about a pair further up is not
- * stored at all: it is true if that pair turns out equal, and by then it is no
- * longer needed. Nothing provisional is ever remembered, which is what makes a
- * set safe: a set tries a member against candidates that do not match, so a
- * `false` there does not end the comparison, and anything such a failed try
- * left behind would be read later as "already known equal".
+ * An answer that DID lean on a pair further up is not stored at all, whether it
+ * was "equal" or "different". "Equal" is then only as true as that pair. And
+ * "different" can be an accident of the search: a set pairs its members
+ * greedily, and a member paired on a wrong assumption can leave another member
+ * with no partner. Nothing provisional is ever remembered, which is what makes
+ * a set safe: it tries a member against candidates that do not match, so a
+ * `false` there does not end the comparison, and anything provisional such a
+ * try left behind would be read later as known.
  *
- * The two facts are also what keep the walk linear on a value that shares
- * sub-objects: each pair is compared once, whichever way a set search goes.
+ * The facts are also what keep the walk linear on a value that shares
+ * sub-objects without cycles: nothing is ever assumed there, so each pair is
+ * compared once, whichever way a set search goes.
  */
 interface SeenPairs {
   /** `a → b → state` (see above). */
@@ -188,12 +190,13 @@ function equalContainers(a: any, b: any, kind: ValueKind, seen: SeenPairs | unde
   seen.low = Infinity;
   const equal = equalParts(a, b, kind, seen, opaque);
   seen.depth = depth;
-  // Equal with every assumption it made closed at this pair or below it: a fact. Equal under an
-  // assumption about a pair further up: not stored, and that pair is told. Different: a fact.
-  const open = equal && seen.low < depth;
-  if (open) partners.delete(b);
-  else partners.set(b, equal ? PROVEN : DISPROVEN);
-  seen.low = open ? Math.min(outerLow, seen.low) : outerLow;
+  // The answer is a fact when nothing in this comparison leaned on a pair above it (a pair that
+  // met ITSELF again is closed here: equal on the assumption that it is equal is equal). An answer
+  // that did lean on one is not stored, either way, and that pair is told through `low`.
+  const closed = seen.low >= depth;
+  if (closed) partners.set(b, equal ? PROVEN : DISPROVEN);
+  else partners.delete(b);
+  seen.low = closed ? outerLow : Math.min(outerLow, seen.low);
   return equal;
 }
 
