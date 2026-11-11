@@ -201,6 +201,26 @@ With the dial off there is only stage-level co-occurrence: every edge is
 stamped `basis: 'stage'` and the slice carries a `'conservative-fed-edges'`
 note. A conservative edge is never presented as an exact one.
 
+**A `set` row the writer built on its step's view is a reader for itself
+alone.** The writer sometimes stores a `set` of a whole value where the step
+only added, and marks it (`TraceEntry.builtOnView`; `memory/README.md` says
+when and why). The row holds what the view held of the key, so its commit is a
+reader of that value, dated by its own stamps:
+
+```
+a (written @0 by start)
+  held by fill (fill#0) @1 (in a row the writer built on its view)
+  → fed [exact, built on the view] a (written @1 by fill)
+      read by use (use#0) @2
+```
+
+- the read is marked `builtOnView: true`. WHY: no code of the step read the
+  key, and a list of "who read this key" must be able to leave it out;
+- the one edge goes to that row, `basis: 'built-on-view'`: exact, because the
+  row says it. Nothing else the commit wrote is fed by it;
+- where the step ALSO read the key, the step's read keeps the edge and the
+  basis it always had, and nothing is marked.
+
 ### `keyTimeline(commitLog, key, keysRead, options?)` → `KeyTimeline`
 
 The whole life of one key in commit order: every write (with its verb) and
@@ -225,6 +245,21 @@ The read names the write it saw; follow `builtOnWriteIdx` from there to reach
 every write the value is made of. WHY on the write and not on the read: a list
 on every read grows with the square of a key that is appended to and read in
 a loop. This is one number per write.
+
+A `set` row the writer built on its step's view (`TraceEntry.builtOnView`)
+says what that view held the same way: `builtOnWriteIdx` when one write is
+under it for certain. When the key was also written while that step ran, the
+record does not say which of those writes the view held, and
+`builtOnViewIdxs` lists them:
+
+```
+@0 write set — start (start#0)
+@1 write set — other (other#0)
+@2 write set — fill (fill#0) (built on the value its step's view held: commit 0 or 1)
+```
+
+Such a commit is a write moment only. Its step read nothing, so the timeline
+shows no read for it.
 
 ### `sliceToJSON(slice)` / `formatSlice(slice)` — the ONLY safe serializations
 
@@ -325,7 +360,8 @@ with the names it recorded (`test/lib/slice/nested-rows.test.ts`).
 - `VariableSlice.missing` / `ArrayProvenance.missing` — absence with a reason,
   never a silent empty object.
 - `ElementBirth.basis` — exact vs inferred vs reset, on every record;
-  `ForwardEdge.basis` — exact vs conservative, on every edge.
+  `ForwardEdge.basis` — exact (by a recorded read, or by a row the writer
+  built on the view) vs conservative, on every edge.
 - `CausalEdge.overlap` (backward), `ForwardRead.overlap` (forward),
   `KeyMoment.orWriteIdxs` (timeline) — steps side by side. A read is dated
   where its step LOOKED at state, not where it committed
@@ -344,9 +380,15 @@ with the names it recorded (`test/lib/slice/nested-rows.test.ts`).
   both. The walk back goes on to that write with an edge no read is behind;
   it used to stop, and the step that wrote the rest was left out with no
   note (`memory/builtOn.ts`, the one rule; `memory/README.md` has the why, an
-  example, the one case in which the walk's result is not a DAG, and the
-  limit that is still open: a `set` row the writer itself makes out of
-  writes that only added). Text says `← built on box`.
+  example and the one case in which the walk's result is not a DAG). Text
+  says `← built on box`.
+- `CausalEdge.builtOn: 'built-on-view'` (backward), `ForwardRead.builtOnView`
+  and `ForwardEdge.basis: 'built-on-view'` (forward),
+  `KeyMoment.builtOnViewIdxs` (timeline): a `set` row the WRITER built on its
+  step's view (`TraceEntry.builtOnView`). The row replaces the value in the
+  fold and still holds what the view held, so the walk goes on to the write
+  that view held. No read by the step is behind it, and every answer says so
+  in its own words instead of counting it as a read.
 - `keysReadKind` + `readsCoverage` — a slice can always be traced to its reads
   provider, and a reads-less provider is detectable, not silent.
 - `HonestyNote[]` (forward, timeline) — the machine-readable envelope: a consumer

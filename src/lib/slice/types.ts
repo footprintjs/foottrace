@@ -176,9 +176,9 @@ export interface VariableSlice {
 
 /**
  * How a `fed` edge was attributed — the honesty axis of the FORWARD walk,
- * the mirror of {@link AttributionBasis} for the backward one. The two words
- * are deliberately `causalChain`'s `edgeAttribution` values, because they
- * name the same two mechanisms:
+ * the mirror of {@link AttributionBasis} for the backward one. The first two
+ * words are deliberately `causalChain`'s `edgeAttribution` values, because
+ * they name the same two mechanisms:
  *
  * - `'per-write'` — EXACT. The child's write carries per-write read
  *   provenance (`TraceEntry.readKeys`, recorded under the executor's
@@ -193,13 +193,20 @@ export interface VariableSlice {
  *   real. Never presented as exact: every conservative edge is stamped here
  *   AND summarised once on the slice as a `'conservative-fed-edges'`
  *   {@link HonestyNote}.
+ * - `'built-on-view'` — EXACT, and no read by the step is behind it. The
+ *   child is a `set` row the WRITER built on its step's view
+ *   (`TraceEntry.builtOnView`): the row holds what the view held of this
+ *   key, so the value is in it. WHY ITS OWN WORD: `'per-write'` promises a
+ *   recorded read before the write, and here the step's code read nothing.
+ *   A reader that shows "who read this key" must be able to tell the two
+ *   apart (`ForwardRead.builtOnView` marks the read the same way).
  *
  * Each member is registered, with the one sentence that says what it means,
  * in `memory/honesty.ts · HONESTY_CODES` (served on `foottrace`); the
  * union declares its members through `RegisteredCode`, so a member the
  * registry does not hold does not compile.
  */
-export type FedBasis = RegisteredCode<'per-write' | 'stage'>;
+export type FedBasis = RegisteredCode<'per-write' | 'stage' | 'built-on-view'>;
 
 /**
  * The code of a {@link HonestyNote} — a machine-readable honesty statement about a forward query's
@@ -251,6 +258,15 @@ export interface ForwardRead {
    * Absent on a certain read, which is every read of a step with no window.
    */
   overlap?: ReadOverlap;
+  /**
+   * Present (`true`) when no code of the step read the key: this commit holds a `set` row the WRITER
+   * built on the step's view (`TraceEntry.builtOnView`), and that row holds what the view held of the
+   * key. The value went on into that row and into nothing else the commit wrote (the fed edge to it
+   * says `basis: 'built-on-view'`). Absent on a read the step made, also when its commit holds such a
+   * row too. WHY SAID: a list of "who read this key" that counts this commit names a step that never
+   * asked for the key.
+   */
+  builtOnView?: true;
 }
 
 /**
@@ -260,7 +276,9 @@ export interface ForwardRead {
  */
 export interface ForwardEdge {
   child: ForwardNode;
-  /** Exact (`'per-write'`) or conservative (`'stage'`) — see {@link FedBasis}. */
+  /**
+   * Exact (`'per-write'`, `'built-on-view'`) or conservative (`'stage'`) — see {@link FedBasis}.
+   */
   basis: FedBasis;
 }
 
@@ -412,6 +430,16 @@ export interface KeyMoment {
    * `'from-initial-state'` note.
    */
   builtOnPreRun?: true;
+  /**
+   * `'write'` moments only, and only for a commit with a `set` row the
+   * WRITER built on its step's view (`TraceEntry.builtOnView`) when one
+   * number cannot say it: the key was also written while the step ran, or
+   * the commit has a fold link as well. The `commitIdx` of each write the
+   * view could have held, ascending; one of them is under this value. With
+   * one certain source and no fold link, `builtOnWriteIdx` says it and this
+   * field is absent.
+   */
+  builtOnViewIdxs?: number[];
 }
 
 /**
@@ -634,8 +662,12 @@ export interface SliceJSON {
     basis?: RegisteredCode<'nested-rows'>;
     /** Why this edge is a possible source and not a certain one (`CausalEdge.overlap`). Absent on a certain edge. */
     overlap?: ReadOverlap;
-    /** An edge no read made: the child's write of `key` kept part of what the parent wrote (`CausalEdge.builtOn`). */
-    builtOn?: RegisteredCode<'partial-write'>;
+    /**
+     * An edge no read by the child's code made: the child's write of `key` kept part of what the parent
+     * wrote, because it did not replace the value (`'partial-write'`) or because the writer built it on
+     * the step's view (`'built-on-view'`). See `CausalEdge.builtOn`.
+     */
+    builtOn?: RegisteredCode<'partial-write' | 'built-on-view'>;
   }>;
   /** Copied from the root when a budget cut the slice — registered as `'truncated'` in `HONESTY_CODES`. */
   truncated?: { byDepth: boolean; byNodes: boolean };

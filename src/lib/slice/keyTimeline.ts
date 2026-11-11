@@ -32,13 +32,17 @@
  * a list that was appended to N times saw N writes, and a list on every read
  * grows with the square of a loop that appends and reads. The link is one
  * number per write, found with one look at one bundle; a reader follows it
- * from the write a read names.
+ * from the write a read names. One more case: a `set` row the WRITER built on
+ * the step's view (`TraceEntry.builtOnView`) holds what the view held. With
+ * one certain source it is linked like any other write; when the key was
+ * also written while that step ran, the view's possible sources are listed
+ * (`builtOnViewIdxs`).
  *
  * DAG position: memory ← slice. Imports memory/ only (see README.md).
  */
 
 import type { KeysReadLookup } from '../memory/backtrack.js';
-import { builtOnBefore } from '../memory/builtOn.js';
+import { builtOnBefore, readFromView } from '../memory/builtOn.js';
 import { readSourcesOf } from '../memory/readWindow.js';
 import type { CommitBundle } from '../memory/types.js';
 import {
@@ -156,7 +160,20 @@ export function keyTimeline(
       // names the write it saw, and a reader of the timeline follows the links from there. (A list on
       // every read would grow with the square of a key that is appended to and read in a loop.)
       const under = builtOnBefore(normalisedKey, idx, bundleAt, writeBefore);
-      if (under === -1) restsOnPreRun = true;
+      // A `set` row the WRITER built on the step's view still holds what the view held: its sources
+      // are the read rule's, asked with this commit's own window (`memory/builtOn.ts · readFromView`).
+      // One certain source and no fold link: it is the write this one was built on, said like any
+      // other. Otherwise the view's possible sources are listed beside the fold link.
+      const seen = readFromView(bundle, normalisedKey)
+        ? readSourcesOf(normalisedKey, index.windows.get(idx) ?? { start: idx, end: idx }, writeBefore)
+        : undefined;
+      const viewCertain = seen !== undefined && seen.during.length === 0;
+      const link = under ?? (viewCertain ? seen.before : undefined);
+      const viewed =
+        seen === undefined || (under === undefined && viewCertain)
+          ? []
+          : [seen.before, ...seen.during].filter((position) => position >= 0 && position !== under);
+      if (link === -1 || (seen !== undefined && seen.before < 0)) restsOnPreRun = true;
       moments.push({
         kind: 'write',
         commitIdx: idx,
@@ -164,7 +181,9 @@ export function keyTimeline(
         stageId: bundle.stageId,
         stageName: bundle.stage,
         ...(entry !== undefined && { verb: entry.verb }),
-        ...(under !== undefined && (under < 0 ? { builtOnPreRun: true as const } : { builtOnWriteIdx: under })),
+        ...(link !== undefined && link >= 0 && { builtOnWriteIdx: link }),
+        ...((link === -1 || (seen !== undefined && seen.before < 0)) && { builtOnPreRun: true as const }),
+        ...(viewed.length > 0 && { builtOnViewIdxs: viewed }),
       });
     }
   }

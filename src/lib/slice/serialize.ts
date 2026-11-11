@@ -31,6 +31,7 @@
 import { flattenCausalDAG, formatCausalChain } from '../memory/backtrack.js';
 import type { ReadOverlap } from '../memory/readWindow.js';
 import type {
+  FedBasis,
   ForwardNode,
   ForwardSlice,
   ForwardSliceJSON,
@@ -239,6 +240,13 @@ const MAYBE_READ_WORDS: Record<ReadOverlap, string> = {
   'written-while-running': 'it began before this write',
 };
 
+/** How a fed edge was attributed, in a tree line. The full sentence is the registry's. */
+const FED_WORDS: Record<FedBasis, string> = {
+  'per-write': '[exact]',
+  stage: '[conservative]',
+  'built-on-view': '[exact, built on the view]',
+};
+
 export function formatForwardSlice(slice: ForwardSlice): string {
   const lines: string[] = [];
   const anchor = slice.before !== undefined ? ` (as of before commit ${slice.before})` : '';
@@ -271,15 +279,18 @@ export function formatForwardSlice(slice: ForwardSlice): string {
     }
     for (const read of node.reads.slice(0, READS_RENDERED)) {
       // `maybe read by`: the key was written inside that step's window, so it may have read another value.
-      const verb = read.overlap !== undefined ? 'maybe read by' : 'read by';
+      // `held by`: no code of that step read the key; the writer built one of its rows on the step's view.
+      const sure = read.builtOnView ? 'held by' : 'read by';
+      const verb = read.overlap !== undefined ? `maybe ${sure}` : sure;
       const why = read.overlap !== undefined ? ` — ${MAYBE_READ_WORDS[read.overlap]}` : '';
-      lines.push(`${pad}  ${verb} ${read.stageName} (${read.runtimeStageId}) @${read.commitIdx}${why}`);
+      const how = read.builtOnView ? ' (in a row the writer built on its view)' : '';
+      lines.push(`${pad}  ${verb} ${read.stageName} (${read.runtimeStageId}) @${read.commitIdx}${how}${why}`);
     }
     if (node.reads.length > READS_RENDERED) {
       lines.push(`${pad}  … and ${node.reads.length - READS_RENDERED} more reads`);
     }
     for (const edge of node.fedEdges) {
-      walk(edge.child, indent + 1, `→ fed ${edge.basis === 'per-write' ? '[exact]' : '[conservative]'} `);
+      walk(edge.child, indent + 1, `→ fed ${FED_WORDS[edge.basis]} `);
     }
   };
   if (slice.root) walk(slice.root, 0);
@@ -314,12 +325,17 @@ export function formatTimeline(timeline: KeyTimeline): string {
   for (const moment of moments.slice(0, MOMENTS_RENDERED)) {
     const where = `${moment.stageName} (${moment.runtimeStageId})`;
     if (moment.kind === 'write') {
-      // A value built in steps: this write did not replace the value, it was folded onto an earlier one.
+      // A value built in steps: this write did not replace the value, it was folded onto an earlier one,
+      // or the writer built it on what the step's view held (one of several commits, when it cannot say which).
+      const held = moment.builtOnViewIdxs?.length ? `commit ${moment.builtOnViewIdxs.join(' or ')}` : '';
+      const viewed = held ? `; its step's view held ${held}` : '';
       const under =
         moment.builtOnWriteIdx !== undefined
-          ? ` (added to the value of commit ${moment.builtOnWriteIdx})`
+          ? ` (added to the value of commit ${moment.builtOnWriteIdx}${viewed})`
           : moment.builtOnPreRun
-          ? ' (added to the value from BEFORE the run)'
+          ? ` (added to the value from BEFORE the run${viewed})`
+          : held
+          ? ` (built on the value its step's view held: ${held})`
           : '';
       lines.push(`@${moment.commitIdx} write ${moment.verb ?? 'set'} — ${where}${under}`);
     } else {

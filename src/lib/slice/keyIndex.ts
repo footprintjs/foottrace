@@ -37,7 +37,7 @@ import {
   rootOf,
   writesOnlyInside,
 } from '../memory/keyPaths.js';
-import { replacesValue } from '../memory/builtOn.js';
+import { isViewRow, replacesValue } from '../memory/builtOn.js';
 import { logModel } from '../memory/logModel.js';
 import { type ReadOverlap, type ReadWindow, readOfValue } from '../memory/readWindow.js';
 import { windowsOf } from '../memory/windowPlacement.js';
@@ -75,15 +75,27 @@ export interface KeyIndex {
   /** key → commit ARRAY positions whose stage read it, a path inside it or a container around it, ascending. Memoised. */
   readsOf(key: string): number[];
   /**
+   * key → the commits (ARRAY positions, ascending) that hold a `set` row the WRITER built on its step's
+   * view, on the key, inside it or around it (`TraceEntry.builtOnView`, `memory/builtOn.ts`). Such a
+   * commit holds what the view held of the key. It reads the value for that row, at ITS OWN position (a
+   * later commit of a step has a view of its own), and for nothing else it wrote.
+   *
+   * WHY NOT AMONG `readsOf`: those are the reads the steps' own code made, as the reads provider names
+   * them. Mixed in, a commit of a step that never read the key showed up as a read of it in the
+   * timeline, counted as "reads were recorded" for a log that recorded none, and fed every write of
+   * its bundle. Memoised.
+   */
+  viewReadersOf(key: string): number[];
+  /**
    * The executions whose reads are NOT dated at their own commit (`CommitBundle.beganAt`): first-bundle
    * ARRAY position → when the step looked at state (`readWindow.ts · windowOf`). Empty for a log with no
    * such step, which is every log of a run whose steps go one after another.
    */
   readonly windows: ReadonlyMap<number, ReadWindow>;
   /**
-   * The steps among `readsOf(key)` that are in {@link windows}, ascending. Memoised, so a forward walk asks
-   * the rule once per such READER of the key and never once per stamped step of the whole log (a large
-   * fan-out stamps every branch, and few of them read any one key).
+   * The commits among `readsOf(key)` and `viewReadersOf(key)` that are in {@link windows}, ascending.
+   * Memoised, so a forward walk asks the rule once per such READER of the key and never once per stamped
+   * step of the whole log (a large fan-out stamps every branch, and few of them read any one key).
    */
   windowedReadsOf(key: string): number[];
   /** Every key this log knows BY NAME: written paths ∪ recorded read keys — the list an unknown-key note shows. */
@@ -109,6 +121,17 @@ export function buildKeyIndex(commitLog: CommitBundle[], lookup: KeysReadLookup)
   const writers = model.index;
   const readsByKey = new Map<string, number[]>();
   const readKeysByRoot = new Map<string, string[]>();
+  const viewsByPath = new Map<string, number[]>();
+  const viewPathsByRoot = new Map<string, string[]>();
+  /** One more position under one name; the first time a name is seen it joins the names of its root. */
+  const note = (byName: Map<string, number[]>, namesByRoot: Map<string, string[]>, name: string, at: number) => {
+    if (!byName.has(name)) {
+      const names = namesByRoot.get(rootOf(name));
+      if (names) names.push(name);
+      else namesByRoot.set(rootOf(name), [name]);
+    }
+    push(byName, name, at);
+  };
   const executions = new Set<string>();
   const windows = new Map<number, ReadWindow>();
   const windowAt = windowsOf(commitLog);
@@ -117,10 +140,16 @@ export function buildKeyIndex(commitLog: CommitBundle[], lookup: KeysReadLookup)
     // Reads: one lookup per EXECUTION, at its first bundle (see THE INVERSION above). A later bundle
     // of the same runtimeStageId is a continuation; the stage read before its own commit, and the
     // backward walk dates it there too (`commitLogUtils · buildCommitIndex`).
-    if (executions.has(bundle.runtimeStageId)) continue;
+    const first = !executions.has(bundle.runtimeStageId);
     executions.add(bundle.runtimeStageId);
+    // Rows the writer built on the view belong to the BUNDLE, first or not (`viewReadersOf`).
+    const viewed = new Set<string>();
+    for (const row of bundle.trace) if (isViewRow(row)) viewed.add(row.path);
+    for (const path of viewed) note(viewsByPath, viewPathsByRoot, path, i);
+    if (!first && viewed.size === 0) continue;
     const window = windowAt(i);
     if (window.start < i) windows.set(i, window);
+    if (!first) continue;
     // A provider that throws is a consumer bug, not a reason to lose the
     // query — the same error-isolation posture recorder callbacks get.
     let keys: string[] = [];
@@ -129,14 +158,7 @@ export function buildKeyIndex(commitLog: CommitBundle[], lookup: KeysReadLookup)
     } catch {
       /* provider threw — treat this step as "no recorded reads" */
     }
-    for (const k of new Set(keys)) {
-      if (!readsByKey.has(k)) {
-        const names = readKeysByRoot.get(rootOf(k));
-        if (names) names.push(k);
-        else readKeysByRoot.set(rootOf(k), [k]);
-      }
-      push(readsByKey, k, i);
-    }
+    for (const k of new Set(keys)) note(readsByKey, readKeysByRoot, k, i);
   }
 
   const writesOf = (key: string): number[] => model.writersOf(key) as number[];
@@ -149,38 +171,61 @@ export function buildKeyIndex(commitLog: CommitBundle[], lookup: KeysReadLookup)
     }
     return positions;
   };
-  const reads = new Map<string, number[]>();
-  const readsOf = (key: string): number[] => {
-    let positions = reads.get(key);
-    if (positions === undefined) {
-      const names = readKeysByRoot.get(rootOf(key)) ?? [];
-      positions = ascendingUnion(
-        names.filter((name) => relation(name, key) !== undefined).map((name) => readsByKey.get(name) as number[]),
-      );
-      reads.set(key, positions);
-    }
-    return positions;
+  /** key → the positions noted under every name on the key, inside it or around it, ascending. Memoised. */
+  const related = (byName: Map<string, number[]>, namesByRoot: Map<string, string[]>) => {
+    const memo = new Map<string, number[]>();
+    return (key: string): number[] => {
+      let positions = memo.get(key);
+      if (positions === undefined) {
+        const names = namesByRoot.get(rootOf(key)) ?? [];
+        positions = ascendingUnion(
+          names.filter((name) => relation(name, key) !== undefined).map((name) => byName.get(name) as number[]),
+        );
+        memo.set(key, positions);
+      }
+      return positions;
+    };
   };
+  const readsOf = related(readsByKey, readKeysByRoot);
+  const viewReadersOf = related(viewsByPath, viewPathsByRoot);
   const knownKeys = new Set<string>([...pathsWritten(writers), ...readsByKey.keys()]);
   const windowedReads = new Map<string, number[]>();
   const windowedReadsOf = (key: string): number[] => {
     let positions = windowedReads.get(key);
     if (positions === undefined) {
-      positions = windows.size === 0 ? [] : readsOf(key).filter((position) => windows.has(position));
+      positions =
+        windows.size === 0
+          ? []
+          : ascendingUnion([readsOf(key), viewReadersOf(key)]).filter((position) => windows.has(position));
       windowedReads.set(key, positions);
     }
     return positions;
   };
 
   const isKnown = (key: string): boolean => writesOf(key).length > 0 || readsOf(key).length > 0;
-  return { writers, writesOf, closingWritesOf, readsByKey, readsOf, windows, windowedReadsOf, knownKeys, isKnown };
+  return {
+    writers,
+    writesOf,
+    closingWritesOf,
+    readsByKey,
+    readsOf,
+    viewReadersOf,
+    windows,
+    windowedReadsOf,
+    knownKeys,
+    isKnown,
+  };
 }
 
-/** One step that read a value, and why it is only a possible reader when it is (`readWindow.ts · ReadOverlap`). */
+/** One commit that read a value, and why it is only a possible reader when it is (`readWindow.ts · ReadOverlap`). */
 export interface LifeReader {
-  /** The ARRAY position of the step's first bundle. */
+  /** The ARRAY position of the commit: a step's first bundle, or a bundle that holds a row built on the view. */
   readonly position: number;
   readonly overlap?: ReadOverlap;
+  /** The step's own code read the key (`KeyIndex.readsOf`). */
+  readonly step: boolean;
+  /** The writer built a `set` row of this commit on the step's view of the key (`KeyIndex.viewReadersOf`). */
+  readonly view: boolean;
 }
 
 /**
@@ -194,26 +239,47 @@ export interface LifeReader {
  * `beganAt` is not dated at its own commit, so each of those is asked the rule instead: it read the value
  * when one of its looks at state could see it, and it is a possible reader, not a certain one, when the
  * key was written inside its window.
+ *
+ * A commit that holds a `set` row the writer built on its step's view is a reader by the same rule,
+ * dated by its own stamps (`KeyIndex.viewReadersOf`). Each reader says which it is (`step`, `view`).
  */
 export function readersOfLife(
-  index: Pick<KeyIndex, 'windows' | 'windowedReadsOf' | 'readsOf' | 'writesOf'>,
+  index: Pick<KeyIndex, 'windows' | 'windowedReadsOf' | 'readsOf' | 'viewReadersOf' | 'writesOf'>,
   key: string,
   writeIdx: number | undefined,
   nextWriteIdx: number | undefined,
 ): LifeReader[] {
-  const inLife = indicesInRange(index.readsOf(key), writeIdx === undefined ? 0 : writeIdx + 1, nextWriteIdx);
+  const steps = index.readsOf(key);
+  const views = index.viewReadersOf(key);
+  // A log with no such row (every log before the mark existed) takes the lists as they are.
+  const how =
+    views.length === 0
+      ? () => BY_STEP
+      : (position: number) => ({ step: holds(steps, position), view: holds(views, position) });
+  const lookers = views.length === 0 ? steps : ascendingUnion([steps, views]);
+  const inLife = indicesInRange(lookers, writeIdx === undefined ? 0 : writeIdx + 1, nextWriteIdx);
   const stamped = index.windowedReadsOf(key);
-  if (stamped.length === 0) return inLife.map((position) => ({ position }));
+  if (stamped.length === 0) return inLife.map((position) => ({ position, ...how(position) }));
   const readers: LifeReader[] = [];
-  for (const position of inLife) if (!index.windows.has(position)) readers.push({ position });
+  for (const position of inLife) if (!index.windows.has(position)) readers.push({ position, ...how(position) });
   const writes = index.writesOf(key);
   for (const position of stamped) {
     const window = index.windows.get(position)!;
-    const written = window.start < window.end && indicesInRange(writes, window.start, window.end - 1).length > 0;
+    // Two halvings, never a copy of the writes in the window: with a wide window on every reader of a
+    // key that is written all along (a fan-out), a copy per reader cost the square of the log.
+    const written = lowerBound(writes, window.start) < lowerBound(writes, window.end);
     const read = readOfValue(window, writeIdx ?? -1, nextWriteIdx, written);
-    if (read !== false) readers.push(read === true ? { position } : { position, overlap: read });
+    if (read !== false) readers.push({ position, ...(read !== true && { overlap: read }), ...how(position) });
   }
   return readers.sort((one, other) => one.position - other.position);
+}
+
+const BY_STEP = { step: true, view: false } as const;
+
+/** Is `value` in the ascending list? */
+function holds(ascending: number[], value: number): boolean {
+  const at = lowerBound(ascending, value);
+  return at < ascending.length && ascending[at] === value;
 }
 
 /** At least one read a forward answer lists is only possible: the key was written inside the reader's window. */

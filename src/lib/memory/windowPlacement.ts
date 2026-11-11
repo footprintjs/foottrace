@@ -74,8 +74,10 @@
  *     the log before it, and when a later index of the second log still rises past that reading
  *     (bundles were taken out of it), the join is never seen. A step of the second log is then
  *     dated in the first, and can be given a writer of the first as its one certain source;
- *   - the stamps sit on a step's FIRST bundle. An array without that bundle has lost them, and the
- *     step's later bundles are read as any bundle with no stamp.
+ *   - the stamps that date a step's READS sit on its FIRST bundle. An array without that bundle has
+ *     lost them, and the step's later bundles are read as any bundle with no stamp. (A later bundle
+ *     can carry stamps of its own, for a row the writer built on the view of that commit:
+ *     `builtOn.ts · readFromView`. They date that row, never the step's reads.)
  *
  * WHY A DOOR READS STRICTER THAN THIS FILE. An array of typed bundles may be several logs one after
  * another (the legs of a paused run), so here an index that does not rise starts a new stretch, and a

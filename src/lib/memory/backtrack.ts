@@ -26,6 +26,11 @@
  *    commit order (`builtOn.ts`), with an edge marked `builtOn`. No step read anything for this
  *    edge. The rule speaks in commits and a node here is a STEP: when the commit underneath is an
  *    earlier one of the same step, no edge is drawn and the walk passes through it.
+ *    One more case of the same kind: a `set` row the WRITER built on the step's view
+ *    (`TraceEntry.builtOnView`) replaces the value in the fold and still holds what the view held.
+ *    The parent is linked to what a read of the key from that commit's view could have seen (the
+ *    read rule of step 3, with that commit's own stamps), with the edge marked
+ *    `builtOn: 'built-on-view'`.
  * 6. Enqueue parent. Repeat until queue empty or limits hit.
  *
  * Output is a graph of steps, not a linked list: a stage reading `creditScore` AND `dti` from
@@ -72,7 +77,7 @@
  * ```
  */
 
-import { builtOnBefore, replacesValue } from './builtOn.js';
+import { builtOnBefore, readFromView, replacesValue } from './builtOn.js';
 import { buildCommitIndex, lastWriterPosition } from './commitLogUtils.js';
 import type { RegisteredCode } from './honesty.js';
 import { queryWork, relation, writesOnlyInside } from './keyPaths.js';
@@ -201,18 +206,28 @@ export interface CausalEdge {
    */
   overlap?: ReadOverlap;
   /**
-   * Present only on a `'data'` edge that no READ made: the child's own write of `key` did not replace
-   * the value (it merged into it, appended to it, or wrote a path inside it), so what the child left
-   * under `key` still holds part of what the parent had written. The parent is the last commit that
-   * wrote `key` before the child's write, in commit order: a fold applies commits in that order, so
-   * this edge is exact (`memory/builtOn.ts`). Registered as `'partial-write'` in
-   * `memory/honesty.ts · HONESTY_CODES`. Absent on an edge a read made, so such an edge keeps its
-   * shape. When the child ALSO read `key` from this parent, for certain, the read's edge stands
-   * alone and no second one is added; beside a read that is only a possible source (`overlap`), both
-   * edges are there, because this one is certain.
+   * Present only on a `'data'` edge that no READ by the child's code made: what the child left under
+   * `key` still holds part of what the parent had written, and the record's rows say why
+   * (`memory/builtOn.ts`):
+   *   - `'partial-write'`: the child's own write of `key` did not replace the value (it merged into
+   *     it, appended to it, or wrote a path inside it). The parent is the last commit that wrote
+   *     `key` before the child's write, in commit order: a fold applies commits in that order, so
+   *     this edge is exact;
+   *   - `'built-on-view'`: the child's write is a `set` row the WRITER built on the step's view
+   *     (`TraceEntry.builtOnView`). The parent is the write that view held. With the key also
+   *     written inside the commit's window the edge carries `overlap`, as a read's edge does: the
+   *     parent is then one of the writes the view could have held.
+   * Both are registered in `memory/honesty.ts · HONESTY_CODES`. Absent on an edge a read made, so
+   * such an edge keeps its shape. When the child ALSO read `key` from this parent, for certain, the
+   * read's edge stands alone and no second one is added; beside a read that is only a possible
+   * source (`overlap`), both edges are there when this one is certain. Where both reasons name one
+   * parent there is one edge, and it says `'partial-write'`.
    */
-  builtOn?: RegisteredCode<'partial-write'>;
+  builtOn?: BuiltOn;
 }
+
+/** Why a parent is under a child's value though no read by the child's code names it (`CausalEdge.builtOn`). */
+type BuiltOn = RegisteredCode<'partial-write' | 'built-on-view'>;
 
 /**
  * RFC-003 D3 — a control dependency resolved for one execution step:
@@ -527,17 +542,24 @@ function buildCausalChain(
   // ── Writes that did not replace a value (`builtOn.ts`) ─────────────────
   // A node the walk came to through key `k`, at the bundle that wrote `k`, owes one more link when
   // that write was partial: to the commit it was built on. Each (node, key, bundle) is followed once.
-  type Partial = readonly [key: string, at: number];
+  // What is under the write: the commit it was folded onto (`'fold'`: it did not replace the value),
+  // or what its step's view held (`'view'`: the writer built a `set` row on the view, on the key,
+  // around it or inside it). A commit with such a row INSIDE the key owes both.
+  type Partial = readonly [key: string, at: number, from: 'fold' | 'view'];
   const followed = new Set<string>();
   const bundleAt = (position: number): CommitBundle => commitLog[position];
-  /** The partial write of `key` at `at` by `id`, when it has not been followed yet. */
+  /** What the write of `key` at `at` by `id` still owes the walk, less what has been followed already. */
   function partialWrite(id: string, key: string, at: number): Partial[] {
-    queryWork.units += 1 + commitLog[at].trace.length;
-    if (replacesValue(commitLog[at], key)) return [];
-    const mark = `${at}\u0000${key}\u0000${id}`;
-    if (followed.has(mark)) return [];
-    followed.add(mark);
-    return [[key, at]];
+    queryWork.units += 1 + 2 * commitLog[at].trace.length;
+    const owed: Partial[] = [];
+    if (!replacesValue(commitLog[at], key)) owed.push([key, at, 'fold']);
+    if (readFromView(commitLog[at], key)) owed.push([key, at, 'view']);
+    return owed.filter(([, , from]) => {
+      const mark = `${at}\u0000${key}\u0000${id}\u0000${from}`;
+      if (followed.has(mark)) return false;
+      followed.add(mark);
+      return true;
+    });
   }
 
   // BFS/worklist queue: [node, commitIdx, depth, keysToExpand, partial writes to follow]
@@ -570,7 +592,7 @@ function buildCausalChain(
     key: string | undefined,
     depth: number,
     overlap?: ReadOverlap,
-    builtOn = false,
+    builtOn?: BuiltOn,
   ): void {
     const parentCommit = commitLog[parentPos];
     const parentId = parentCommit.runtimeStageId;
@@ -659,8 +681,15 @@ function buildCausalChain(
       e.parent.runtimeStageId === parentId && e.kind === kind && e.key === key;
     const certain = node.parentEdges.find((e) => sameLink(e) && e.overlap === undefined);
     let known: boolean;
-    if (builtOn) known = certain !== undefined;
-    else if (overlap === undefined && certain?.builtOn !== undefined) {
+    if (builtOn !== undefined) {
+      // A certain edge already says it. Where that edge is one no read made and this link is the
+      // fold, the edge says `'partial-write'` whichever of the two the walk met first. A possible
+      // one (a view that had a write of the key in its window) is one edge per mark.
+      if (certain?.builtOn !== undefined && builtOn === 'partial-write') certain.builtOn = builtOn;
+      known =
+        certain !== undefined ||
+        node.parentEdges.some((e) => sameLink(e) && e.overlap === overlap && e.builtOn !== undefined);
+    } else if (overlap === undefined && certain?.builtOn !== undefined) {
       delete certain.builtOn;
       known = true;
     } else known = node.parentEdges.some((e) => sameLink(e) && e.overlap === overlap && e.builtOn === undefined);
@@ -684,7 +713,7 @@ function buildCausalChain(
         weight,
         ...(nested && { basis: 'nested-rows' as const }),
         ...(overlap && { overlap }),
-        ...(builtOn && { builtOn: 'partial-write' as const }),
+        ...(builtOn !== undefined && { builtOn }),
       });
     }
   }
@@ -732,19 +761,35 @@ function buildCausalChain(
     // through it to what THAT commit was folded onto, or ends there when it replaced the value. Each
     // (step, key, commit) is followed once (`partialWrite`), so a step that committed many times costs
     // one lookup per commit, however often the walk comes to it.
+    //
+    // A `'view'` item is dated differently: the row holds what the step's VIEW held, so its sources
+    // are the read rule's, asked with the window of the commit that carries the row (a later commit
+    // of a step has a view of its own). With a write of the key inside that window each source is a
+    // possible one and its edge says so (`overlap`), as for any read.
     const pending = [...partials];
     while (pending.length > 0) {
-      const [key, at] = pending.pop()!;
-      const under = builtOnBefore(key, at, bundleAt, findWriter);
-      if (under === undefined) continue; // not for a write `partialWrite` handed out; kept for the type
-      if (under < 0) {
-        // Folded onto what the key held before the run: say why there is no edge.
-        node.preRunBase ??= { code: 'from-initial-state', keys: [] };
-        if (!node.preRunBase.keys.includes(key)) node.preRunBase.keys.push(key);
-      } else if (commitLog[under].runtimeStageId === node.runtimeStageId) {
-        pending.push(...partialWrite(node.runtimeStageId, key, under));
+      const [key, at, from] = pending.pop()!;
+      const under: Array<[position: number, overlap: ReadOverlap | undefined]> = [];
+      if (from === 'fold') {
+        const position = builtOnBefore(key, at, bundleAt, findWriter);
+        if (position === undefined) continue; // not for a write `partialWrite` handed out; kept for the type
+        under.push([position, undefined]);
       } else {
-        linkParent(node, under, 'data', key, depth, undefined, true);
+        const seen = readSourcesOf(key, windowAt(at), findWriter);
+        under.push([seen.before, overlapOf(seen, seen.before)]);
+        for (const position of seen.during) under.push([position, overlapOf(seen, position)]);
+      }
+      for (const [position, overlap] of under) {
+        if (position < 0) {
+          // Folded onto what the key held before the run (or built on a view that held it): say why
+          // there is no edge.
+          node.preRunBase ??= { code: 'from-initial-state', keys: [] };
+          if (!node.preRunBase.keys.includes(key)) node.preRunBase.keys.push(key);
+        } else if (commitLog[position].runtimeStageId === node.runtimeStageId) {
+          pending.push(...partialWrite(node.runtimeStageId, key, position));
+        } else {
+          linkParent(node, position, 'data', key, depth, overlap, from === 'fold' ? 'partial-write' : 'built-on-view');
+        }
       }
     }
 
@@ -818,7 +863,8 @@ export function flattenCausalDAG(root: CausalNode): CausalNode[] {
  * the one shown.
  *
  * An edge no read made (`CausalEdge.builtOn`: the child's write of the key did not replace the value,
- * so it kept part of what the parent had written) renders as `← built on <key>`.
+ * or the writer built it on the step's view, so it kept part of what the parent had written) renders
+ * as `← built on <key>`.
  *
  * RFC-003 D4: edge weights from the `weigh` hook render as a suffix —
  * `← via systemPrompt (0.18)` — only when ≠ 1.0, so unweighted output is

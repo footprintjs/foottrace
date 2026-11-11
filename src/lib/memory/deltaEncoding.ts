@@ -48,6 +48,11 @@ export type Survivor = {
  * secret in the log and the redacted mirror. Such a path always takes the
  * `set` of the whole value, where the mark lands (9.30.0; the same gap was
  * open in 9.29.0 for a hard write of base + tail).
+ *
+ * `whenSet` — what the row carries when it comes out as a `set`, and only
+ * then: the caller's `builtOnView` for a value it built on the step's view.
+ * An `append` says by its verb that it added to what was there, so it never
+ * carries that.
  */
 export function pushValueRow(
   rows: Rows,
@@ -57,12 +62,13 @@ export function pushValueRow(
   value: unknown,
   prov: Pick<TraceEntry, 'readKeys' | 'readAttempts' | 'readAttemptsOmitted'> | undefined,
   marked = false,
+  whenSet: Pick<TraceEntry, 'builtOnView'> = {},
 ): void {
   if (!marked && isStrictArrayPrefix(before, value)) {
     rows.trace.push({ path, verb: 'append', ...prov });
     _set(rows.overwrite, segments, structuredClone((value as unknown[]).slice(before.length)));
   } else {
-    rows.trace.push({ path, verb: 'set', ...prov });
+    rows.trace.push({ path, verb: 'set', ...prov, ...whenSet });
     _set(rows.overwrite, segments, structuredClone(value));
   }
 }

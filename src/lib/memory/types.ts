@@ -61,6 +61,25 @@ export interface TraceEntry {
    * log may contain delta-mode bundles.
    */
   verb: 'set' | 'merge' | 'append' | 'delete';
+  /**
+   * Present (`true`) only on a `set` row that the WRITER made out of writes that only ADDED to the
+   * path. The step merged into the path or wrote paths inside it, and the row holds the whole value
+   * because compact rows could not: the `'delta'` encoding does it when rows of one commit overlap,
+   * and either encoding does it for rows that would not fold back to what the step read. The value is
+   * what the path held in the step's VIEW (the state it pinned at its first touch) with the step's
+   * own writes folded in.
+   *
+   * WHY IT IS SAID. The row says `set`, and a `set` replaces: a reader that takes it at its word ends
+   * its walk here, and the steps whose writes are still in the value are left out with no note. The
+   * writer is the only one who knows the value was built on what was there, so it says so, and the
+   * commit counts as having READ this path from its view: a reader follows that read like any other
+   * (`memory/builtOn.ts · readFromView`), dated by the stamps of the commit that carries the row.
+   *
+   * ABSENT on a `set` the step made itself (it set or deleted the path, or a container around it),
+   * so such a row keeps its bytes. Never on another verb: a `merge`, an `append` and a row inside a
+   * key say by themselves that they added.
+   */
+  builtOnView?: true;
 }
 
 /**
@@ -151,6 +170,14 @@ export interface CommitBundle {
    * {@link sawUntil} says it looked again later. A reader must never date such a read at the step's
    * own commit: a sibling that committed first would be named as its source although the read
    * happened earlier (`readWindow.ts · readSourcesOf`, the one rule).
+   *
+   * ALSO PRESENT on a bundle, the step's first or a later one, that holds a `set` row the writer
+   * built on the step's view (`TraceEntry.builtOnView`), when another step committed between the
+   * moment that view was pinned and this commit. Carrying the view into the record is a look at
+   * state, and it is dated like one. On a LATER bundle of a step the stamps speak of that row alone:
+   * the step's reads are dated by its first bundle. On a first bundle one pair of stamps serves the
+   * step's reads and such a row together, so a step that pinned its view by a write and read live
+   * state later has that read dated by the wider window (its sources become possible ones).
    *
    * A log written before this field existed carries it nowhere; for such a log a read is dated at
    * the step's first commit, as before.

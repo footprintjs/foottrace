@@ -516,6 +516,11 @@ export class RecordFrame {
    */
   commit(stampOf: () => CommitStamp): void {
     const payload = this.buffer?.commit();
+    // A row the writer built on the view (`TraceEntry.builtOnView`) carries what the view held into
+    // the record: that is a read of the view, made for the step, and it is dated like one. Pinning
+    // the view for a write is otherwise no look at all ({@link sawAt}); without this, a step that only
+    // wrote would have such a row dated at its commit, after siblings whose writes it never held.
+    if (payload?.trace.some((row) => row.builtOnView)) this.sawAt(this.#pinnedAt);
     const into = { state: this.state, mirror: this._mirror, log: this.log };
     recordCommit(payload, stampOf(), into, this.#beganAt, this.#sawUntil);
     this.#committed = true;

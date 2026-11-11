@@ -91,6 +91,11 @@ export function admitBundle(
             budget.addGap({ code: 'not-collected', commitIdx, rowIdx });
           }
         }
+        // The writer's mark on a `set` row it built on the step's view (`TraceEntry.builtOnView`). Kept,
+        // never dropped: without it the row reads as a replacement. Anything else in its place, or the
+        // mark on another verb, refuses the bundle.
+        const builtOnView = dataField(rawRow, 'builtOnView', budget);
+        if (builtOnView !== undefined && (builtOnView !== true || verb !== 'set')) throw new ProvDataRefusal();
         rows.push({
           commitIdx,
           rowIdx,
@@ -99,14 +104,16 @@ export function admitBundle(
           ...(readKeys === undefined ? {} : { readKeys }),
           ...(readAttempts?.length ? { readAttempts } : {}),
           ...(readAttemptsOmitted === undefined ? {} : { readAttemptsOmitted }),
+          ...(builtOnView === true ? { builtOnView: true as const } : {}),
         });
       }
-      projected.trace = rows.map(({ path, verb, readKeys, readAttempts, readAttemptsOmitted }) => ({
+      projected.trace = rows.map(({ path, verb, readKeys, readAttempts, readAttemptsOmitted, builtOnView }) => ({
         path,
         verb,
         ...(readKeys === undefined ? {} : { readKeys }),
         ...(readAttempts?.length ? { readAttempts } : {}),
         ...(readAttemptsOmitted === undefined ? {} : { readAttemptsOmitted }),
+        ...(builtOnView === true ? { builtOnView: true as const } : {}),
       }));
     } else projected.trace = rawTrace;
     if (!isCommitBundle(projected)) {

@@ -1,7 +1,7 @@
 /**
  * honesty.ts — the ONE vocabulary for what a reader cannot see (F4a).
  *
- *   unit      the registry is frozen and closed, holds exactly the twenty-six codes, and every explanation is
+ *   unit      the registry is frozen and closed, holds exactly the twenty-seven codes, and every explanation is
  *             ONE sentence
  *   boundary  the TYPES, asked of the real compiler: a code the registry does not hold FAILS TO COMPILE; the
  *             six public unions are exactly the members they were (they did not widen); the sentences are
@@ -74,7 +74,8 @@ const SLICE_CODES_9_31 = ['conservative-fed-edges', 'pre-run-origin', 'reads-not
 /** Every slice note today: the five, F3's `'nested-rows'`, the read window's `'concurrent-write'`, and the built-on rule's `'partial-write'`. */
 const SLICE_CODES = [...SLICE_CODES_9_31, 'nested-rows', 'concurrent-write', 'partial-write'];
 const MISSING_REASONS = ['empty-log', 'never-written', 'not-an-array'];
-const FED_BASES = ['per-write', 'stage'];
+/** The two a read gives, and the one a `set` row the writer built on its step's view gives (`TraceEntry.builtOnView`). */
+const FED_BASES = ['per-write', 'stage', 'built-on-view'];
 const ATTRIBUTION_BASES = ['append-verb', 'prefix-inference', 'whole-value'];
 const FOLD_BASES = ['initial+log', 'log-only'];
 /** F4b (9.33.0): the two codes only a key's value basis speaks (`ValueBasis` — the rest of it is shared). */
@@ -103,7 +104,7 @@ describe('HONESTY_CODES — unit', () => {
     }).toThrow(TypeError);
   });
 
-  it('holds exactly twenty-six codes — eight slice notes, three missing reasons, two fed-edge and three birth bases, two fold bases, two value bases, two read overlaps, four codeless signals', () => {
+  it('holds exactly twenty-seven codes — eight slice notes, three missing reasons, three fed-edge and three birth bases, two fold bases, two value bases, two read overlaps, four codeless signals', () => {
     const all = [
       ...SLICE_CODES,
       ...MISSING_REASONS,
@@ -114,7 +115,7 @@ describe('HONESTY_CODES — unit', () => {
       ...READ_OVERLAPS,
       ...SIGNALS_WITHOUT_A_CODE_FIELD,
     ];
-    expect(all).toHaveLength(26);
+    expect(all).toHaveLength(27);
     expect(Object.keys(HONESTY_CODES).sort()).toEqual(all.sort());
   });
 
@@ -157,7 +158,7 @@ const HEADER = [
   "type TodayBasis = 'initial+log' | 'log-only';",
   "type TodayMissing = 'empty-log' | 'never-written';",
   "type TodayProvenance = 'empty-log' | 'never-written' | 'not-an-array';",
-  "type TodayFed = 'per-write' | 'stage';",
+  "type TodayFed = 'per-write' | 'stage' | 'built-on-view';",
   "type TodayAttribution = 'append-verb' | 'prefix-inference' | 'whole-value';",
   "type TodayValue = 'never-written' | 'deleted' | 'nested-rows' | 'from-initial-state' | 'redacted';",
   "type TodayWriter = 'never-written' | 'nested-rows' | 'redacted';",
@@ -489,15 +490,23 @@ describe('every code the slice queries and the fold emit is on the registry — 
     for (const reason of emitted) expect(Object.keys(HONESTY_CODES)).toContain(reason);
   });
 
-  it("a fed edge says how it was attributed — 'per-write' with recorded provenance, 'stage' without; both registered", () => {
+  it("a fed edge says how it was attributed — 'per-write' with recorded provenance, 'stage' without, 'built-on-view' for a row the writer built on its step's view; all registered", () => {
     const log = [
       bundle(0),
       bundle(1, { trace: [{ path: 'k1', verb: 'set', readKeys: ['k0'] }] }),
       bundle(2, { trace: [{ path: 'k2', verb: 'set' }] }),
+      // No code of this step read k0. The writer built its `set` of k0 on the step's view, which held k0.
+      bundle(3, { trace: [{ path: 'k0', verb: 'set', builtOnView: true }], overwrite: { k0: 3 } }),
     ];
-    const reads = (id: string) => (id === 's0#0' ? [] : ['k0']);
-    const bases = forwardSliceForKey(log, 'k0', reads).root!.fedEdges.map((edge) => edge.basis);
-    expect(bases).toEqual(['per-write', 'stage']);
+    const reads = (id: string) => (id === 's0#0' || id === 's3#3' ? [] : ['k0']);
+    const root = forwardSliceForKey(log, 'k0', reads, { before: 1 }).root!;
+    const bases = root.fedEdges.map((edge) => edge.basis);
+    expect(bases).toEqual(['per-write', 'stage', 'built-on-view']);
+    expect(root.reads.map((read) => [read.commitIdx, read.builtOnView])).toEqual([
+      [1, undefined],
+      [2, undefined],
+      [3, true],
+    ]);
     for (const basis of bases) expect(Object.keys(HONESTY_CODES)).toContain(basis);
   });
 

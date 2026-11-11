@@ -25,23 +25,25 @@
  *             256 commits (where the writer lookup changes its method) and frozen logs. This
  *             generator is the second reader's, who used it to try to break the first version.
  *
- * NOT COVERED, and pinned as `KNOWN LIMIT` at the end of this file: a `set` row that the WRITER made
- * out of writes that only added to a value. Such a row says `set`, and nothing in it says that the
- * value was built on what was there. A reader cannot follow what the record does not say; the
- * writer has to say it. It happens under BOTH encodings:
+ * THE WRITER'S OWN `set` ROWS. A `set` row is read as a write that replaced the value, and for a
+ * `set` a step made that is what it is. The writer also makes `set` rows of its own, out of writes
+ * that only ADDED to a value, under both encodings:
  *   - `'full'` (the default): rows that would not fold back to what the step read are written as
  *     `set` rows of that read-back. Ordinary writes reach it: a step that merges into `a.x`, deletes
- *     `a.x` and merges into `a`. The first four clauses cannot reach it (they write top-level keys
- *     and fresh paths one level inside), so their passing says nothing about it. The WIDER clauses
- *     do reach it, and leave such a run out: the test knows which paths each step replaced itself,
- *     so a `set` row anywhere else is the writer's.
+ *     `a.x` and merges into `a`.
  *   - `'delta'`: also any step that merged into a key and wrote a path inside it.
+ * Such a row holds what the key held in the step's view, and it now SAYS so (`TraceEntry.builtOnView`):
+ * the step is followed as having read that path from its view. The WIDER clauses run under both
+ * encodings and leave no run out. They also check the mark itself against the test's own books: a
+ * `set` row carries it exactly when the step did not replace that path, or a path around it, itself.
+ * The first four clauses cannot reach these rows (they write top-level keys and fresh paths one level
+ * inside), so their passing said nothing about them; the three cases at the end of this file pin them.
  */
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 
 import { causalChain, forwardSliceForKey } from '../../../../src';
-import type { CausalEdge, CausalNode, CommitBundle } from '../../../../src';
+import type { CausalEdge, CausalNode, CommitBundle, ForwardNode, ForwardSlice } from '../../../../src';
 import { deepFreeze, EventLog, RecordFrame, SharedMemory } from '../../../../src/write';
 
 const KEYS = ['a', 'b'] as const;
@@ -279,6 +281,7 @@ interface WideProgram {
   schedule: number[];
   pad: boolean;
   freeze: boolean;
+  encoding: Encoding;
 }
 const WIDE_SEED = { a: { 'init:a': 1, x: { 'init:x': 1 } } };
 const wideProgram: fc.Arbitrary<WideProgram> = fc.record({
@@ -306,6 +309,7 @@ const wideProgram: fc.Arbitrary<WideProgram> = fc.record({
   schedule: fc.array(fc.nat({ max: 4 }), { maxLength: 40 }),
   pad: fc.boolean(),
   freeze: fc.boolean(),
+  encoding: fc.constantFrom<Encoding>('full', 'delta'),
 });
 
 /** Every writer's name in a value, at any depth. */
@@ -323,7 +327,7 @@ function runWide(program: WideProgram) {
   const events = new EventLog(structuredClone(WIDE_SEED));
   const frame = () => {
     const made = new RecordFrame(state, events);
-    made.useEncoding({ commitValues: 'full', writeProvenance: 'off' });
+    made.useEncoding({ commitValues: program.encoding, writeProvenance: 'off' });
     return made;
   };
   if (program.pad) {
@@ -348,6 +352,8 @@ function runWide(program: WideProgram) {
   const pending = program.steps.map((): string[] => []);
   const committedAt = new Map<string, number>();
   let writerMadeSet = false;
+  /** A `set` row whose mark disagrees with these books: the first one, as text. */
+  let wrongMark: string | undefined;
 
   const commitStep = (i: number): void => {
     const at = events.list().length;
@@ -358,6 +364,11 @@ function runWide(program: WideProgram) {
     for (const row of events.list()[at].trace) {
       const own = [...replaced[i]].some((path) => row.path === path || row.path.startsWith(path + D));
       if (row.verb === 'set' && !own) writerMadeSet = true;
+      // The mark is on exactly the `set` rows the step did not make itself, and on no other verb.
+      const marked = row.builtOnView === true;
+      if (marked !== (row.verb === 'set' && !own)) {
+        wrongMark ??= `s${i} commit ${at}: ${row.verb} ${row.path.split(D).join('.')} is ${marked ? '' : 'not '}marked`;
+      }
     }
     replaced[i].clear();
   };
@@ -398,20 +409,41 @@ function runWide(program: WideProgram) {
     const step = /^s(\d+)#/.exec(id);
     return step ? [...new Set((observed[Number(step[1])] ?? []).map((read) => read.key.replace('.', D)))] : [];
   };
-  return { log, observed, idOf, reads, committedAt, writerMadeSet };
+  return { log, observed, idOf, reads, committedAt, writerMadeSet, wrongMark };
+}
+
+/**
+ * Does the way forward from a write reach `reader` as a reader of `key`: in the life of that write, or
+ * in the life of a later write of the key (or of a path inside or around it) that descends from it?
+ * The second case is a `set` row the writer built on a view that held the write: that row ends the
+ * first life, its step is a reader of it, and the value goes on in the row's own life.
+ */
+function reachesReader(slice: ForwardSlice, reader: string, key: string): boolean {
+  const related = (other: string) => other === key || other.startsWith(key + D) || key.startsWith(other + D);
+  const seen = new Set<ForwardNode>();
+  const queue: ForwardNode[] = slice.root ? [slice.root] : [];
+  while (queue.length > 0) {
+    const node = queue.shift()!;
+    if (seen.has(node)) continue;
+    seen.add(node);
+    if (related(node.key) && node.reads.some((read) => read.runtimeStageId === reader)) return true;
+    for (const edge of node.fedEdges) queue.push(edge.child);
+  }
+  return false;
 }
 
 describe('the walk back and a value built in steps, on a wider run', () => {
-  it('SOUND: nested keys, writes around and deep inside, steps that commit twice, long and frozen logs', () => {
-    let judged = 0;
-    let leftOut = 0;
+  it('SOUND, both encodings: nested keys, writes around and deep inside, steps that commit twice, long and frozen logs', () => {
+    let runs = 0;
+    let writerMade = 0;
     let continued = 0;
     fc.assert(
       fc.property(wideProgram, (program) => {
-        const { log, observed, idOf, reads, writerMadeSet } = runWide(program);
-        if (writerMadeSet) return void leftOut++;
-        judged++;
+        const { log, observed, idOf, reads, writerMadeSet, wrongMark } = runWide(program);
+        runs++;
+        if (writerMadeSet) writerMade++;
         if (log.some((bundle) => bundle.phase === 'exit')) continued++;
+        expect(wrongMark, 'the mark on a set row the writer made').toBeUndefined();
         for (let i = 0; i < observed.length; i++) {
           const root = causalChain(log, idOf(i), reads, { maxNodes: 100_000, maxDepth: 100_000 })!;
           for (const { key, tokens } of observed[i]) {
@@ -433,49 +465,47 @@ describe('the walk back and a value built in steps, on a wider run', () => {
           }
         }
       }),
-      { numRuns: 3000 },
+      { numRuns: 4000 },
     );
-    // Most runs are judged, and many of them hold a step that committed twice.
-    expect(judged).toBeGreaterThan(leftOut * 5);
+    // No run is left out, and many of them hold what used to be the limit: a `set` row the writer made.
+    expect(runs).toBe(4000);
+    expect(writerMade).toBeGreaterThan(200);
     expect(continued).toBeGreaterThan(300);
-  }, 120_000);
+  }, 180_000);
 
-  it('FORWARD: the reader is among the readers of the life of every write its value names', () => {
+  it('FORWARD, both encodings: the reader is among the readers of the life of every write its value names', () => {
     fc.assert(
       fc.property(wideProgram, (program) => {
-        const { log, observed, idOf, reads, committedAt, writerMadeSet } = runWide(program);
-        if (writerMadeSet) return;
+        const { log, observed, idOf, reads, committedAt } = runWide(program);
         for (let i = 0; i < observed.length; i++) {
           for (const { key, tokens } of observed[i]) {
             for (const token of tokens) {
               if (fromBeforeTheRun(token) || token.startsWith(`s${i}:`)) continue;
               const at = committedAt.get(token)!;
-              const life = forwardSliceForKey(log, key.split('.'), reads, { before: at + 1, maxNodes: 100_000 }).root;
-              expect(life?.commitIdx, `${token} was written to ${key} at ${at}`).toBe(at);
+              const life = forwardSliceForKey(log, key.split('.'), reads, { before: at + 1, maxNodes: 100_000 });
+              expect(life.root?.commitIdx, `${token} was written to ${key} at ${at}`).toBe(at);
+              // The reader read the value while this write was in it: it is a reader of this life, or of
+              // the life of a later write that the writer built on a view which held it.
               expect(
-                life?.reads.some((read) => read.runtimeStageId === idOf(i)),
-                `${idOf(i)} read ${key} holding ${token}: it is among the readers of that write's life`,
+                reachesReader(life, idOf(i), key.replace('.', D)),
+                `${idOf(i)} read ${key} holding ${token}: the way forward from that write reaches it`,
               ).toBe(true);
             }
           }
         }
       }),
-      { numRuns: 2000 },
+      { numRuns: 2500 },
     );
-  }, 120_000);
+  }, 180_000);
 });
 
 // A `set` row is read as a write that replaced the value, and for a `set` a step made that is what
-// it is. The writer also makes `set` rows of its own, out of writes that only ADDED to a value:
-//   - either encoding: a family of rows that would not fold back to what the step read is written as
-//     `set` rows of that read-back (`TransactionBuffer · emitReadBack`). Ordinary writes reach it
-//     under the default encoding: merge into `a.x`, delete `a.x`, merge into `a`;
-//   - `'delta'`: also a step that merged into a key AND wrote a path inside it. The two rows share
-//     storage in the bundle, so both are written as a `set` of the whole value.
-// Such a row holds what the key held when the step began, plus the step's own part, and no field of
-// the row says so. The walk then stops at that step, and the steps whose writes are still in the
-// value are left out, with no note. When the writer says it, these tests ask for the right answer.
-describe('KNOWN LIMIT: a set row the writer made out of writes that only added', () => {
+// it is. The writer also makes `set` rows of its own, out of writes that only ADDED to a value. Such a
+// row holds what the key held in the step's view, plus the step's own part. Until the writer marked
+// it, nothing in the row said so: the walk stopped at that step, and the steps whose writes were
+// still in the value were left out, with no note. These three were pinned as KNOWN LIMIT with the
+// wrong answer; they now ask for the right one.
+describe('CLOSED: a set row the writer made out of writes that only added says so, and is followed', () => {
   const merged: Op[][] = [
     [{ kind: 'merge', key: 'a' }],
     [
@@ -485,30 +515,34 @@ describe('KNOWN LIMIT: a set row the writer made out of writes that only added',
     [{ kind: 'read', key: 'a' }],
   ];
 
-  it('full: a step that merges into a key and writes a path inside it keeps its verbs, and the walk holds every step', () => {
+  it('full: a step that merges into a key and writes a path inside it keeps its verbs, and no row is marked', () => {
     const { log, observed } = run({ steps: merged, schedule: [], encoding: 'full' });
     expect(log[1].trace.map((row) => row.verb)).toEqual(['merge', 'set']);
-    expect(log[1].trace[1].path).not.toBe('a'); // the `set` is of a path inside the key
+    expect(log[1].trace[1].path).not.toBe('a'); // the `set` is of a path inside the key, and the step made it
+    expect(log.flatMap((bundle) => bundle.trace).some((row) => row.builtOnView)).toBe(false);
     expect(observed[2][0].tokens).toEqual(['init:a', 's0:0', 's1:0', 's1:1']);
     expect(firstUnexplained(log, observed)).toBeUndefined();
   });
 
-  it('delta: the same step is one set of the whole value, and the walk stops at it', () => {
+  it('delta: the same step is one set of the whole value, marked, and the walk goes on through it', () => {
     const { log, observed } = run({ steps: merged, schedule: [], encoding: 'delta' });
-    // The value is the same: it still holds what s0 wrote and what was there before the run.
     expect(observed[2][0].tokens).toEqual(['init:a', 's0:0', 's1:0', 's1:1']);
-    expect(log[1].trace.filter((row) => row.path === 'a').map((row) => row.verb)).toEqual(['set']);
-    // The omission, pinned: s0 is not on the walk back from the reader.
-    expect(firstUnexplained(log, observed)).toBe('s2#0 read a holding init:a: the walk does not end before the run');
+    // `set a` holds the whole value and the step never set `a`: marked. The path inside it the step did set.
+    expect(log[1].trace.map((row) => [row.verb, row.path === 'a' ? 'a' : 'a/…', row.builtOnView])).toEqual([
+      ['set', 'a/…', undefined],
+      ['set', 'a', true],
+    ]);
+    expect(firstUnexplained(log, observed)).toBeUndefined();
     const root = causalChain(log, 's2#0', readsOf(observed))!;
-    expect([...through(root, 'a').steps]).toEqual(['s1#0']);
+    expect([...through(root, 'a').steps].sort()).toEqual(['s0#0', 's1#0']);
+    expect(through(root, 'a').preRun).toBe(true);
   });
 
-  it('full, the default: merge into a.x, delete a.x, merge into a is written as two sets, and the walk stops at it', () => {
-    // Found by the second reader of this change. Nothing unusual is written here, and the encoding is
-    // the default one. The rows would not fold back to what the step read, so the writer stored what
-    // it read: `set a.x`, `set a`. What `a` held before is still in it (`init:a`).
-    const { log, observed, idOf, reads, writerMadeSet } = runWide({
+  it('full, the default: merge into a.x, delete a.x, merge into a is two sets; the one of `a` is marked and followed', () => {
+    // Found by the second reader of the reader rule. Nothing unusual is written here, and the encoding is
+    // the default one. The rows would not fold back to what the step read, so the writer stored what it
+    // read: `set a.x`, `set a`. The step deleted `a.x` itself; it never replaced `a`.
+    const { log, observed, idOf, reads } = runWide({
       steps: [
         [{ kind: 'merge', key: 'a' }],
         [
@@ -521,15 +555,17 @@ describe('KNOWN LIMIT: a set row the writer made out of writes that only added',
       schedule: [],
       pad: false,
       freeze: false,
+      encoding: 'full',
     });
-    expect(log[1].trace.map((row) => `${row.verb} ${row.path.split(D).join('.')}`)).toEqual(['set a.x', 'set a']);
-    expect(writerMadeSet).toBe(true);
-    // The value the last step read still names the first step and the value from before the run.
+    expect(
+      log[1].trace.map(
+        (row) => `${row.verb} ${row.path.split(D).join('.')}${row.builtOnView ? ' (built on view)' : ''}`,
+      ),
+    ).toEqual(['set a.x', 'set a (built on view)']);
     expect(observed[2][0].tokens).toEqual(expect.arrayContaining(['init:a', 's0:0', 's1:2']));
-    // The omission, pinned: the walk back from the reader ends at the middle step.
     const root = causalChain(log, idOf(2), reads)!;
     const walked = through(root, 'a');
-    expect([...walked.steps]).toEqual([idOf(1)]);
-    expect(walked.preRun).toBe(false);
+    expect([...walked.steps].sort()).toEqual([idOf(0), idOf(1)].sort());
+    expect(walked.preRun).toBe(true);
   });
 });

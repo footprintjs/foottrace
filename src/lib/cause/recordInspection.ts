@@ -12,7 +12,7 @@ import {
   readAttributionIsPrecise,
   recordGapCollector,
 } from './recordCoverage.js';
-import { builtOnParent } from './recordBuiltOn.js';
+import { builtOnParents } from './recordBuiltOn.js';
 import { nodeIdFor } from './recordIdentity.js';
 import { readKeysForStage } from './recordScope.js';
 import type { AddRecordGap, PreparedRecordScope, RecordInspection, ResolvedRecordNode } from './recordTypes.js';
@@ -94,8 +94,9 @@ function projectParentEdges(
 }
 
 /**
- * The write this node's own write was folded onto, when it did not replace the key
- * (`recordBuiltOn.ts`): asked for the node's own COMMIT, never read off the step-level walk.
+ * The writes this node's value still holds without a read of its step saying so
+ * (`recordBuiltOn.ts`): the write it was folded onto, and what its step's view held when the writer
+ * built a `set` row on that view. Asked for the node's own COMMIT, never read off the step-level walk.
  *
  * WHY NOT THE WALK'S `builtOn` EDGES. The walk answers in steps. It draws no edge from a step to its
  * own earlier commit, and it lets a certain read of the key from the same STEP stand in for this
@@ -106,14 +107,16 @@ function projectParentEdges(
  * One edge per node. Where a read already names that write:
  *   - a CERTAIN read keeps its edge as it is. A step that read the key and then added to it
  *     (`scope.box.b = 2`) is answered as it always was, byte for byte;
- *   - a read that is only a POSSIBLE source gives its place to this edge, which is certain. The
- *     node keeps the `conservative` gap that read brought: its other sources are still only possible.
+ *   - a read that is only a POSSIBLE source gives its place to a certain edge from here. The node
+ *     keeps the `conservative` gap that read brought: its other sources are still only possible.
+ * An edge from here that is itself only possible (a view with a write of the key in its window)
+ * stands where no read names the node, and brings `conservative` with it.
  *
- * A write folded onto the value from before the run has no node to point at and adds no gap of its
- * own: the node already carries `conservative` for a value with no whole write in range (the
+ * A write that rests on the value from before the run has no node to point at and adds no gap of
+ * its own: the node already carries `conservative` for a value with no whole write in range (the
  * `'from-initial-state'` note of its slice), as it did before this edge existed.
  */
-function addBuiltOnParent(
+function addBuiltOnParents(
   scope: PreparedRecordScope,
   key: string,
   commitIndex: number,
@@ -121,13 +124,19 @@ function addBuiltOnParent(
   maximumEdges: number,
   addGap: AddRecordGap,
 ): void {
-  const under = builtOnParent(scope, key, commitIndex);
-  if (under === undefined || under === 'pre-run') return;
-  const named = parents.edges.findIndex((edge) => edge.kind === 'data' && edge.nodeId === under.nodeId);
-  if (named >= 0) {
-    if (parents.onlyPossible.has(under.nodeId)) parents.edges[named] = under;
-  } else if (parents.edges.length >= maximumEdges) addGap('edge-limit');
-  else parents.edges.push(under);
+  for (const { edge, certain } of builtOnParents(scope, key, commitIndex, maximumEdges + 1).parents) {
+    const named = parents.edges.findIndex((other) => other.kind === 'data' && other.nodeId === edge.nodeId);
+    if (named >= 0) {
+      if (certain && parents.onlyPossible.has(edge.nodeId)) parents.edges[named] = edge;
+      continue;
+    }
+    if (parents.edges.length >= maximumEdges) {
+      addGap('edge-limit');
+      return;
+    }
+    parents.edges.push(edge);
+    if (!certain) addGap('conservative');
+  }
 }
 
 /** Derive parent adjacency and its ordered gaps together from the same bounded canonical query. */
@@ -187,7 +196,7 @@ export function inspectRecordNode(
   for (const note of slice?.notes ?? [])
     if (note.code === 'redacted') coverage.addGap('redacted');
     else if (note.code === 'nested-rows' || note.code === 'from-initial-state') coverage.addGap('conservative');
-  // The walk's own `builtOn` edges are left out: they are step-level (`addBuiltOnParent` says why).
+  // The walk's own `builtOn` edges are left out: they are step-level (`addBuiltOnParents` says why).
   const parents = projectParentEdges(
     scope,
     (root?.parentEdges ?? []).filter((edge) => edge.builtOn === undefined),
@@ -197,7 +206,7 @@ export function inspectRecordNode(
     coverage.addGap,
   );
   if (identity.key !== undefined && !identity.read) {
-    addBuiltOnParent(scope, identity.key, commitIndex, parents, maximumEdges, coverage.addGap);
+    addBuiltOnParents(scope, identity.key, commitIndex, parents, maximumEdges, coverage.addGap);
   }
   return { adjacency: { edges: parents.edges, complete: coverage.gaps.length === 0 }, gaps: coverage.gaps };
 }

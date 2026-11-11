@@ -4,7 +4,7 @@
  * The record graph without exact read sources, over runs made on `SharedMemory`, `EventLog` and
  * `RecordFrame`: steps side by side (so some carry a read window), steps that commit more than once
  * (`cut`: the later commit is a continuation), rows on the key and inside it, per-write read
- * provenance on.
+ * provenance on, under both encodings of the log (`commitValues: 'full'` and `'delta'`).
  *
  *   INVERSE  every `'recorded-write'` edge is listed both ways: the child names the node among its
  *            parents, and the parent names it among its children. A law of these edges.
@@ -16,9 +16,11 @@
  * edges, round 2). It failed on the first version of that change, which answered in steps where
  * the graph's nodes are commits, and it fails on the version before the change.
  *
- * Left out, as in the walk's own property test: a run in which the WRITER made a `set` row out of
- * writes that only added (`memory/builtOn.ts`, NOT COVERED). The test knows which paths each step
- * replaced itself, so a `set` row anywhere else is the writer's.
+ * No run is left out. A run in which the WRITER made a `set` row out of writes that only added used
+ * to be: the row read as a replacement and the way back ended there. The writer marks such a row now
+ * (`TraceEntry.builtOnView`) and the graph follows it to what the step's view held, so VALUE holds
+ * for those runs too. They are the common case under `'delta'`, where a merge of a key and a write
+ * inside it are stored as one `set`.
  */
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
@@ -30,6 +32,7 @@ const address = { logRunId: 'run', drillPath: [] };
 const ctx = () => ({ signal: new AbortController().signal });
 const D = '\u001f';
 type Kind = 'read' | 'set' | 'merge' | 'inside' | 'cut';
+type Encoding = 'full' | 'delta';
 interface Program {
   steps: Kind[][];
   schedule: number[];
@@ -43,13 +46,13 @@ const program: fc.Arbitrary<Program> = fc.record({
 });
 
 /** The first thing that is wrong in the graph of this run, as text; `undefined` when nothing is. */
-async function firstFault(p: Program): Promise<string | undefined | 'left out'> {
+async function firstFault(p: Program, encoding: Encoding): Promise<string | undefined> {
   const state = new SharedMemory(undefined, {});
   const events = new EventLog({});
   const count = p.steps.length;
   const frame = () => {
     const made = new RecordFrame(state, events);
-    made.useEncoding({ commitValues: 'full', writeProvenance: 'reads-prefix' });
+    made.useEncoding({ commitValues: encoding, writeProvenance: 'reads-prefix' });
     return made;
   };
   const frames = p.steps.map(frame);
@@ -61,25 +64,15 @@ async function firstFault(p: Program): Promise<string | undefined | 'left out'> 
   /** Where each token was committed, and what each step wrote since its last commit. */
   const committedAt = new Map<string, number>();
   const pending = p.steps.map((): string[] => []);
-  const replaced = p.steps.map(() => new Set<string>());
-  let writerMadeSet = false;
 
   const commitStep = (i: number): void => {
     // A reader writes a key of its own with its first commit: that write is the node the walk back starts at.
-    if (commits[i] === 0 && p.steps[i].includes('read')) {
-      frames[i].write([`o${i}`], 1, 'set');
-      replaced[i].add(`o${i}`);
-    }
+    if (commits[i] === 0 && p.steps[i].includes('read')) frames[i].write([`o${i}`], 1, 'set');
     const at = events.list().length;
     const phase = commits[i]++ > 0 ? { phase: 'exit' as const } : {};
     frames[i].commit(() => ({ stage: `s${i}`, stageId: `s${i}`, runtimeStageId: `s${i}#0`, ...phase }));
     frames[i].release();
     for (const token of pending[i].splice(0)) committedAt.set(token, at);
-    for (const row of events.list()[at].trace) {
-      const own = [...replaced[i]].some((path) => row.path === path || row.path.startsWith(path + D));
-      if (row.verb === 'set' && !own) writerMadeSet = true;
-    }
-    replaced[i].clear();
     frames[i] = frame();
   };
   const move = (i: number): void => {
@@ -100,18 +93,12 @@ async function firstFault(p: Program): Promise<string | undefined | 'left out'> 
     }
     const token = `s${i}:${writes[i]++}`;
     pending[i].push(token);
-    if (kind === 'set') {
-      replaced[i].add('k');
-      frames[i].write(['k'], { [token]: 1 }, 'set');
-    } else if (kind === 'merge') frames[i].write(['k'], { [token]: 1 }, 'merge');
-    else {
-      replaced[i].add(['k', token].join(D));
-      frames[i].write(['k', token], 1, 'set');
-    }
+    if (kind === 'set') frames[i].write(['k'], { [token]: 1 }, 'set');
+    else if (kind === 'merge') frames[i].write(['k'], { [token]: 1 }, 'merge');
+    else frames[i].write(['k', token], 1, 'set');
   };
   for (const pick of p.schedule) move(pick % count);
   for (let i = 0; i < count; i++) while (!done[i]) move(i);
-  if (writerMadeSet) return 'left out';
 
   const log = events.list();
   const reads = Object.fromEntries(p.steps.map((kinds, i) => [`s${i}#0`, kinds.includes('read') ? ['k'] : []]));
@@ -124,7 +111,7 @@ async function firstFault(p: Program): Promise<string | undefined | 'left out'> 
     .map(
       (bundle, at) =>
         `${at}:${bundle.stageId}${bundle.phase ? '/' + bundle.phase : ''}[${bundle.trace
-          .map((row) => `${row.verb} ${row.path.split(D).join('.')}`)
+          .map((row) => `${row.verb} ${row.path.split(D).join('.')}${row.builtOnView ? ' (built on view)' : ''}`)
           .join(', ')}]`,
     )
     .join(' | ');
@@ -187,18 +174,16 @@ async function firstFault(p: Program): Promise<string | undefined | 'left out'> 
 }
 
 describe('the cause graph and a value built in steps, on the real writer', () => {
-  it('INVERSE and VALUE: steps side by side, steps that commit more than once, rows inside the key', async () => {
-    let judged = 0;
-    let leftOut = 0;
-    await fc.assert(
-      fc.asyncProperty(program, async (p) => {
-        const fault = await firstFault(p);
-        if (fault === 'left out') return void leftOut++;
-        judged++;
-        expect(fault).toBeUndefined();
-      }),
-      { numRuns: 1500 },
-    );
-    expect(judged).toBeGreaterThan(leftOut * 10);
-  }, 180_000);
+  it.each(['full', 'delta'] as const)(
+    '%s: INVERSE and VALUE: steps side by side, steps that commit more than once, rows inside the key',
+    async (encoding) => {
+      await fc.assert(
+        fc.asyncProperty(program, async (p) => {
+          expect(await firstFault(p, encoding)).toBeUndefined();
+        }),
+        { numRuns: 1500 },
+      );
+    },
+    180_000,
+  );
 });

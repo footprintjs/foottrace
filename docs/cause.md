@@ -44,6 +44,22 @@ Forward, a write's children include the next write of the key, when that one was
 
 A node is named once among a node's parents. When a read already names the write underneath: a certain read keeps its edge as it is (a step that read a key and then added to it is answered as before), and a read that is only a possible source gives its place to the `'recorded-write'` edge, which is certain. The node keeps the `conservative` gap that read brought.
 
+### A `set` row the writer built on the view
+
+The record's writer sometimes stores a `set` of a whole value where the step only added, and marks that row `builtOnView` (the [record contract](guides/record-contract.md) says when, and what a producer owes). In the fold the row replaces the value. It still holds what the step's view held, so the node has the write that view held as its parent, with the same `'recorded-write'` attribution:
+
+```ts
+// commitValues: 'delta'. Start sets `box`. Fill merges into `box` and sets `box.in`, reading nothing.
+// The record holds ONE `set` of `box` for Fill, marked. Use reads `box` and writes `final`.
+await graph.parents(node('fill', 'box'));   // [ start·box  attribution: 'recorded-write' ]
+await graph.children(node('start', 'box')); // [ fill·box   attribution: 'recorded-write' ]
+// Without the mark the row read as a replacement: Fill had no parent, and Start was never reached.
+```
+
+The parent is found by the read rule, with the stamps of the commit that carries the row. WHY not the write just before the commit, as for a fold: the view was pinned before the commit. A write a sibling committed in between is not under the row; the row replaced it. When the key was written inside that commit's window, the record does not say which of those writes the view held. Each of them is then a parent, and the node says `conservative`. A step that also read the key keeps the read's edge, as above.
+
+The two directions are inverses for these edges too, checked on logs the real writer made under both encodings (`test/cause/built-on.property.test.ts`). A record from outside can put a marked row and a window over the whole log on every commit, so one question (the parents or the children of one node) is answered in work that grows with the log, not with its square, and stops at the cap on edges (`test/cause/built-on-view.test.ts` counts it).
+
 A write folded onto the value from before the run has no node to point at and adds no gap of its own. Without exact read sources the node carries `conservative`, as it always has for a value with no whole write in range; that gap does not consult the record's initial state, so it is also there when the key did not exist before the run. With exact sources the pre-run state is a known end of the walk. A graph of your own may return `'recorded-write'` on a data edge; a control edge with it is refused, like any other mismatch.
 
 ## Optional exact root-read sources

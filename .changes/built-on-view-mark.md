@@ -1,0 +1,12 @@
+---
+type: added
+bump: minor
+---
+
+- `TraceEntry.builtOnView` (`true`): the writer's mark on a `set` row it made out of writes that only added to the path. The row holds what the path held in the stage's view of state, with the stage's own writes folded in. Absent on a `set` the stage made itself, and never on another verb. The record contract has the producer's side as law 8.
+- `CausalEdge.builtOn` gains `'built-on-view'`: the child's write is such a row, and the parent is the write the stage's view held. With the key also written inside the commit's read window the edge carries `overlap`, as a read's edge does. `sliceToJSON` carries it, and `formatCausalChain` prints `← built on <key>`. Where a fold and a view name the same parent there is one edge, and it says `'partial-write'`.
+- `ForwardRead.builtOnView` (`true`) and `FedBasis` gains `'built-on-view'`. A commit that holds such a row is a reader of the value its view held. No code of the stage read the key, so the read is marked, and the one edge goes to that row with the new basis: exact, because the row says it. Where the stage also read the key, the read keeps the edge and the basis it always had. `formatForwardSlice` prints `held by … (in a row the writer built on its view)` and `→ fed [exact, built on the view]`. Code that treats every basis other than `'per-write'` as conservative stays on the safe side.
+- `KeyMoment.builtOnViewIdxs`, on a write moment of `keyTimeline`: the writes the view of such a commit could have held, when one number cannot say it (the key was also written while the stage ran). With one certain write under the row, `builtOnWriteIdx` says it. `formatTimeline` prints `(built on the value its step's view held: commit A or B)`. The timeline shows no read moment for such a commit.
+- The code `'built-on-view'` in `HONESTY_CODES`.
+- `foottrace/cause`: a node whose write is such a row has an edge of attribution `'recorded-write'` to each write the view could have held, and those writes name it among their children. With several, the node says `conservative`. One question costs work that grows with the log and stops at the cap on edges, however the record is shaped.
+- The cause graph and the PROV export keep the mark on the copy of a record they read, and refuse a bundle whose mark cannot be one (a value other than `true`, or the mark on a row that is not a `set`). The PROV export itself is unchanged: such a row is exported as the same row without the mark.

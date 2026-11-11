@@ -117,12 +117,18 @@ export function bundleOf(value: unknown, after: number, budget: { left: number }
     const readAttemptsOmitted = window.omitted;
     const readAttempts = rawAttempts === undefined ? undefined : names(rawAttempts, 128, true, window.expectedLength);
     if (readAttempts?.some((id) => !parseAttemptId(id))) throw new RecordRefusal();
+    // The writer's mark on a `set` row it built on the step's view. Kept, never dropped: without it the
+    // row reads as a replacement and the walk leaves out every step whose write is still in the value.
+    // A value that cannot be the mark, or the mark on another verb, refuses the bundle.
+    const builtOnView = recordOwn(t, 'builtOnView');
+    if (builtOnView !== undefined && (builtOnView !== true || verb !== 'set')) throw new RecordRefusal();
     return {
       path,
       verb: verb as 'set',
       ...(readKeys === undefined ? {} : { readKeys: names(readKeys, 128, true) }),
       ...(readAttempts?.length ? { readAttempts } : {}),
       ...(readAttemptsOmitted === undefined ? {} : { readAttemptsOmitted }),
+      ...(builtOnView === true ? { builtOnView: true as const } : {}),
     };
   });
   spend(
