@@ -177,6 +177,10 @@ describe('the rule: what a write was folded onto (commit by commit)', () => {
     expect(over(log, 1)).toBe(2);
   });
 
+  // WHY A TIME LIMIT OF ITS OWN. The work is fixed: 597,870 logs and over a million pairs, about half a
+  // second on a laptop. On a slow CI runner under coverage it took 5.08 s, which is past the default
+  // limit of 5 s, and the job went red with every assertion right. A test that counts through a fixed
+  // space is not a test of speed; it gets room, like the other exhaustive tests of this suite.
   it('forward is the inverse of backward, for every log of up to six commits by three steps', () => {
     // Each commit: one of three steps, and it replaces `k`, adds to it, or leaves it alone. A step may
     // commit more than once and steps may interleave (a fork's children, a mount's two commits).
@@ -210,7 +214,7 @@ describe('the rule: what a write was folded onto (commit by commit)', () => {
     grow([]);
     expect(logs).toBe(9 + 9 ** 2 + 9 ** 3 + 9 ** 4 + 9 ** 5 + 9 ** 6);
     expect(pairs).toBeGreaterThan(1_000_000);
-  });
+  }, 60_000);
 });
 
 describe('the walk back through a value built in steps', () => {
