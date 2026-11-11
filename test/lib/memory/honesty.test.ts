@@ -1,7 +1,7 @@
 /**
  * honesty.ts — the ONE vocabulary for what a reader cannot see (F4a).
  *
- *   unit      the registry is frozen and closed, holds exactly the twenty-eight codes, and every explanation is
+ *   unit      the registry is frozen and closed, holds exactly the twenty-nine codes, and every explanation is
  *             ONE sentence
  *   boundary  the TYPES, asked of the real compiler: a code the registry does not hold FAILS TO COMPILE; the
  *             six public unions are exactly the members they were (they did not widen); the sentences are
@@ -41,10 +41,14 @@
  * `readStoredRecord` could not read (`StoredRecord.unread`). The registry holds TWENTY-TWO; no union widened and
  * no runtime string the readers wrote before changed.
  *
- * A `set` row the writer built on its step's view added TWO codes. `'built-on-view'` (`FedBasis`, and the mark
- * of a causal edge): the write the view held is under the row. `'pre-run-view'` (a slice note, and the code of
- * `CausalNode.preRunView`): the view held no write of the key, so that part of the row came from before the
- * run. The registry holds TWENTY-EIGHT codes (nine slice notes) and `Today` gains the note. ONE earlier
+ * A `set` row the writer built on its step's view added THREE codes, one for each thing a reader can say of the
+ * view. `'built-on-view'` (`FedBasis`, and the mark of a causal edge): the write the view held is under the row.
+ * `'pre-run-view'` (a slice note, and the code of `CausalNode.preRunView`): the view held no write of the key,
+ * so that part of the row came from before the run. `'view-not-placed'` (`ViewOverlap`: a causal edge's and a
+ * forward read's `overlap`, and a slice note): the array does not show where the view sits, so each write it
+ * could have held is a possible source. WHY that last one does not borrow a read's two overlap codes: they say
+ * a step was running while the key was written, and no step read the key here.
+ * The registry holds TWENTY-NINE codes (nine slice notes) and `Today` gains both notes. ONE earlier
  * sentence was reworded, on purpose: `'from-initial-state'` is said of a point (the end of a range, or one
  * write), because a timeline that names a write folded onto the pre-run value can hold a later `set`, and "no
  * set in the range asked about" was then false of it. WHY the view has a code of its own and does not borrow
@@ -67,6 +71,7 @@ import {
   readsNotRecordedNote,
   truncatedNote,
   unknownKeyNote,
+  viewNotPlacedNote,
 } from '../../../src/lib/slice/keyIndex';
 import {
   arrayProvenance,
@@ -97,6 +102,8 @@ const FOLD_BASES = ['initial+log', 'log-only'];
 const VALUE_BASES = ['deleted', 'from-initial-state'];
 /** The read window: why a source of a read is only possible (`readWindow.ts · ReadOverlap`). */
 const READ_OVERLAPS = ['replaced-while-running', 'written-while-running'];
+/** Why a source of a `set` row built on a view is only possible (`builtOn.ts · ViewOverlap`). Also a slice note. */
+const VIEW_OVERLAPS = ['view-not-placed'];
 const SIGNALS_WITHOUT_A_CODE_FIELD = ['log-gap', 'incomplete-sources', 'redacted', 'unread-entry'];
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -119,7 +126,7 @@ describe('HONESTY_CODES — unit', () => {
     }).toThrow(TypeError);
   });
 
-  it('holds exactly twenty-eight codes — nine slice notes, three missing reasons, three fed-edge and three birth bases, two fold bases, two value bases, two read overlaps, four codeless signals', () => {
+  it('holds exactly twenty-nine codes — nine slice notes, three missing reasons, three fed-edge and three birth bases, two fold bases, two value bases, two read overlaps, one view overlap, four codeless signals', () => {
     const all = [
       ...SLICE_CODES,
       ...MISSING_REASONS,
@@ -128,9 +135,10 @@ describe('HONESTY_CODES — unit', () => {
       ...FOLD_BASES,
       ...VALUE_BASES,
       ...READ_OVERLAPS,
+      ...VIEW_OVERLAPS,
       ...SIGNALS_WITHOUT_A_CODE_FIELD,
     ];
-    expect(all).toHaveLength(28);
+    expect(all).toHaveLength(29);
     expect(Object.keys(HONESTY_CODES).sort()).toEqual(all.sort());
   });
 
@@ -169,7 +177,8 @@ const HEADER = [
   "import { HONESTY_CODES } from './honesty.js';",
   "import type { HonestyCode, RegisteredCode } from './honesty.js';",
   "import type { ReadOverlap } from './readWindow.js';",
-  "type Today = 'conservative-fed-edges' | 'concurrent-write' | 'nested-rows' | 'partial-write' | 'pre-run-origin' | 'reads-not-recorded' | 'unknown-key' | 'truncated' | 'redacted' | 'from-initial-state' | 'pre-run-view';",
+  "import type { ViewOverlap } from './builtOn.js';",
+  "type Today = 'conservative-fed-edges' | 'concurrent-write' | 'nested-rows' | 'partial-write' | 'pre-run-origin' | 'reads-not-recorded' | 'unknown-key' | 'truncated' | 'redacted' | 'from-initial-state' | 'pre-run-view' | 'view-not-placed';",
   "type TodayBasis = 'initial+log' | 'log-only';",
   "type TodayMissing = 'empty-log' | 'never-written';",
   "type TodayProvenance = 'empty-log' | 'never-written' | 'not-an-array';",
@@ -178,9 +187,10 @@ const HEADER = [
   "type TodayValue = 'never-written' | 'deleted' | 'nested-rows' | 'from-initial-state' | 'redacted';",
   "type TodayWriter = 'never-written' | 'nested-rows' | 'redacted';",
   "type TodayOverlap = 'replaced-while-running' | 'written-while-running';",
+  "type TodayViewOverlap = 'view-not-placed';",
   // every declared vocabulary, plus the four codes a field carries instead of a `code` value
   'type Declared = HonestyNoteCode | MissingSliceReason | MissingProvenanceReason | FedBasis | AttributionBasis | FoldBasis | ' +
-    'ValueBasis | WriterBasis | ReadOverlap | ' +
+    'ValueBasis | WriterBasis | ReadOverlap | ViewOverlap | ' +
     "'log-gap' | 'incomplete-sources' | 'redacted' | 'unread-entry';",
 ];
 
@@ -213,6 +223,8 @@ const CASES: Record<string, string> = {
     'const e6: TodayWriter = null as unknown as WriterBasis; const f6: WriterBasis = null as unknown as TodayWriter;',
   overlapUnionIsToday:
     'const e7: TodayOverlap = null as unknown as ReadOverlap; const f7: ReadOverlap = null as unknown as TodayOverlap;',
+  viewOverlapUnionIsToday:
+    'const e8: TodayViewOverlap = null as unknown as ViewOverlap; const f8: ViewOverlap = null as unknown as TodayViewOverlap;',
   // … and did NOT widen to every registered code
   sliceUnionRefusesALogGap: "const g: HonestyNoteCode = 'log-gap';",
   sliceUnionRefusesABasis: "const h: HonestyNoteCode = 'log-only';",
@@ -293,11 +305,12 @@ describe('the types — asked of the real compiler', () => {
     expect(byCase.get('lookupByAnUnregisteredCodeFails')).toEqual(['TS7053']);
   });
 
-  it("the nine public unions are exactly today's members: mutually assignable with the literal unions, and not widened", () => {
+  it("the ten public unions are exactly today's members: mutually assignable with the literal unions, and not widened", () => {
     for (const name of [
       'valueUnionIsToday',
       'writerUnionIsToday',
       'overlapUnionIsToday',
+      'viewOverlapUnionIsToday',
       'sliceUnionIsToday',
       'foldUnionIsToday',
       'missingUnionIsToday',
@@ -438,6 +451,22 @@ describe("the two notes of a write that rests on the value from before the run �
     // The two notes never share words: the fold's says the value may be only part of what the key
     // held, and that no write of the whole value is under it. The view's says neither.
     expect(one.detail).not.toMatch(/no write of its whole value|only part of it/);
+  });
+});
+
+describe("a view the array does not place — 'view-not-placed'", () => {
+  it('its note is one sentence for all three queries, with no count and no word of a step that ran', () => {
+    const note = viewNotPlacedNote();
+    expect(note).toEqual({
+      code: 'view-not-placed',
+      detail:
+        "a set row the writer built on a step's view is listed with possible sources only — the array handed over does not show where that view sits among its commits (bundles around the commit say no index, the array holds several logs, or the stamp cannot be one), so each write the view could have held is named and none is certain.",
+    });
+    expect(Object.keys(HONESTY_CODES)).toContain(note.code);
+    // A read's words say a step was running while the key was written. No step read the key here.
+    for (const words of [note.detail, HONESTY_CODES['view-not-placed']]) {
+      expect(words).not.toMatch(/looked at state again|while it ran|was running|reading step|side by side/);
+    }
   });
 });
 

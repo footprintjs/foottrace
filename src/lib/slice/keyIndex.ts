@@ -39,7 +39,8 @@ import {
 } from '../memory/keyPaths.js';
 import { isViewRow, replacesValue } from '../memory/builtOn.js';
 import { logModel } from '../memory/logModel.js';
-import { type ReadOverlap, type ReadWindow, readOfValue } from '../memory/readWindow.js';
+import type { SourceOverlap } from '../memory/parentEdges.js';
+import { type ReadWindow, readOfValue } from '../memory/readWindow.js';
 import { placesOf } from '../memory/windowPlacement.js';
 import { shownPath } from '../record-paths/codec.js';
 import type { CommitBundle, TraceEntry } from '../memory/types.js';
@@ -239,12 +240,16 @@ export function buildKeyIndex(commitLog: CommitBundle[], lookup: KeysReadLookup)
   };
 }
 
-/** One commit that read a value, and why it is only a possible reader when it is (`readWindow.ts · ReadOverlap`). */
+/**
+ * One commit that read a value, and why it is only a possible reader when it is: a read's reason
+ * (`readWindow.ts · ReadOverlap`), or the view's (`builtOn.ts · ViewOverlap`) when the commit holds the
+ * value through a row built on a view alone and the array does not show where that view sits.
+ */
 export interface LifeReader {
   /** The ARRAY position of the commit: a step's first bundle, or a bundle that holds a row built on the view. */
   readonly position: number;
   /** Present when the commit is only a POSSIBLE reader of this value, by every way it read the key. */
-  readonly overlap?: ReadOverlap;
+  readonly overlap?: SourceOverlap;
   /** The step's own code read this value: its recorded reads name the key, dated by its read window. */
   readonly step: boolean;
   /** A `set` row of this commit, built by the writer on the step's view, holds this value (`KeyIndex.viewReadersOf`). */
@@ -252,7 +257,7 @@ export interface LifeReader {
 }
 
 /** How a commit read a value one way: for certain, or only possibly (the mark says why). */
-type Read = true | ReadOverlap;
+type Read = true | SourceOverlap;
 
 /**
  * The commits that read the value of `key` written at `writeIdx` (`undefined`: the value from before the
@@ -305,7 +310,8 @@ export function readersOfLife(
   const viewers = index.viewReadersOf(key);
   if (viewers.length > 0) {
     for (const [position, read] of readersBy(viewers, index.datedViewsOf(key), index.views)) {
-      how.set(position, { ...how.get(position), view: read });
+      // The rule answers in a read's words. A view is only possible for one reason, the array's.
+      how.set(position, { ...how.get(position), view: read === true ? true : 'view-not-placed' });
     }
   }
   return [...how]
@@ -483,6 +489,22 @@ export function nestedRowsNote(key: string, commits: readonly number[]): Honesty
       `'${shownPath(key)}' was written only through paths inside it at ${at} — such a write changed part of ` +
       'its value, not the whole: earlier writes account for the rest (a walk back follows them), and a ' +
       'reader of the key may not have read the part it changed.',
+  };
+}
+
+/**
+ * At least one `set` row the writer built on a view is listed with possible sources only, because the
+ * array does not show where that view sits. One sentence for the three queries that can meet it (a
+ * backward slice, a forward slice, a timeline). No count: the three would count different things.
+ */
+export function viewNotPlacedNote(): HonestyNote {
+  return {
+    code: 'view-not-placed',
+    detail:
+      "a set row the writer built on a step's view is listed with possible sources only — the array handed " +
+      'over does not show where that view sits among its commits (bundles around the commit say no index, ' +
+      'the array holds several logs, or the stamp cannot be one), so each write the view could have held is ' +
+      'named and none is certain.',
   };
 }
 

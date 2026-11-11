@@ -252,9 +252,10 @@ use, remote commitment or complete external ancestry.
   of the log the bundle was written to. A log handed over as a slice, or
   with rows taken out, can hold bundles that say no index, and the place of
   that index is then a range. Each write inside the range is named as a
-  possible source of the row (`overlap` on the walk's edge, `orViewIdxs` on
-  the timeline's write moment, `conservative` on the cause graph's node),
-  and none as the certain one. A stored record says
+  possible source of the row (`overlap: 'view-not-placed'` on the walk's
+  edge, `orViewIdxs` on the timeline's write moment, `conservative` on the
+  cause graph's node, and a `'view-not-placed'` note from the slices and
+  the timeline), and none as the certain one. A stored record says
   every bundle's index, so this cannot happen there.
 
 ## Bring your own record

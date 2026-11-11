@@ -90,9 +90,30 @@
  * Where the idea comes from, and what is ours: `REFERENCES.md` in this folder.
  */
 
+import type { RegisteredCode } from './honesty.js';
 import { relation } from './keyPaths.js';
 import type { LastWriterBefore } from './readWindow.js';
 import type { CommitBundle, TraceEntry } from './types.js';
+
+/**
+ * Why a write is only a POSSIBLE source of a `set` row the writer built on its step's view: the array
+ * the reader was handed does not show where that view sits (`windowPlacement.ts`: bundles around the
+ * commit that say no index, several logs in one array, a `viewAt` that cannot be one). The row could
+ * then have been built on any write in the range the view could be in, and each is named.
+ *
+ * WHY NOT THE READ'S WORDS (`readWindow.ts · ReadOverlap`). Those say a step was RUNNING while the key
+ * was written: it began, another step committed, and it looked at state again. A view is one moment.
+ * Nothing is written "while it ran", and in a log as its writer wrote it a view has one source, for
+ * certain. What is missing here is only the reader's knowledge of that moment. Said in the read's
+ * words, a walk back told a person that a step "looked at state again after another step committed"
+ * where no step had read the key at all (found by asking every reader about one such row).
+ */
+export type ViewOverlap = RegisteredCode<'view-not-placed'>;
+
+/** The mark of each write a view could have held: none when it has ONE source (`during` is empty). */
+export function viewOverlapOf(sources: { readonly during: readonly number[] }): ViewOverlap | undefined {
+  return sources.during.length > 0 ? 'view-not-placed' : undefined;
+}
 
 /** What the rule reads of a commit: its rows. */
 type Written = Pick<CommitBundle, 'trace'>;

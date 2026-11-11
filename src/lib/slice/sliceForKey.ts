@@ -22,7 +22,13 @@ import {
 import { commitValueAtWithBasis, findLastWriterWithBasis } from '../memory/commitLogUtils.js';
 import type { CommitBundle } from '../memory/types.js';
 import { normaliseStateKey } from '../record-paths/codec.js';
-import { concurrentWriteNote, fromInitialStateNote, nestedRowsNote, redactedValueNote } from './keyIndex.js';
+import {
+  concurrentWriteNote,
+  fromInitialStateNote,
+  nestedRowsNote,
+  redactedValueNote,
+  viewNotPlacedNote,
+} from './keyIndex.js';
 import { resolveKeysReadSource } from './keysReadSources.js';
 import type { KeysReadSource, StateKey, VariableSlice } from './types.js';
 
@@ -106,10 +112,15 @@ export function sliceForKey(
     rootLinkKeys: options?.rootLinkKeys ?? [normalisedKey],
   })!;
   // Steps side by side: say how many reads have only possible sources (one read = one step and one key).
+  // An edge a view made is no read by a step, and is possible for another reason: said apart.
   let contested = 0;
+  let viewNotPlaced = false;
   for (const node of flattenCausalDAG(root)) {
-    contested += new Set(node.parentEdges.filter((edge) => edge.overlap).map((edge) => edge.key)).size;
+    const possible = node.parentEdges.filter((edge) => edge.overlap !== undefined);
+    contested += new Set(possible.filter((edge) => edge.builtOn === undefined).map((edge) => edge.key)).size;
+    if (possible.some((edge) => edge.overlap === 'view-not-placed')) viewNotPlaced = true;
   }
   if (contested > 0) notes.push(concurrentWriteNote(contested));
+  if (viewNotPlaced) notes.push(viewNotPlacedNote());
   return { ...base, writer, root, ...(notes.length > 0 && { notes }) };
 }

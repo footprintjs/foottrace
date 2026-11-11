@@ -73,6 +73,7 @@ import { DELIM } from '../memory/utils.js';
 import {
   buildKeyIndex,
   concurrentReadsNote,
+  viewNotPlacedNote,
   conservativeEdgesNote,
   firstIndexAfter,
   hasRecordedReads,
@@ -223,6 +224,7 @@ export function forwardSliceForKey(
   let truncatedByNodes = false;
   let anyConservative = false;
   let concurrentReads = 0;
+  let viewNotPlaced = false;
 
   const anchorIdx = lastIndexBefore(index.writesOf(normalisedKey), options?.before);
   const root = makeNode(commitLog, index, normalisedKey, anchorIdx, 0);
@@ -244,7 +246,9 @@ export function forwardSliceForKey(
 
     for (const { position: readerIdx, overlap, step, view } of readers) {
       const bundle = commitLog[readerIdx];
-      if (overlap) concurrentReads++;
+      // A commit that holds the value through its view alone is no read by a step: said apart.
+      if (overlap === 'view-not-placed') viewNotPlaced = true;
+      else if (overlap) concurrentReads++;
       node.reads.push({
         runtimeStageId: bundle.runtimeStageId,
         stageId: bundle.stageId,
@@ -319,6 +323,7 @@ export function forwardSliceForKey(
   for (const [key, commits] of merged) notes.push(partialWriteNote(key, ascending(commits)));
   if (anyConservative) notes.push(conservativeEdgesNote(normalisedKey));
   if (concurrentReads > 0) notes.push(concurrentReadsNote(concurrentReads));
+  if (viewNotPlaced) notes.push(viewNotPlacedNote());
   if (truncatedByDepth || truncatedByNodes) {
     root.truncated = { byDepth: truncatedByDepth, byNodes: truncatedByNodes };
     notes.push(truncatedNote(truncatedByDepth, truncatedByNodes));

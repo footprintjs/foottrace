@@ -29,7 +29,7 @@
  */
 
 import { flattenCausalDAG, formatCausalChain } from '../memory/backtrack.js';
-import type { ReadOverlap } from '../memory/readWindow.js';
+import type { SourceOverlap } from '../memory/parentEdges.js';
 import type {
   FedBasis,
   ForwardNode,
@@ -237,9 +237,10 @@ export function forwardSliceToJSON(slice: ForwardSlice): ForwardSliceJSON {
  * rather than looking alike.
  */
 /** Why a forward read is only possible, in a tree line. The full sentence is the registry's. */
-const MAYBE_READ_WORDS: Record<ReadOverlap, string> = {
+const MAYBE_READ_WORDS: Record<SourceOverlap, string> = {
   'replaced-while-running': 'the key was written again while it ran',
   'written-while-running': 'it began before this write',
+  'view-not-placed': 'the array does not show where its view sits',
 };
 
 /**

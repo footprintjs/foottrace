@@ -12,8 +12,9 @@
  * rule is one function over two values, and a test applies every order of every small set of links
  * and holds the result against a statement that knows no order (`test/lib/memory/parent-edges.test.ts`).
  *
- * THE RULE. A link is CERTAIN (no `overlap`) or only POSSIBLE (`overlap` says why). It was made by a
- * READ of the step's code (no `builtOn`), or by the record's ROWS (`builtOn` says which kind).
+ * THE RULE. A link is CERTAIN (no `overlap`) or only POSSIBLE (`overlap` says why: a read's reason,
+ * or the view's, `SourceOverlap` below). It was made by a READ of the step's code (no `builtOn`), or
+ * by the record's ROWS (`builtOn` says which kind).
  *   - At most one certain edge. Where a certain read is among the links, it is that read: such an
  *     edge is what every reader saw before rows were followed, so a record whose walk was right
  *     keeps its bytes. Otherwise it is the rows' edge, and it says `'partial-write'` when a fold is
@@ -24,8 +25,16 @@
  *     this parent's write, and no other edge says that.
  */
 
+import type { ViewOverlap } from './builtOn.js';
 import type { RegisteredCode } from './honesty.js';
 import type { ReadOverlap } from './readWindow.js';
+
+/**
+ * Why a parent is only a POSSIBLE source: a read's reason (the key was written inside the reading
+ * step's window) or the view's (the array does not show where the view of a marked row sits). The
+ * rule below reads it as one thing, "possible", and never asks which.
+ */
+export type SourceOverlap = ReadOverlap | ViewOverlap;
 
 /** Why a parent is under a child's value though no read by the child's code names it (`CausalEdge.builtOn`). */
 export type BuiltOn = RegisteredCode<'partial-write' | 'built-on-view'>;
@@ -33,7 +42,7 @@ export type BuiltOn = RegisteredCode<'partial-write' | 'built-on-view'>;
 /** What the rule reads and writes of an edge, and what a link says of itself. */
 export interface LinkMarks {
   /** Present on a link that is only possible. */
-  overlap?: ReadOverlap;
+  overlap?: SourceOverlap;
   /** Present on a link the record's rows made, absent on one a read made. */
   builtOn?: BuiltOn;
 }

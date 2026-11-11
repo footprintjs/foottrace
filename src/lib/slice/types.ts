@@ -25,7 +25,7 @@
 import type { CausalNode, KeysReadLookup } from '../memory/backtrack.js';
 import type { ValueBasis } from '../memory/commitLogUtils.js';
 import type { RegisteredCode } from '../memory/honesty.js';
-import type { ReadOverlap } from '../memory/readWindow.js';
+import type { SourceOverlap } from '../memory/parentEdges.js';
 import type { CommitBundle, TraceEntry, UntrackedSource } from '../memory/types.js';
 
 // ── Keys ───────────────────────────────────────────────────────────────────
@@ -229,6 +229,7 @@ export type HonestyNoteCode = RegisteredCode<
   | 'redacted'
   | 'from-initial-state'
   | 'pre-run-view'
+  | 'view-not-placed'
 >;
 
 /** One honesty statement — see {@link HonestyNoteCode}. */
@@ -256,9 +257,14 @@ export interface ForwardRead {
    * this value, not a certain one (`memory/readWindow.ts`):
    *   - `'replaced-while-running'`: this value is the one the key held when the step began;
    *   - `'written-while-running'`: this value was written inside the step's window.
-   * Absent on a certain read, which is every read of a step with no window.
+   * A commit that holds the value through its view alone (`builtOnView`) is only a possible reader
+   * for another reason, with a word of its own:
+   *   - `'view-not-placed'`: the array does not show where that view sits, so this value is one of
+   *     those it could have held (`memory/builtOn.ts · ViewOverlap`).
+   * Absent on a certain read, which is every read of a step with no window, and every row built on
+   * a view in a log as its writer wrote it.
    */
-  overlap?: ReadOverlap;
+  overlap?: SourceOverlap;
   /**
    * Present (`true`) when no read by the step's code is behind this entry AT THIS COMMIT: the commit
    * holds a `set` row the WRITER built on the step's view (`TraceEntry.builtOnView`), and that row
@@ -477,8 +483,9 @@ export interface KeyMoment {
    * log with rows taken out; an array of several logs; a `viewAt` that
    * cannot be one). The view then held `builtOnViewIdx` (or the value from
    * before the run, `builtOnViewPreRun`) or one of these, and the record
-   * cannot say which: each is a possible source, none the certain one.
-   * Absent for a log as its writer wrote it, where a view has one source.
+   * cannot say which: each is a possible source, none the certain one. The
+   * timeline then carries a `'view-not-placed'` note. Absent for a log as
+   * its writer wrote it, where a view has one source.
    */
   orViewIdxs?: number[];
 }
@@ -704,7 +711,7 @@ export interface SliceJSON {
     /** Copied from `CausalEdge.basis` (9.33.0); absent for an exact edge. */
     basis?: RegisteredCode<'nested-rows'>;
     /** Why this edge is a possible source and not a certain one (`CausalEdge.overlap`). Absent on a certain edge. */
-    overlap?: ReadOverlap;
+    overlap?: SourceOverlap;
     /**
      * An edge no read by the child's code made: the child's write of `key` kept part of what the parent
      * wrote, because it did not replace the value (`'partial-write'`) or because the writer built it on

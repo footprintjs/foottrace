@@ -92,6 +92,9 @@ export const HONESTY_CODES = /* @__PURE__ */ Object.freeze({
     'This write is the value the key held when the reading step began, and another step committed the key, in whole or in part, before the reading step last looked at state, so the step may have read that later value instead: this is a possible source, not a certain one.',
   'written-while-running':
     'This write was committed while the reading step was running and before the step last looked at state, so the step may have read the key before or after it: this is a possible source, not a certain one.',
+  // ── why a source of a set row built on a view is only possible — `CausalEdge.overlap`, `ForwardRead.overlap`, a slice note (builtOn.ts: ViewOverlap) ─
+  'view-not-placed':
+    "The array handed to the reader does not show where the view of a set row the writer built on it (TraceEntry.builtOnView) sits among its commits (bundles around that commit say no index, the array holds several logs, or the bundle's viewAt cannot be one), so each write the view could have held is named as a possible source of the row, not a certain one: the real one is among them, or is the value from before the run where that is said.",
   // ── a write that did not replace a value — a slice note, and `CausalEdge.builtOn` (builtOn.ts) ─
   'partial-write':
     "A write this answer rests on did not replace the key's value but merged into it or appended to it, so the value is made of that write and of what the earlier writes had left: a walk back goes on to the commit that wrote the key before it (an edge marked builtOn, which no read by the step is behind), and a reader after it read all of them.",

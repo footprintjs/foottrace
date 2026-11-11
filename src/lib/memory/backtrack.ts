@@ -77,13 +77,13 @@
  * ```
  */
 
-import { builtOnBefore, readFromView, replacesValue } from './builtOn.js';
+import { builtOnBefore, readFromView, replacesValue, viewOverlapOf } from './builtOn.js';
 import { buildCommitIndex, lastWriterPosition } from './commitLogUtils.js';
 import type { RegisteredCode } from './honesty.js';
 import { queryWork, relation, writesOnlyInside } from './keyPaths.js';
 import { logModel } from './logModel.js';
-import { type LastWriterBefore, overlapOf, type ReadOverlap, readSourcesOf } from './readWindow.js';
-import { type BuiltOn, takeLink } from './parentEdges.js';
+import { type LastWriterBefore, overlapOf, readSourcesOf } from './readWindow.js';
+import { type BuiltOn, type SourceOverlap, takeLink } from './parentEdges.js';
 import { placesOf } from './windowPlacement.js';
 import { shownPath } from '../record-paths/codec.js';
 import type { CommitBundle, TraceEntry, UntrackedSource } from './types.js';
@@ -222,10 +222,14 @@ export interface CausalEdge {
    * among them (or is the value from before the run, when `preRunReads` lists the key):
    *   - `'replaced-while-running'`: the parent wrote the value the key held when the child began;
    *   - `'written-while-running'`: the parent wrote the key inside the window.
-   * Both are registered in `memory/honesty.ts · HONESTY_CODES`. Absent on a certain edge, so the
+   * An edge a view made (`builtOn: 'built-on-view'`) is only possible for another reason, and says
+   * it in a word of its own:
+   *   - `'view-not-placed'`: the array does not show where the view of the child's row sits, so the
+   *     parent is one of the writes that view could have held (`memory/builtOn.ts · ViewOverlap`).
+   * All are registered in `memory/honesty.ts · HONESTY_CODES`. Absent on a certain edge, so the
    * edge of a step with no window keeps its shape.
    */
-  overlap?: ReadOverlap;
+  overlap?: SourceOverlap;
   /**
    * Present only on a `'data'` edge that no READ by the child's code made: what the child left under
    * `key` still holds part of what the parent had written, and the record's rows say why
@@ -239,7 +243,8 @@ export interface CausalEdge {
    *     view was pinned (`CommitBundle.viewAt`): one write, for certain. Only where the reader
    *     cannot place that moment at one position of the array it was handed (`windowPlacement.ts`
    *     has the cases; bundles that say no index are the usual one) does the edge carry `overlap`,
-   *     as a read's edge does: the parent is then one of the writes the view could have held.
+   *     with the view's own word (`'view-not-placed'`): the parent is then one of the writes the
+   *     view could have held.
    * Both are registered in `memory/honesty.ts · HONESTY_CODES`. Absent on an edge a read made, so
    * such an edge keeps its shape. When the child ALSO read `key` from this parent, for certain, the
    * read's edge stands alone and no second one is added; beside a read that is only a possible
@@ -614,7 +619,7 @@ function buildCausalChain(
     kind: 'data' | 'control',
     key: string | undefined,
     depth: number,
-    overlap?: ReadOverlap,
+    overlap?: SourceOverlap,
     builtOn?: BuiltOn,
   ): void {
     const parentCommit = commitLog[parentPos];
@@ -772,15 +777,18 @@ function buildCausalChain(
     const pending = [...partials];
     while (pending.length > 0) {
       const [key, at, from] = pending.pop()!;
-      const under: Array<[position: number, overlap: ReadOverlap | undefined]> = [];
+      const under: Array<[position: number, overlap: SourceOverlap | undefined]> = [];
       if (from === 'fold') {
         const position = builtOnBefore(key, at, bundleAt, findWriter);
         if (position === undefined) continue; // not for a write `partialWrite` handed out; kept for the type
         under.push([position, undefined]);
       } else {
         const seen = readSourcesOf(key, places.view(at), findWriter);
-        under.push([seen.before, overlapOf(seen, seen.before)]);
-        for (const position of seen.during) under.push([position, overlapOf(seen, position)]);
+        // One word for every write an unplaced view could have held: the reason is the array's, not a
+        // running step's, and it is the same for the write before the range and for those inside it.
+        const possible = viewOverlapOf(seen);
+        under.push([seen.before, possible]);
+        for (const position of seen.during) under.push([position, possible]);
       }
       for (const [position, overlap] of under) {
         if (position < 0) {
@@ -879,9 +887,10 @@ export function flattenCausalDAG(root: CausalNode): CausalNode[] {
  * `⚠ slice truncated …` line.
  */
 /** How a tree line says each mark. Short on purpose: the full sentence is the registry's. */
-const OVERLAP_WORDS: Record<ReadOverlap, string> = {
+const OVERLAP_WORDS: Record<SourceOverlap, string> = {
   'replaced-while-running': 'as the reader began; written again while it ran',
   'written-while-running': 'written while the reader ran',
+  'view-not-placed': 'possibly: the array does not show where the view sits',
 };
 
 export function formatCausalChain(root: CausalNode): string {
@@ -892,7 +901,7 @@ export function formatCausalChain(root: CausalNode): string {
     edge !== undefined && edge.weight !== 1 ? ` (${edge.weight})` : '';
   // The keys this parent is only a possible source of, said per mark (`CausalEdge.overlap`).
   const overlapSuffix = (edges: CausalEdge[] | undefined, shown: CausalEdge): string =>
-    (Object.keys(OVERLAP_WORDS) as ReadOverlap[])
+    (Object.keys(OVERLAP_WORDS) as SourceOverlap[])
       .map((mark) => {
         const keys = [...new Set((edges ?? []).filter((e) => e.overlap === mark && e.key).map((e) => e.key as string))];
         if (keys.length === 0) return '';

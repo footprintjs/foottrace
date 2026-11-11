@@ -24,6 +24,7 @@ import {
   causalChain,
   flattenCausalDAG,
   formatForwardSlice,
+  formatSlice,
   formatTimeline,
   forwardSliceForKey,
   keysReadFromMap,
@@ -72,6 +73,12 @@ const PRE_RUN_VIEW_WORDS = (key: string, at: string) =>
   'view held no write of the key (or may have held none, where the moment lists other writes it could have ' +
   "held) — what the row holds beyond the step's own writes was absent or came from before the run, which the " +
   'commit log cannot see.';
+/** The `'view-not-placed'` note, word for word: the same from a backward slice, a forward slice and a timeline. */
+const VIEW_NOT_PLACED_WORDS =
+  "a set row the writer built on a step's view is listed with possible sources only — the array handed over " +
+  'does not show where that view sits among its commits (bundles around the commit say no index, the array ' +
+  'holds several logs, or the stamp cannot be one), so each write the view could have held is named and none ' +
+  'is certain.';
 /** The `'from-initial-state'` note of a timeline, word for word: it names the write it is said of. */
 const FOLDED_ON_PRE_RUN_WORDS = (key: string, at: number) =>
   `'${key}' was first written at commit ${at}, by a write that did not replace it — the value there rests on ` +
@@ -363,12 +370,52 @@ describe('the walk back through a row the writer built on the view', () => {
     expect(edgesOf(walk(log, 'use', { 'use#0': ['a'] })).sort()).toEqual(
       [
         'use <- fill via a',
-        'fill <- start via a [built-on-view] (replaced-while-running)',
-        'fill <- other via a [built-on-view] (written-while-running)',
+        'fill <- start via a [built-on-view] (view-not-placed)',
+        'fill <- other via a [built-on-view] (view-not-placed)',
       ].sort(),
     );
+    // WHY a word of its own and not a read's (`'written-while-running'`): no step read `a` here, and
+    // nothing was written "while a reader ran". The walk said exactly that, in its text and in a note
+    // that counted "1 read made by a step that looked at state again", until every reader was asked
+    // about this row. What is missing is where the view sits, and each answer says so.
+    const slice = sliceForKey(log, 'out', keysReadFromMap({ 'use#0': ['a'] }).lookup);
+    expect(slice.notes).toEqual([{ code: 'view-not-placed', detail: VIEW_NOT_PLACED_WORDS }]);
+    expect(formatSlice(slice).split('\n').slice(1, 5)).toEqual([
+      'use (use#0) [wrote: out]',
+      '  fill (fill#0) ← via a [wrote: a]',
+      '    start (start#0) ← built on a (possibly: the array does not show where the view sits) [wrote: a]',
+      '    other (other#0) ← built on a (possibly: the array does not show where the view sits) [wrote: a]',
+    ]);
+    expect(sliceToJSON(slice).edges?.filter((edge) => edge.overlap !== undefined)).toEqual([
+      {
+        from: 'fill#0',
+        to: 'start#0',
+        kind: 'data',
+        key: 'a',
+        weight: 1,
+        overlap: 'view-not-placed',
+        builtOn: 'built-on-view',
+      },
+      {
+        from: 'fill#0',
+        to: 'other#0',
+        kind: 'data',
+        key: 'a',
+        weight: 1,
+        overlap: 'view-not-placed',
+        builtOn: 'built-on-view',
+      },
+    ]);
+    // Forward: fill is a possible holder of either value, and the line says why in the same words.
+    const forward = forwardSliceForKey(log, 'a', keysReadFromMap({ 'use#0': ['a'] }).lookup, { before: 2 });
+    expect(formatForwardSlice(forward)).toContain(
+      'maybe held by fill (fill#0) @2 (in a row the writer built on its view) — the array does not show where its view sits',
+    );
+    expect(forward.notes.map((note) => note.code)).toContain('view-not-placed');
+    expect(forward.notes.map((note) => note.code)).not.toContain('concurrent-write');
     // The timeline says it on the write: the write the view held, OR another one it could have held.
     const timeline = keyTimeline(log, 'a', keysReadFromMap({ 'use#0': ['a'] }).lookup);
+    expect(timeline.notes).toEqual([{ code: 'view-not-placed', detail: VIEW_NOT_PLACED_WORDS }]);
     const writes = (timeline.moments ?? []).filter((moment) => moment.kind === 'write');
     expect(writes.map((moment) => [moment.commitIdx, moment.builtOnViewIdx, moment.orViewIdxs])).toEqual([
       [0, undefined, undefined],
@@ -400,8 +447,8 @@ describe('the walk back through a row the writer built on the view', () => {
     const guardedRoot = causalChain(badStamp, 'fill#0', keysReadFromMap({}).lookup, { rootLinkKeys: ['a'] })!;
     expect(guardedRoot.preRunView).toEqual({ code: 'pre-run-view', keys: ['a'] });
     expect(edgesOf(guardedRoot).sort()).toEqual([
-      'fill <- other via a [built-on-view] (written-while-running)',
-      'fill <- start via a [built-on-view] (written-while-running)',
+      'fill <- other via a [built-on-view] (view-not-placed)',
+      'fill <- start via a [built-on-view] (view-not-placed)',
     ]);
     // With the index said, the same record has one answer.
     const said = [log[0], { ...log[1], idx: 12 }, log[2], log[3]];

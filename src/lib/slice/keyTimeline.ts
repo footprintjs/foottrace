@@ -72,6 +72,7 @@ import {
   partialWriteNote,
   preRunOriginNote,
   preRunViewNote,
+  viewNotPlacedNote,
   readsNotRecordedNote,
   unknownKeyNote,
   writeEntry,
@@ -148,6 +149,7 @@ export function keyTimeline(
   // The writes that rest on what the key held before the run, by the link that says so (`KeyMoment`).
   let foldedOnPreRun: number | undefined; // at most one: only the first write of a key has nothing before it
   const viewsOfPreRun: number[] = [];
+  let viewNotPlaced = false;
   const bundleAt = (position: number): CommitBundle => commitLog[position];
   const writeBefore = (_key: string, before: number): number => lastIndexBefore(allWrites, before) ?? -1;
   while (w < writes.length || r < reads.length) {
@@ -192,6 +194,7 @@ export function keyTimeline(
       const viewPreRun = seen !== undefined && seen.before < 0;
       if (foldPreRun) foldedOnPreRun = idx;
       if (viewPreRun) viewsOfPreRun.push(idx);
+      if (seen !== undefined && seen.during.length > 0) viewNotPlaced = true;
       moments.push({
         kind: 'write',
         commitIdx: idx,
@@ -217,6 +220,7 @@ export function keyTimeline(
   // partial; a row built on a view of it is a whole write whose origin the log cannot see.
   if (foldedOnPreRun !== undefined) notes.push(fromInitialStateNote(normalisedKey, foldedOnPreRun));
   if (viewsOfPreRun.length > 0) notes.push(preRunViewNote(normalisedKey, viewsOfPreRun));
+  if (viewNotPlaced) notes.push(viewNotPlacedNote());
   if (concurrentReads > 0) notes.push(concurrentReadsNote(concurrentReads));
   return { ...base, moments, notes };
 }

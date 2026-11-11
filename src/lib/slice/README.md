@@ -291,7 +291,8 @@ was handed are there other writes the view could have held (the usual case:
 a slice, or rows taken out, so that bundles around the commit say no index;
 `memory/windowPlacement.ts` has the others). `orViewIdxs` lists them, the
 line reads `(built on the value its step's view held: commit 0 or commit 1)`,
-and none of them is certain. A log as its writer wrote it never has this.
+none of them is certain, and the timeline carries a `'view-not-placed'`
+note. A log as its writer wrote it never has this.
 
 Such a commit is a write moment only. Its step read nothing, so the timeline
 shows no read for it.
@@ -406,7 +407,12 @@ with the names it recorded (`test/lib/slice/nested-rows.test.ts`).
   state again after a sibling committed the key gets several, and each is
   marked `'replaced-while-running'` or `'written-while-running'`: possible, not
   certain, the real one among them. Text says `maybe read by` and
-  `(written while the reader ran)`.
+  `(written while the reader ran)`. A `set` row built on a view has a third
+  word in the same field, for another reason: `'view-not-placed'`, where the
+  array does not show where the view sits (text: `maybe held by`,
+  `(possibly: the array does not show where the view sits)`). It is never
+  counted among the reads of the `'concurrent-write'` note: no step read
+  the key.
 - `CausalEdge.builtOn` and `CausalNode.preRunBase` (backward), a
   `'partial-write'` note (forward, timeline), `KeyMoment.builtOnWriteIdx` /
   `builtOnPreRun` (timeline): a value built in steps. A write that did not
@@ -439,7 +445,9 @@ with the names it recorded (`test/lib/slice/nested-rows.test.ts`).
   value is made of that write and of the earlier ones), and on a timeline
   the two that say a write rests on the value from before the run:
   `'from-initial-state'` (it was folded onto that value) and `'pre-run-view'`
-  (its `set` row was built on a view that held it). What each code MEANS is
+  (its `set` row was built on a view that held it). A backward slice, a
+  forward slice and a timeline also say `'view-not-placed'` when the array
+  does not show where the view of such a row sits. What each code MEANS is
   registered once, in `memory/honesty.ts · HONESTY_CODES` (served as
   `HONESTY_CODES` on `foottrace`): `HONESTY_CODES[note.code]` is the
   one-sentence explanation, and the `detail` is the per-instance sentence (it
