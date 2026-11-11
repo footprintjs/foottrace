@@ -152,7 +152,10 @@ use, remote commitment or complete external ancestry.
   writer as certain, and nothing in the answer marks it. That holds with or
   without the stamps. Hand over the whole log, or treat the answer as "the
   last writer among these bundles". (`readStoredRecord` does know which
-  commits a stored log lost, and reports each as a gap.)
+  commits a stored log lost, and reports each as a gap.) When two logs are
+  handed over one after the other (the legs of a paused run), the first
+  bundle of the second must say its `idx`: that index not rising is what
+  shows a reader where the second log begins.
 - **One saved-row boundary.** `isCommitBundle(row)` applies the same checks as
   replay. Causal readers still accept typed `CommitBundle[]`, not unknown input.
   A consumer preparing a causal query from stored rows must validate every row

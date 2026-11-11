@@ -69,6 +69,11 @@
  *     array: a writer that was taken out, or that sits in a part of another log that was cut away
  *     before the logs were joined, cannot be named, and indices that still rise across such a join
  *     do not show it. That is so with or without a window; it is the caller's claim, not checked here;
+ *   - a log put behind another one shows where it begins only by an index that does not rise. Its
+ *     first bundles must say their index for that: a head that says none is read as going on with
+ *     the log before it, and when a later index of the second log still rises past that reading
+ *     (bundles were taken out of it), the join is never seen. A step of the second log is then
+ *     dated in the first, and can be given a writer of the first as its one certain source;
  *   - the stamps sit on a step's FIRST bundle. An array without that bundle has lost them, and the
  *     step's later bundles are read as any bundle with no stamp.
  *
