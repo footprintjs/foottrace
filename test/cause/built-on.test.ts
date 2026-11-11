@@ -458,10 +458,16 @@ describe('a read of one commit of a step, a fold onto another (the real writer)'
 
 describe('back and forward agree, commit by commit', () => {
   // Every log of up to four commits made of: a writer that may commit more than once (`w1`, `w2`), adding
-  // to `k` or replacing it; and a reader, which reads `k`, writes a key of its own and may also add to
-  // `k` or replace it. For every node: each child has the node on its way back, and each parent has the
-  // node on its way forward. (A reader commits once: a later commit of a step is not another run of its
-  // reads, which is an older rule of the walk and not this one's.)
+  // to `k` or replacing it; and a reader, which reads `k` FIRST, then writes a key of its own and may also
+  // add to `k` or replace it. For every node: each child has the node on its way back, and each parent
+  // has the node on its way forward.
+  //
+  // The space is bounded on purpose, by two older rules of the graph that are not this change's:
+  //   - a reader commits once: a later commit of a step is not another run of its reads;
+  //   - a reader reads before it writes: a step that reads a key AFTER it replaced the key is listed as
+  //     a child of the earlier write and has no way back to it (the second reader of this change showed
+  //     it on the released version too). So this is a check of these logs, not a law of the graph. What
+  //     IS a law, for the new edges alone, is in `built-on.property.test.ts` beside this file.
   type Step = { id: string; k?: 'merge' | 'set'; reads: boolean };
   const OPTIONS = (at: number): Step[] => [
     { id: 'w1', k: 'merge', reads: false },
