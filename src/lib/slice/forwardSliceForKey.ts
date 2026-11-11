@@ -73,7 +73,6 @@ import { DELIM } from '../memory/utils.js';
 import {
   buildKeyIndex,
   concurrentReadsNote,
-  viewNotPlacedNote,
   conservativeEdgesNote,
   firstIndexAfter,
   hasRecordedReads,
@@ -89,6 +88,7 @@ import {
   readsNotRecordedNote,
   truncatedNote,
   unknownKeyNote,
+  viewNotPlacedNote,
   writeEntry,
   writtenPaths,
 } from './keyIndex.js';

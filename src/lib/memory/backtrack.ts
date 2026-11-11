@@ -175,11 +175,11 @@ export interface CausalNode {
    * (`TraceEntry.builtOnView`; on the key, around it, or on a path inside it) when no commit had
    * written the key before that view was pinned: what the row holds of the key beyond the step's own
    * writes was absent or came from the state before the run, which the commit log cannot see, so the
-   * walk has no edge to follow for that part. The
-   * code says so (`'pre-run-view'`, registered in `memory/honesty.ts · HONESTY_CODES`); `keys` are in
-   * the order the walk met them. Said too where the record does not show where the view sits and it
-   * only MAY have been pinned that early: the writes it could have held instead are then edges with
-   * `overlap`. Only for a key the walk came through. ABSENT otherwise, so a node keeps its shape.
+   * walk has no edge to follow for that part. The code says so (`'pre-run-view'`, registered in
+   * `memory/honesty.ts · HONESTY_CODES`); `keys` are in the order the walk met them. Said too where
+   * the record does not show where the view sits and it only MAY have been pinned that early: the
+   * writes it could have held instead are then edges with `overlap: 'view-not-placed'`. Only for a
+   * key the walk came through. ABSENT otherwise, so a node keeps its shape.
    *
    * WHY A FIELD OF ITS OWN. Not `preRunReads`: no code of the step read the key, the same reason the
    * edge to a write a view held is marked `builtOn: 'built-on-view'`. Not `preRunBase`: that one says
