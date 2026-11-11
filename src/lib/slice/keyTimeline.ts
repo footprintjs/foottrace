@@ -26,11 +26,13 @@
  * the key) was folded onto the write before it. The write moment names that
  * one (`builtOnWriteIdx`), or says the value from before the run was under it
  * (`builtOnPreRun`). The rule is `memory/builtOn.ts`, the one the backward
- * walk follows, so the two cannot disagree. WHY on the write and not on the
- * read: a read of a list that was appended to N times saw N writes, and a
- * list on every read grows with the square of a loop that appends and reads.
- * The link is one number per write; a reader follows it from the write a
- * read names.
+ * walk follows, so the two cannot disagree. The moments here are COMMITS, so
+ * the link is by commit: a step that committed twice has its later commit
+ * linked to its earlier one. WHY on the write and not on the read: a read of
+ * a list that was appended to N times saw N writes, and a list on every read
+ * grows with the square of a loop that appends and reads. The link is one
+ * number per write, found with one look at one bundle; a reader follows it
+ * from the write a read names.
  *
  * DAG position: memory ← slice. Imports memory/ only (see README.md).
  */

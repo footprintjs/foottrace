@@ -105,6 +105,10 @@ WHY by verb and path, never by value: calling a write that added a replacement l
 
 WHY no second edge when the step also read the key: `scope.box.b = 2` and `scope.list.push(x)` read the key first, and that read already leads to the earlier writer. A record whose walk was right keeps its answer byte for byte. Beside a read that is only a possible source (steps side by side) both edges stand, because the `builtOn` one is certain.
 
+WHY the rule speaks in commits and knows nothing of steps: a step can commit more than once (a subflow mount commits and then commits its exit), and its later commit is folded onto its earlier one like any other. A reader whose nodes are commits (the cause graph, the key timeline) wants exactly that link. The backward walk's nodes are steps: it draws no edge from a step to itself and passes through the step's own earlier commit to what that one was folded onto. That pass belongs to the walk, not to the rule. The first version had it inside the rule, and the cause graph then had no way back to a step's earlier commit although its way forward reached readers from it.
+
+One consequence for `causalChain`: its result is a DAG unless a step commits a key between two commits of another step that both add to that key. Each of the two then rests on the other, and the walk says so with an edge each way. `flattenCausalDAG`, `formatCausalChain` and `sliceToJSON` visit a node once and end on it; code that follows `parents` itself must do the same. The cause graph, with one node per commit, is always acyclic.
+
 What each reader does with the rule:
 
 | Reader | What it says |
@@ -112,9 +116,14 @@ What each reader does with the rule:
 | `causalChain`, `sliceForKey` | `CausalEdge.builtOn` on the edge to the write underneath; `CausalNode.preRunBase` when nothing in the log is underneath. Text: `← built on box` |
 | `forwardSliceForKey` | a value's life does not end at a write that only added, so the readers after it are readers of this value too. A `'partial-write'` note names the commits it crossed |
 | `keyTimeline` | on the WRITE moment: `builtOnWriteIdx`, or `builtOnPreRun`. One number per write: a list on every read would grow with the square of a loop that appends and reads |
-| `foottrace/cause` | an edge with `attribution: 'recorded-write'` from a node to the write underneath it, and from that write forward |
+| `foottrace/cause` | an edge with `attribution: 'recorded-write'` from a node to the write just before it, and from that write forward. Its nodes are commits, so it asks the rule for each node by its own commit and names a node once |
 
-What it does not cover is listed at the top of `builtOn.ts`. The one that matters: a `set` row that the WRITER makes out of writes that only added (the `'delta'` encoding does it for a step that merged into a key and also wrote a path inside it). Such a row says `set`, nothing in it says the value was built on what was there, and the walk stops at it. It is pinned as `KNOWN LIMIT` in `test/lib/memory/property/built-on.property.test.ts`. Where the idea comes from, and what is ours: [REFERENCES.md](REFERENCES.md).
+What it does not cover is listed at the top of `builtOn.ts`. The one that matters: a `set` row that the WRITER makes out of writes that only added. It does so under both encodings:
+
+- `'full'`, the default: when a step's rows would not fold back to what the step read, they are written as `set` rows of what it read. Ordinary writes reach it, for example one step that merges into `a.x`, deletes `a.x` and merges into `a`: the record holds `set a.x`, `set a`.
+- `'delta'`: also any step that merged into a key and wrote a path inside it.
+
+Such a row says `set`, nothing in it says the value was built on what was there, and the walk stops at it: the steps whose writes are still in the value are left out, with no note. A reader cannot follow what the record does not say, so the fix is in the writer (it has to mark such a row) and changes record bytes. Both cases are pinned as `KNOWN LIMIT` in `test/lib/memory/property/built-on.property.test.ts`. Where the idea comes from, and what is ours: [REFERENCES.md](REFERENCES.md).
 
 ## Run evidence rides the same doors
 

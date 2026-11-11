@@ -30,7 +30,7 @@ frame.release();
 
 ## A value built in steps
 
-A node is one commit's write of one key. When that write did not replace the key's value (a `merge`, an `append`, a row on a path inside the key), the value it left is made of that write and of what the write before it had left. No read is behind that dependence, so it has its own kind of edge: `attribution: 'recorded-write'`, from the node to that earlier write, read off the record's rows and commit order. It is exact.
+A node is one commit's write of one key. When that write did not replace the key's value (a `merge`, an `append`, a row on a path inside the key), the value it left is made of that write and of what the write before it had left. No read is behind that dependence, so it has its own kind of edge: `attribution: 'recorded-write'`, from the node to the write just before it, read off the record's rows and commit order. It is exact. The link is by commit: when a step committed twice, its later commit's node has its earlier commit's node as parent.
 
 ```ts
 // Start sets `box`. Fill merges into `box` without reading it. Use reads `box` and writes `final`.
@@ -40,7 +40,11 @@ await graph.parents(node('fill', 'box'));  // [ start·box  attribution: 'record
 // Before this edge the walk ended at Fill, and Start was never reached.
 ```
 
-Forward, a write's children include the next write that was folded onto it. Without exact read sources they also include every reader of the value for as long as nothing replaced it. With exact sources they include the readers whose recorded source is this commit, and a later reader is reached through the write that was folded onto this one. A write folded onto the value from before the run has no node to point at: without exact read sources the node carries `untracked-input`, as a read of a pre-run value does; with them the pre-run state is a known end of the walk. A graph of your own may return `'recorded-write'` on a data edge; a control edge with it is refused, like any other mismatch.
+Forward, a write's children include the next write of the key, when that one was folded onto it. Without exact read sources they also include every reader of the value for as long as nothing replaced it. With exact sources they include the readers whose recorded source is this commit, and a later reader is reached through the write that was folded onto this one. Going back from any child reaches the node, and going forward from any parent reaches it too; a test checks that on every log of up to four commits.
+
+A node is named once among a node's parents. When a read already names the write underneath: a certain read keeps its edge as it is (a step that read a key and then added to it is answered as before), and a read that is only a possible source gives its place to the `'recorded-write'` edge, which is certain. The node keeps the `conservative` gap that read brought.
+
+A write folded onto the value from before the run has no node to point at and adds no gap of its own. Without exact read sources the node carries `conservative`, as it always has for a value with no whole write in range; that gap does not consult the record's initial state, so it is also there when the key did not exist before the run. With exact sources the pre-run state is a known end of the walk. A graph of your own may return `'recorded-write'` on a data edge; a control edge with it is refused, like any other mismatch.
 
 ## Optional exact root-read sources
 

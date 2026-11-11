@@ -155,12 +155,17 @@ use, remote commitment or complete external ancestry.
   `forwardSliceForKey` by not ending a value's life there (a
   `'partial-write'` note names the commits), `keyTimeline` with
   `builtOnWriteIdx` or `builtOnPreRun` on the write moment, the cause graph
-  with an edge of attribution `'recorded-write'`. The test is by verb and
-  path, never by value: a `merge` that overwrote the only field a value had
-  is still followed. One writer too many, never one too few. A stage that
-  also read the key keeps its one edge, the read's. Not covered: a `set` row
-  written in place of rows that only added (see "What is not in this
-  contract").
+  with an edge of attribution `'recorded-write'`. The rule is by commit: a
+  stage that committed twice has its later commit folded onto its earlier
+  one, and the readers whose answers are commits (the timeline, the cause
+  graph) link them. `causalChain` answers in stages, draws no edge from a
+  stage to itself, and is a DAG unless one stage commits a key between two
+  commits of another that both add to it; then each rests on the other and
+  there is an edge each way. The test is by verb and path, never by value:
+  a `merge` that overwrote the only field a value had is still followed.
+  One writer too many, never one too few. A stage that also read the key
+  keeps its one edge, the read's. Not covered: a `set` row written in place
+  of rows that only added (see "What is not in this contract").
 - **A reader names the writers that are in the array.** Every reader that
   takes a commit log takes it as the history before each stage: the source of
   a read is the last writer of the key that is in the array. A bundle that was
@@ -198,11 +203,15 @@ use, remote commitment or complete external ancestry.
   before it, except through a read the stage is recorded with. A producer
   that writes a `set` of an earlier value plus a change, and records no read
   of the key, has left that earlier writer out of every walk back, and no
-  reader can tell. `RecordFrame` itself does this in two cases: under
-  `commitValues: 'delta'` for a stage that merged into a key and also wrote
-  a path inside it, and under either encoding for rows that would not fold
-  back to what the stage read. Both are pinned as a known limit
-  (`test/lib/memory/property/built-on.property.test.ts`).
+  reader can tell. `RecordFrame` itself does this in two cases. Under either
+  encoding, the default one included: rows that would not fold back to what
+  the stage read are written as `set` rows of what it read, and ordinary
+  writes reach that (one stage that merges into `a.x`, deletes `a.x` and
+  merges into `a` is recorded as `set a.x`, `set a`). Under
+  `commitValues: 'delta'`: also any stage that merged into a key and wrote a
+  path inside it. Both are pinned as a known limit
+  (`test/lib/memory/property/built-on.property.test.ts`); closing it needs
+  the writer to mark such a row.
 
 ## Bring your own record
 

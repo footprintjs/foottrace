@@ -396,11 +396,13 @@ export interface KeyMoment {
   /**
    * `'write'` moments only, and only when the write did not replace the
    * value (it merged into it, appended to it, or wrote a path inside it):
-   * the `commitIdx` of the write it was folded onto, the last write of the
-   * key before it by another step (`memory/builtOn.ts`). A read that saw
-   * this write also saw that one, and so on back to a write that carries
-   * neither this field nor `builtOnPreRun`. One number per write: follow it
-   * from the write a read names (`fromWriteIdx`, `orWriteIdxs`).
+   * the `commitIdx` of the write it was folded onto, which is the write
+   * moment just before it in this timeline, whichever step made it (an
+   * earlier commit of the same step included; `memory/builtOn.ts`). A read
+   * that saw this write also saw that one, and so on back to a write that
+   * carries neither this field nor `builtOnPreRun`: that one replaced the
+   * value. One number per write: follow it from the write a read names
+   * (`fromWriteIdx`, `orWriteIdxs`).
    */
   builtOnWriteIdx?: number;
   /**

@@ -114,54 +114,13 @@ describe('the rule: does a commit replace the value of a key', () => {
   });
 });
 
-describe('the rule: what a write was built on', () => {
-  /** A log of bundles written by hand: [execution, ...rows on `k`]. */
-  const logOf = (...steps: Array<[id: string, ...verbs: string[]]>) =>
-    steps.map(([id, ...verbs]) => ({ runtimeStageId: id, trace: verbs.map((verb) => ({ path: 'k', verb })) }));
-  const ask = (log: ReturnType<typeof logOf>, at: number) =>
-    builtOnBefore(
-      'k',
-      at,
-      (position) => log[position] as never,
-      (_key, before) => {
-        for (let i = before - 1; i >= 0; i--) if (log[i].trace.length > 0) return i;
-        return -1;
-      },
-    );
-
-  it('nothing, when the write replaced the value', () => {
-    expect(ask(logOf(['a', 'set'], ['b', 'set']), 1)).toBeUndefined();
-  });
-
-  it('the last commit that wrote the key before it, when the write was partial', () => {
-    expect(ask(logOf(['a', 'set'], ['x'], ['b', 'merge']), 2)).toBe(0);
-    expect(ask(logOf(['a', 'set'], ['b', 'merge'], ['c', 'append']), 2)).toBe(1);
-  });
-
-  it('-1 when no commit before it wrote the key: it was folded onto the value from before the run', () => {
-    expect(ask(logOf(['x'], ['b', 'merge']), 1)).toBe(-1);
-  });
-
-  it('passes through an earlier bundle of the same step to what that one was built on', () => {
-    // A mount commits its merge-back and then its exit; a fork child its bundle and then its settle.
-    expect(ask(logOf(['a', 'set'], ['m', 'merge'], ['m', 'merge']), 2)).toBe(0);
-    expect(ask(logOf(['m', 'merge'], ['m', 'append']), 1)).toBe(-1);
-  });
-
-  it('nothing, when an earlier bundle of the same step had replaced the value', () => {
-    expect(ask(logOf(['a', 'set'], ['m', 'set'], ['m', 'merge']), 2)).toBeUndefined();
-  });
-});
-
-describe('the rule, forward: which writes were built directly on a write', () => {
+describe('the rule: what a write was folded onto (commit by commit)', () => {
   /** A log of bundles written by hand: [execution, ...rows on `k`]. No row: the commit did not write `k`. */
   const logOf = (...steps: Array<[id: string, ...verbs: string[]]>) =>
     steps.map(([id, ...verbs]) => ({ runtimeStageId: id, trace: verbs.map((verb) => ({ path: 'k', verb })) }));
   type Log = ReturnType<typeof logOf>;
   const writesOf = (log: Log) => log.flatMap((bundle, at) => (bundle.trace.length > 0 ? [at] : []));
-  const children = (log: Log, at: number) =>
-    builtDirectlyOn('k', at, writesOf(log), (position) => log[position] as never);
-  const parent = (log: Log, at: number) =>
+  const under = (log: Log, at: number) =>
     builtOnBefore(
       'k',
       at,
@@ -171,34 +130,51 @@ describe('the rule, forward: which writes were built directly on a write', () =>
         return -1;
       },
     );
+  const over = (log: Log, at: number) => builtDirectlyOn('k', at, writesOf(log), (position) => log[position] as never);
 
-  it('the next step that added to it, and no step after that one', () => {
+  it('nothing, when the write replaced the value', () => {
+    expect(under(logOf(['a', 'set'], ['b', 'set']), 1)).toBeUndefined();
+  });
+
+  it('the last commit that wrote the key before it, when the write was partial', () => {
+    expect(under(logOf(['a', 'set'], ['x'], ['b', 'merge']), 2)).toBe(0);
+    expect(under(logOf(['a', 'set'], ['b', 'merge'], ['c', 'append']), 2)).toBe(1);
+  });
+
+  it('-1 when no commit before it wrote the key: it was folded onto the value from before the run', () => {
+    expect(under(logOf(['x'], ['b', 'merge']), 1)).toBe(-1);
+  });
+
+  it('an earlier commit of the SAME step is the answer like any other: the rule knows nothing of steps', () => {
+    // A mount commits and then commits its exit; a fork child commits again when the fan-out settles.
+    // The later commit was folded onto the earlier one. (A reader whose nodes are steps passes through
+    // it; that is the walk's business and is tested with the walk.)
+    const log = logOf(['a', 'set'], ['m', 'merge'], ['m', 'merge']);
+    expect(under(log, 2)).toBe(1);
+    expect(under(log, 1)).toBe(0);
+    expect(under(logOf(['a', 'set'], ['m', 'set'], ['m', 'merge']), 2)).toBe(1);
+  });
+
+  it('forward: the next write of the key, when it only added', () => {
     const log = logOf(['a', 'set'], ['x'], ['b', 'merge'], ['c', 'merge']);
-    expect(children(log, 0)).toEqual([2]);
-    expect(children(log, 2)).toEqual([3]);
-    expect(children(log, 3)).toEqual([]);
+    expect(over(log, 0)).toBe(2);
+    expect(over(log, 2)).toBe(3);
+    expect(over(log, 3)).toBeUndefined();
   });
 
-  it('none, when the next write replaced the value', () => {
-    expect(children(logOf(['a', 'set'], ['b', 'set'], ['c', 'merge']), 0)).toEqual([]);
+  it('forward: none, when the next write replaced the value', () => {
+    expect(over(logOf(['a', 'set'], ['b', 'set'], ['c', 'merge']), 0)).toBeUndefined();
   });
 
-  it('every bundle of the next step, until one of them replaces the value', () => {
-    expect(children(logOf(['a', 'set'], ['m', 'merge'], ['m', 'append']), 0)).toEqual([1, 2]);
-    expect(children(logOf(['a', 'set'], ['m', 'merge'], ['m', 'set'], ['m', 'merge']), 0)).toEqual([1]);
-  });
-
-  it('none past a later bundle of its OWN step: what follows was built on that later bundle', () => {
-    // `a` wrote the key twice (a mount: its merge-back, then its exit). `b` added to what the SECOND left.
+  it('forward: the next write only, never the one after it, and a later commit of its own step counts', () => {
     const log = logOf(['a', 'set'], ['a', 'merge'], ['b', 'merge']);
-    expect(children(log, 0)).toEqual([]);
-    expect(children(log, 1)).toEqual([2]);
-    expect(parent(log, 2)).toBe(1);
+    expect(over(log, 0)).toBe(1);
+    expect(over(log, 1)).toBe(2);
   });
 
-  it('is the inverse of the backward rule, for every log of up to five commits by three steps', () => {
+  it('forward is the inverse of backward, for every log of up to six commits by three steps', () => {
     // Each commit: one of three steps, and it replaces `k`, adds to it, or leaves it alone. A step may
-    // commit more than once and steps may interleave (a fork's children, a mount's two bundles).
+    // commit more than once and steps may interleave (a fork's children, a mount's two commits).
     const STEPS = ['a', 'b', 'c'];
     const ROWS: string[][] = [[], ['merge'], ['set']];
     let logs = 0;
@@ -207,28 +183,28 @@ describe('the rule, forward: which writes were built directly on a write', () =>
       if (log.length > 0) {
         logs++;
         const writes = writesOf(log);
-        for (const under of writes) {
-          const built = children(log, under);
-          for (const over of writes) {
-            if (over <= under) continue;
+        for (const lower of writes) {
+          const built = over(log, lower);
+          for (const upper of writes) {
+            if (upper <= lower) continue;
             pairs++;
-            const forward = built.includes(over);
-            const backward = parent(log, over) === under;
+            const forward = built === upper;
+            const backward = under(log, upper) === lower;
             if (forward !== backward) {
               throw new Error(
                 `${JSON.stringify(log.map((b) => `${b.runtimeStageId}:${b.trace.map((r) => r.verb).join('+')}`))}: ` +
-                  `is ${over} built on ${under}? forward says ${forward}, backward says ${backward}`,
+                  `was ${upper} folded onto ${lower}? forward says ${forward}, backward says ${backward}`,
               );
             }
           }
         }
       }
-      if (log.length === 5) return;
+      if (log.length === 6) return;
       for (const step of STEPS) for (const rows of ROWS) grow([...log, ...logOf([step, ...rows])]);
     };
     grow([]);
-    expect(logs).toBe(9 + 9 ** 2 + 9 ** 3 + 9 ** 4 + 9 ** 5);
-    expect(pairs).toBeGreaterThan(100_000);
+    expect(logs).toBe(9 + 9 ** 2 + 9 ** 3 + 9 ** 4 + 9 ** 5 + 9 ** 6);
+    expect(pairs).toBeGreaterThan(1_000_000);
   });
 });
 
@@ -415,6 +391,64 @@ describe('the walk back through a value built in steps', () => {
     expect(edgesOf(root)).toEqual(['use <- mount via list', 'mount <- start via list [built on]']);
   });
 
+  it('a step whose own earlier commit REPLACED the value: the walk ends at that step, nothing older is in it', () => {
+    const w = world();
+    writes(w, 'start', [[['list'], ['a'], 'set']]);
+    const first = w.frame();
+    first.write(['list'], ['fresh'], 'set');
+    commit(first, 'mount');
+    const exit = w.frame();
+    exit.write(['list'], ['more'], 'merge');
+    commit(exit, 'mount', 'exit');
+    const use = w.frame();
+    use.read([], 'list');
+    use.write(['out'], 1, 'set');
+    commit(use, 'use');
+    expect(w.state.getState().list).toEqual(['fresh', 'more']);
+    const root = walk(w.log.list(), 'use', { 'use#0': ['list'] });
+    expect(edgesOf(root)).toEqual(['use <- mount via list']);
+    expect(root.parents[0].preRunBase).toBeUndefined();
+  });
+
+  it('two steps whose commits interleave on one key rest on each other: an edge each way, and every helper ends', () => {
+    // A adds to `k`, B adds to `k`, A adds to `k` again (its second commit). What A left rests on B's
+    // write, and B's write rests on A's first. At the level of steps that is a cycle of two, and it is
+    // what the record says. The cause graph, whose nodes are commits, has no cycle here.
+    const w = world({ k: { seeded: 1 } });
+    const a1 = w.frame();
+    a1.write(['k'], { a1: 1 }, 'merge');
+    commit(a1, 'a');
+    writes(w, 'b', [[['k'], { b: 1 }, 'merge']]);
+    const a2 = w.frame();
+    a2.write(['k'], { a2: 1 }, 'merge');
+    commit(a2, 'a', 'repeat');
+    const use = w.frame();
+    use.read([], 'k');
+    use.write(['out'], 1, 'set');
+    commit(use, 'use');
+    expect(w.state.getState().k).toEqual({ seeded: 1, a1: 1, b: 1, a2: 1 });
+    const log = w.log.list();
+    const root = walk(log, 'use', { 'use#0': ['k'] });
+    expect(edgesOf(root).sort()).toEqual(
+      ['a <- b via k [built on]', 'b <- a via k [built on]', 'use <- a via k'].sort(),
+    );
+    // A's FIRST commit was folded onto the value from before the run, and the walk came to it.
+    expect(root.parents[0].preRunBase).toEqual({ code: 'from-initial-state', keys: ['k'] });
+    // Each helper visits a node once.
+    expect(flattenCausalDAG(root).map((node) => node.stageId)).toEqual(['use', 'a', 'b']);
+    expect(formatCausalChain(root).split('\n')).toEqual([
+      'use (use#0) [wrote: out]',
+      '  a (a#0) ← via k [wrote: k]',
+      '    b (b#0) ← built on k [wrote: k]',
+      '      ↳ a#0 (see above)',
+    ]);
+    const json = sliceToJSON(sliceForKey(log, 'out', keysReadFromMap({ 'use#0': ['k'] })));
+    expect(
+      (json.edges ?? []).map((edge) => `${edge.from} -> ${edge.to}${edge.builtOn ? ' built on' : ''}`).sort(),
+    ).toEqual(['a#0 -> b#0 built on', 'b#0 -> a#0 built on', 'use#0 -> a#0'].sort());
+    expect(Object.keys(json.nodes ?? {}).sort()).toEqual(['a#0', 'b#0', 'use#0']);
+  });
+
   it('a chain longer than the depth budget is cut, and the root says so', () => {
     const w = world();
     writes(w, 's0', [[['k'], { n: 0 }, 'set']]);
@@ -441,6 +475,11 @@ describe('the walk back through a value built in steps', () => {
     const few = walk(w.log.list(), 'use', { 'use#0': ['k'] }, { maxNodes: 3 });
     expect(flattenCausalDAG(few).map((node) => node.stageId)).toEqual(['use', 's6', 's5']);
     expect(few.truncated).toEqual({ byDepth: false, byNodes: true });
+    // A budget that ends exactly at the write that REPLACED the value cuts nothing: that step has no
+    // link left to follow, so the walk is whole and does not say otherwise.
+    const exact = walk(w.log.list(), 'use', { 'use#0': ['k'] }, { maxDepth: 7 });
+    expect(flattenCausalDAG(exact).map((node) => node.stageId)).toHaveLength(8);
+    expect(exact.truncated).toBeUndefined();
   });
 
   it('under per-write attribution the link is followed too, beside the reads that fed the write', () => {
@@ -620,6 +659,31 @@ describe('forward: the life of a value does not end at a write that only added t
     expect(read.fromWriteIdx).toBe(1);
     expect(timeline.notes.map((note) => note.code)).toEqual(['partial-write', 'from-initial-state']);
     expect(formatTimeline(timeline)).toContain('@0 write merge — a (a#0) (added to the value from BEFORE the run)');
+  });
+
+  it('the link is by COMMIT: a step that committed twice has its later commit linked to its earlier one', () => {
+    // A reader of the timeline works commit by commit. Had the link skipped the step's own earlier
+    // commit, the later one would look like a whole value and commit 1 would never be named.
+    const w = world();
+    writes(w, 'start', [[['list'], ['a'], 'set']]);
+    const first = w.frame();
+    first.write(['list'], ['b'], 'merge');
+    commit(first, 'mount');
+    const exit = w.frame();
+    exit.write(['list'], ['c'], 'merge');
+    commit(exit, 'mount', 'exit');
+    const use = w.frame();
+    use.read([], 'list');
+    use.write(['out'], 1, 'set');
+    commit(use, 'use');
+    const timeline = keyTimeline(w.log.list(), 'list', lookup({ 'use#0': ['list'] }));
+    expect(momentsOf(timeline).map((m) => [m.kind, m.commitIdx, m.builtOnWriteIdx])).toEqual([
+      ['write', 0, undefined],
+      ['write', 1, 0],
+      ['write', 2, 1],
+      ['read', 3, undefined],
+    ]);
+    expect(formatTimeline(timeline)).toContain('@2 write merge — mount (mount#0) (added to the value of commit 1)');
   });
 
   it('the links stay one number per write, however many writes a read saw (a list appended to and read in a loop)', () => {

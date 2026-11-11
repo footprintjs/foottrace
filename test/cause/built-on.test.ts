@@ -128,11 +128,13 @@ describe.each(Object.entries(ADAPTERS))('the cause graph over %s', (_name, graph
     expect(await answer.children(2, 'k')).toEqual(['c.k (recorded-write)']);
   });
 
-  it('a first write that is a merge was folded onto the value from before the run: the node says a part has no source', async () => {
+  it('a first write that is a merge was folded onto the value from before the run: no parent, and no new gap', async () => {
+    // The node already said `conservative` for a value with no whole write in range, before this edge
+    // existed. It still says exactly that: a first `$update` of a run is not an untracked input.
     const log = [commit('fill', 0, [['box', 'merge']]), commit('use', 1, [['final', 'set', ['box']]])];
     const answer = ask(log, { 'fill#0': [], 'use#1': ['box'] });
     expect(await answer.parents(0, 'box')).toEqual([]);
-    expect(await answer.gaps(0, 'box')).toContain('untracked-input');
+    expect(await answer.gaps(0, 'box')).toEqual(['conservative']);
   });
 
   it('explain: a failure in Start is now found as the root cause of what Use wrote, through Fill', async () => {
@@ -178,25 +180,69 @@ describe.each(Object.entries(ADAPTERS))('the cause graph over %s', (_name, graph
     expect(await answer.children(0, 'box')).toContain('fill.box (recorded-write)');
   });
 
-  it('the cap on edges counts the writes folded onto a node, and a cut is said', async () => {
-    // Start's box is read by nobody; three bundles of ONE later step were folded onto it (a mount commits
-    // its merge-back and then its exit; here three, to pass a cap of two).
+  it('the cap on edges counts the write folded onto a node, and a cut is said', async () => {
+    // Start's box has two readers and one write folded onto it: three children, one more than a cap of two.
     const log = [
       commit('start', 0, [['box', 'set']]),
-      commit('mount', 1, [['box', 'merge']]),
-      { ...commit('mount', 2, [['box', 'merge']]), runtimeStageId: 'mount#1', phase: 'exit' },
-      { ...commit('mount', 3, [['box', 'merge']]), runtimeStageId: 'mount#1', phase: 'repeat' },
+      commit('r1', 1, [['out1', 'set', ['box']]]),
+      commit('r2', 2, [['out2', 'set', ['box']]]),
+      commit('fill', 3, [['box', 'merge']]),
     ];
-    const reads = { 'start#0': [], 'mount#1': [] };
+    const reads = { 'start#0': [], 'r1#1': ['box'], 'r2#2': ['box'], 'fill#3': [] };
     const roomy = createRecordGraph([scope(log, reads) as never]);
     const tight = createRecordGraph([scope(log, reads) as never], { maxEdges: 2 });
     const node = (g: typeof roomy) => g.nodeId(address, { runtimeStageId: 'start#0', commitIdx: 0, key: 'box' });
-    expect((await roomy.children(node(roomy), ctx())).edges).toHaveLength(3);
+    const all = await roomy.children(node(roomy), ctx());
+    expect(all.edges.map((edge) => edge.attribution)).toEqual(['per-write', 'per-write', 'recorded-write']);
     expect((await roomy.gaps(node(roomy), ctx())).map((gap) => gap.code)).toEqual([]);
     const cut = await tight.children(node(tight), ctx());
     expect(cut.edges).toHaveLength(2);
     expect(cut.complete).toBe(false);
     expect((await tight.gaps(node(tight), ctx())).map((gap) => gap.code)).toContain('edge-limit');
+  });
+
+  it('a step that committed twice: the way back goes through BOTH its commits, as the way forward does', async () => {
+    // A mount commits and then commits its exit. Its later commit was folded onto its earlier one. The
+    // box Use read holds what both wrote, so both are on the way back, and the way forward from the
+    // earlier commit reaches Use. (Read off the step-level walk, the earlier commit was skipped going
+    // back and reached going forward: the second reader of this change found it.)
+    const log = [
+      commit('start', 0, [['box', 'set']]),
+      commit('mount', 1, [['box', 'merge']]),
+      { ...commit('mount', 2, [['box', 'merge']]), runtimeStageId: 'mount#1', phase: 'exit' },
+      commit('use', 3, [['final', 'set', ['box']]]),
+    ];
+    const answer = ask(log as CommitBundle[], { 'start#0': [], 'mount#1': [], 'use#3': ['box'] });
+    expect(await answer.parents(3, 'final')).toEqual(['mount.box (per-write)']);
+    expect(await answer.parents(2, 'box')).toEqual(['mount.box (recorded-write)']);
+    expect(await answer.parents(1, 'box')).toEqual(['start.box (recorded-write)']);
+    expect(await answer.children(0, 'box')).toEqual(['use.final (per-write)', 'mount.box (recorded-write)']);
+    expect(await answer.children(1, 'box')).toEqual(['use.final (per-write)', 'mount.box (recorded-write)']);
+    // By position, since both of the mount's nodes read `mount.box`:
+    const g = graphOf(log, { 'start#0': [], 'mount#1': [], 'use#3': ['box'] });
+    const node = (at: number, key: string) =>
+      g.nodeId(address, { runtimeStageId: log[at].runtimeStageId, commitIdx: at, key });
+    expect((await g.parents(node(2, 'box'), ctx())).edges.map((edge) => edge.nodeId)).toEqual([node(1, 'box')]);
+    expect((await g.children(node(1, 'box'), ctx())).edges.map((edge) => edge.nodeId)).toEqual([
+      node(3, 'final'),
+      node(2, 'box'),
+    ]);
+  });
+
+  it("a step that READ the key and then added to it keeps the edge it always had: one edge, the read's", async () => {
+    // The common shape (`scope.box.b = 2` reads the box first). Its read already names Start's write, for
+    // certain, so the answer for such a record does not move: same node, same attribution, no second edge.
+    const log = [
+      commit('start', 0, [['box', 'set']]),
+      commit('fill', 1, [['box', 'merge', ['box']]]),
+      commit('use', 2, [['final', 'set', ['box']]]),
+    ];
+    const answer = ask(log, { 'start#0': [], 'fill#1': ['box'], 'use#2': ['box'] });
+    expect(await answer.parents(1, 'box')).toEqual(['start.box (per-write)']);
+    expect(await answer.gaps(1, 'box')).toEqual([]);
+    // Forward, Fill's box is listed once: fed by its read, and the fold onto Start is the same node.
+    // Use is listed too, and that is new: Fill only added, so what Use read still holds Start's write.
+    expect(await answer.children(0, 'box')).toEqual(['fill.box (per-write)', 'use.final (per-write)']);
   });
 
   it('a record whose writes all replace answers as before: no such edge anywhere', async () => {
@@ -310,4 +356,192 @@ describe('steps side by side, on the real writer', () => {
       [node(2), 'recorded-write'],
     ]);
   });
+});
+
+describe('a read of one commit of a step, a fold onto another (the real writer)', () => {
+  const frameOf = (state: SharedMemory, events: EventLog, address: string[] = []) => {
+    const frame = new RecordFrame(state, events, address);
+    frame.useEncoding({ commitValues: 'full', writeProvenance: 'reads-prefix' });
+    return frame;
+  };
+  const finish = (frame: RecordFrame, id: string, phase?: 'exit') => {
+    frame.commit(() => ({ stage: id, stageId: id, runtimeStageId: `${id}#0`, ...(phase && { phase }) }));
+    frame.release();
+  };
+
+  it('both commits are parents: the one the step read, and the one its write was folded onto', async () => {
+    // P sets the box. C reads it. P commits again (its exit) and adds to the box. C adds to the box and
+    // commits. C READ P's first commit, and C's write was FOLDED ONTO P's second. At the level of steps
+    // that is one parent, P, and one edge. Here it is two nodes, and what P's second commit added is
+    // in the box C left.
+    const state = new SharedMemory(undefined, {});
+    const events = new EventLog({});
+    const p = frameOf(state, events);
+    p.write(['box'], { p1: 1 }, 'set');
+    finish(p, 'p');
+    const c = frameOf(state, events);
+    c.read([], 'box');
+    c.noteRead([], 'box');
+    const exit = frameOf(state, events);
+    exit.write(['box'], { p2: 1 }, 'merge');
+    finish(exit, 'p', 'exit');
+    c.write(['box'], { c: 1 }, 'merge');
+    finish(c, 'c');
+    expect(state.getState().box).toEqual({ p1: 1, p2: 1, c: 1 });
+    const log = events.list();
+    expect(log.map((bundle) => `${bundle.runtimeStageId}${bundle.phase ? ` ${bundle.phase}` : ''}`)).toEqual([
+      'p#0',
+      'p#0 exit',
+      'c#0',
+    ]);
+
+    const g = createRecordGraph([scope(log, { 'p#0': [], 'c#0': ['box'] }) as never]);
+    const node = (at: number) =>
+      g.nodeId(address, { runtimeStageId: log[at].runtimeStageId, commitIdx: at, key: 'box' });
+    expect((await g.parents(node(2), ctx())).edges.map((edge) => [edge.nodeId, edge.attribution])).toEqual([
+      [node(0), 'per-write'],
+      [node(1), 'recorded-write'],
+    ]);
+    expect((await g.children(node(1), ctx())).edges.map((edge) => [edge.nodeId, edge.attribution])).toEqual([
+      [node(2), 'recorded-write'],
+    ]);
+    expect((await g.parents(node(1), ctx())).edges.map((edge) => [edge.nodeId, edge.attribution])).toEqual([
+      [node(0), 'recorded-write'],
+    ]);
+
+    // The cap on edges holds for this edge too: with room for one, the read's edge is there and the
+    // node says that one was cut.
+    const tight = createRecordGraph([scope(log, { 'p#0': [], 'c#0': ['box'] }) as never], { maxEdges: 1 });
+    const cut = await tight.parents(tight.nodeId(address, { runtimeStageId: 'c#0', commitIdx: 2, key: 'box' }), ctx());
+    expect(cut.edges.map((edge) => edge.attribution)).toEqual(['per-write']);
+    expect(cut.complete).toBe(false);
+    expect(
+      (await tight.gaps(tight.nodeId(address, { runtimeStageId: 'c#0', commitIdx: 2, key: 'box' }), ctx())).map(
+        (gap) => gap.code,
+      ),
+    ).toContain('edge-limit');
+  });
+
+  it('one edge per node: a read that only MAY have seen a write gives its place to the certain fold onto it', async () => {
+    // C looks at the box, Q adds to it and commits, C looks at live state again and adds to the box.
+    // Which value C read has two possible sources (P, Q). What C's write was folded onto is certain: Q.
+    // Q is named once, and by the certain statement.
+    const state = new SharedMemory(undefined, {});
+    const events = new EventLog({});
+    const p = frameOf(state, events);
+    p.write(['box'], { p: 1 }, 'set');
+    finish(p, 'p');
+    const c = frameOf(state, events, ['runs', 'c']);
+    c.read([], 'box');
+    c.noteRead([], 'box');
+    const q = frameOf(state, events);
+    q.write(['box'], { q: 1 }, 'merge');
+    finish(q, 'q');
+    c.read([], 'box');
+    c.write(['box'], { c: 1 }, 'merge');
+    finish(c, 'c');
+    const log = events.list();
+    expect(log[2]).toMatchObject({ runtimeStageId: 'c#0', beganAt: 1, sawUntil: 2 });
+
+    const g = createRecordGraph([scope(log, { 'p#0': [], 'q#0': [], 'c#0': ['box'] }) as never]);
+    const node = (at: number) =>
+      g.nodeId(address, { runtimeStageId: log[at].runtimeStageId, commitIdx: at, key: 'box' });
+    const parents = await g.parents(node(2), ctx());
+    expect(parents.edges.map((edge) => [edge.nodeId, edge.attribution])).toEqual([
+      [node(0), 'per-write'],
+      [node(1), 'recorded-write'],
+    ]);
+    // The read still has only possible sources, and the node says so.
+    expect((await g.gaps(node(2), ctx())).map((gap) => gap.code)).toContain('conservative');
+  });
+});
+
+describe('back and forward agree, commit by commit', () => {
+  // Every log of up to four commits made of: a writer that may commit more than once (`w1`, `w2`), adding
+  // to `k` or replacing it; and a reader, which reads `k`, writes a key of its own and may also add to
+  // `k` or replace it. For every node: each child has the node on its way back, and each parent has the
+  // node on its way forward. (A reader commits once: a later commit of a step is not another run of its
+  // reads, which is an older rule of the walk and not this one's.)
+  type Step = { id: string; k?: 'merge' | 'set'; reads: boolean };
+  const OPTIONS = (at: number): Step[] => [
+    { id: 'w1', k: 'merge', reads: false },
+    { id: 'w1', k: 'set', reads: false },
+    { id: 'w2', k: 'merge', reads: false },
+    { id: 'w2', k: 'set', reads: false },
+    { id: `r${at}`, reads: true },
+    { id: `r${at}`, k: 'merge', reads: true },
+    { id: `r${at}`, k: 'set', reads: true },
+  ];
+  const bundleOf = (step: Step, at: number, first: boolean): CommitBundle => {
+    const rows: Row[] = [];
+    if (step.k) rows.push(['k', step.k, step.reads ? ['k'] : []]);
+    if (step.reads) rows.push([`o${at}`, 'set', ['k']]);
+    return {
+      ...commit(step.id, at, rows),
+      runtimeStageId: `${step.id}#0`,
+      ...(first ? {} : { phase: 'repeat' as const }),
+    };
+  };
+
+  async function disagreement(steps: Step[]): Promise<string | undefined> {
+    const seen = new Set<string>();
+    const log = steps.map((step, at) => {
+      const first = !seen.has(step.id);
+      seen.add(step.id);
+      return bundleOf(step, at, first);
+    });
+    const reads = Object.fromEntries(steps.map((step) => [`${step.id}#0`, step.reads ? ['k'] : []]));
+    const g = createRecordGraph([scope(log, reads) as never]);
+    const nodes: string[] = [];
+    const label = new Map<string, string>();
+    log.forEach((bundle, at) => {
+      for (const row of bundle.trace) {
+        const id = g.nodeId(address, { runtimeStageId: bundle.runtimeStageId, commitIdx: at, key: row.path });
+        nodes.push(id);
+        label.set(id, `${bundle.stageId}@${at}.${row.path}`);
+      }
+    });
+    const next = async (id: string, way: 'parents' | 'children') =>
+      (await g[way](id, ctx())).edges.map((edge) => edge.nodeId);
+    const closure = async (from: string, way: 'parents' | 'children') => {
+      const reached = new Set<string>();
+      const queue = [from];
+      while (queue.length > 0) {
+        for (const id of await next(queue.shift()!, way)) {
+          if (reached.has(id)) continue;
+          reached.add(id);
+          queue.push(id);
+        }
+      }
+      return reached;
+    };
+    const shape = steps.map((step) => `${step.id}:${step.k ?? '-'}${step.reads ? '+read' : ''}`).join(' ');
+    for (const node of nodes) {
+      for (const child of await next(node, 'children')) {
+        if (!(await closure(child, 'parents')).has(node)) {
+          return `[${shape}] ${label.get(child)} is a child of ${label.get(node)}, which is not on its way back`;
+        }
+      }
+      for (const parent of await next(node, 'parents')) {
+        if (!(await closure(parent, 'children')).has(node)) {
+          return `[${shape}] ${label.get(parent)} is a parent of ${label.get(node)}, which is not on its way forward`;
+        }
+      }
+    }
+    return undefined;
+  }
+
+  it('for every log of up to four commits', async () => {
+    let logs = 0;
+    const grow = async (steps: Step[]): Promise<void> => {
+      if (steps.length > 0) {
+        logs++;
+        expect(await disagreement(steps)).toBeUndefined();
+      }
+      if (steps.length === 4) return;
+      for (const option of OPTIONS(steps.length)) await grow([...steps, option]);
+    };
+    await grow([]);
+    expect(logs).toBe(7 + 7 ** 2 + 7 ** 3 + 7 ** 4);
+  }, 120_000);
 });

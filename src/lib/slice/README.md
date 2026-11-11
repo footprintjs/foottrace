@@ -210,8 +210,10 @@ by the *same* live-range rule the walk uses (a property test pins the two doors
 to identical attribution). No graph, no budgets, no live references.
 
 A write that did not replace the value says what it was folded onto:
-`builtOnWriteIdx` (the write before it), or `builtOnPreRun` (nothing in the log
-is under it; the timeline then carries a `'from-initial-state'` note).
+`builtOnWriteIdx` (the write moment just before it, whichever step made it: a
+step that committed twice has its later commit linked to its earlier one), or
+`builtOnPreRun` (nothing in the log is under it; the timeline then carries a
+`'from-initial-state'` note).
 
 ```
 @0 write set — start (start#0)
@@ -341,8 +343,10 @@ with the names it recorded (`test/lib/slice/nested-rows.test.ts`).
   folded onto what the write before it had left, and the value is made of
   both. The walk back goes on to that write with an edge no read is behind;
   it used to stop, and the step that wrote the rest was left out with no
-  note (`memory/builtOn.ts`, the one rule; `memory/README.md` has the why and
-  an example). Text says `← built on box`.
+  note (`memory/builtOn.ts`, the one rule; `memory/README.md` has the why, an
+  example, the one case in which the walk's result is not a DAG, and the
+  limit that is still open: a `set` row the writer itself makes out of
+  writes that only added). Text says `← built on box`.
 - `keysReadKind` + `readsCoverage` — a slice can always be traced to its reads
   provider, and a reads-less provider is detectable, not silent.
 - `HonestyNote[]` (forward, timeline) — the machine-readable envelope: a consumer

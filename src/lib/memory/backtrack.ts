@@ -22,12 +22,20 @@
  * 4. Create parent CausalNode, link to root.parents
  * 5. A parent whose write of the linking key did not REPLACE the value (a merge, an append, a row
  *    inside the key) is not the end of the walk for that key: the value is made of that write and
- *    of what was there. The parent is linked to the commit its write was built on, in commit order
- *    (`builtOn.ts`), with an edge marked `builtOn`. No step read anything for this edge.
+ *    of what was there. The parent is linked to the step whose commit its write was folded onto, in
+ *    commit order (`builtOn.ts`), with an edge marked `builtOn`. No step read anything for this
+ *    edge. The rule speaks in commits and a node here is a STEP: when the commit underneath is an
+ *    earlier one of the same step, no edge is drawn and the walk passes through it.
  * 6. Enqueue parent. Repeat until queue empty or limits hit.
  *
- * Output is a **DAG** (not a linked list): a stage reading `creditScore` AND `dti`
- * from different writers has two parents.
+ * Output is a graph of steps, not a linked list: a stage reading `creditScore` AND `dti` from
+ * different writers has two parents. It is a **DAG** for every log in which no step commits a key
+ * between two commits of another step that both add to that key. In such a log each of the two
+ * steps rests on the other (A's later commit was folded onto B's write, and B's write onto A's
+ * earlier commit), and the walk says so with an edge each way: a cycle of two steps. Every helper
+ * here (`flattenCausalDAG`, `formatCausalChain`, `sliceToJSON`) visits a node once and ends on it.
+ * A consumer that follows `parents` itself must do the same, as it must already for a shared
+ * parent. The cause graph (`foottrace/cause`) has one node per COMMIT and is always acyclic.
  *
  * ## Staged Optimization
  *
@@ -91,10 +99,12 @@ export interface CausalNode {
   /** BFS depth from the starting node (0 = start). */
   depth: number;
   /**
-   * Parent nodes — stages this node depends on. DAG: multiple parents
-   * possible. KEPT for compatibility; with the `controlDeps` option
-   * (RFC-003 D3) governing deciders appear here too. For typed/keyed/
-   * weighted detail use {@link parentEdges}.
+   * Parent nodes — stages this node depends on. Multiple parents are
+   * possible, a parent can be shared, and two steps whose commits
+   * interleave on one key can each be the other's parent (see the file
+   * header): visit a node once. KEPT for compatibility; with the
+   * `controlDeps` option (RFC-003 D3) governing deciders appear here too.
+   * For typed/keyed/weighted detail use {@link parentEdges}.
    */
   parents: CausalNode[];
   /**
@@ -716,14 +726,23 @@ function buildCausalChain(
     // Built-on edges: for each write of this node that did not replace its key, the commit that
     // write was folded onto (`builtOn.ts`). A certain read of the same key from the same parent keeps
     // its own edge and no second one is added, whichever of the two the walk meets first (`linkParent`).
-    for (const [key, at] of partials) {
+    //
+    // The rule answers in commits; a node here is a step. When the commit underneath is an earlier one
+    // of this SAME step there is no edge to draw (a step does not rest on itself): the walk passes
+    // through it to what THAT commit was folded onto, or ends there when it replaced the value. Each
+    // (step, key, commit) is followed once (`partialWrite`), so a step that committed many times costs
+    // one lookup per commit, however often the walk comes to it.
+    const pending = [...partials];
+    while (pending.length > 0) {
+      const [key, at] = pending.pop()!;
       const under = builtOnBefore(key, at, bundleAt, findWriter);
-      // `undefined`: an earlier bundle of this same execution replaced the value. Nothing older is in it.
-      if (under === undefined) continue;
+      if (under === undefined) continue; // not for a write `partialWrite` handed out; kept for the type
       if (under < 0) {
         // Folded onto what the key held before the run: say why there is no edge.
         node.preRunBase ??= { code: 'from-initial-state', keys: [] };
         if (!node.preRunBase.keys.includes(key)) node.preRunBase.keys.push(key);
+      } else if (commitLog[under].runtimeStageId === node.runtimeStageId) {
+        pending.push(...partialWrite(node.runtimeStageId, key, under));
       } else {
         linkParent(node, under, 'data', key, depth, undefined, true);
       }
