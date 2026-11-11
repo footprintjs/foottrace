@@ -136,6 +136,24 @@ describe('which rows the writer marks', () => {
     expect(rowsOf(w.log.list()[0])).toEqual(['set a.y (built on view)', 'set a.x', 'set a (built on view)']);
   });
 
+  it.each(['full', 'delta'] as const)(
+    '%s: merges of one key that would not fold back, with no path inside it written: one set of what was read, marked',
+    (encoding) => {
+      // The step merged three times into `a`; in between, `a.x` was a number. The three merge rows do
+      // not fold back to what the step read, so the writer stores what it read as one `set`. `old` is
+      // still in it, and the step never wrote `old`: the row was built on the view. (Under 'delta' this
+      // is a branch of its own in the writer, the one that would otherwise try the compact append.)
+      const w = world(encoding, { a: { old: 1, x: { p: 1 } } });
+      const step = w.frame();
+      step.write(['a'], { x: { q: 1 } }, 'merge');
+      step.write(['a'], { x: 5 }, 'merge');
+      step.write(['a'], { x: { r: 1 } }, 'merge');
+      commit(step, 'step');
+      expect(w.state.getState().a).toEqual({ old: 1, x: { r: 1 } });
+      expect(rowsOf(w.log.list()[0])).toEqual(['set a (built on view)']);
+    },
+  );
+
   it('merges of a list that would not fold back: a set of what was read, marked; under delta the compact append, which needs no mark', () => {
     const rows = (encoding: Encoding) => {
       const w = world(encoding, { list: [{ id: 1 }] });
@@ -198,12 +216,20 @@ describe('the walk back through a row the writer built on the view', () => {
     const root = walk(w.log.list(), 'use', { 'use#0': ['a'] });
     expect(edgesOf(root)).toEqual(['use <- fill via a']);
     expect(root.parents[0].preRunBase).toEqual({ code: 'from-initial-state', keys: ['a'] });
-    // The timeline says the same on the write: nothing in the log is under it, and the note says why.
+    // The timeline says the same on the write, in the view's own field: the row replaced the value (no
+    // fold), and the view it was built on held no write of the key.
     const timeline = keyTimeline(w.log.list(), 'a', keysReadFromMap({ 'use#0': ['a'] }).lookup);
-    expect((timeline.moments ?? [])[0]).toMatchObject({ kind: 'write', commitIdx: 0, builtOnPreRun: true });
-    expect((timeline.moments ?? [])[0].builtOnViewIdx).toBeUndefined();
+    const fillMoment = (timeline.moments ?? [])[0];
+    expect(fillMoment).toMatchObject({ kind: 'write', commitIdx: 0, builtOnViewPreRun: true });
+    expect([fillMoment.builtOnPreRun, fillMoment.builtOnViewIdx, fillMoment.builtOnWriteIdx]).toEqual([
+      undefined,
+      undefined,
+      undefined,
+    ]);
     expect(timeline.notes.map((note) => note.code)).toContain('from-initial-state');
-    expect(formatTimeline(timeline)).toContain('@0 write set — fill (fill#0) (added to the value from BEFORE the run)');
+    expect(formatTimeline(timeline)).toContain(
+      "@0 write set — fill (fill#0) (built on the value its step's view held: the value from BEFORE the run)",
+    );
   });
 
   it('steps side by side: the row holds what the VIEW held, not what a sibling committed since', () => {
@@ -324,6 +350,21 @@ describe('the walk back through a row the writer built on the view', () => {
     expect(formatTimeline(timeline)).toContain(
       "@2 write set — fill (fill#0) (built on the value its step's view held: commit 0 or commit 1)",
     );
+    // The same when every index is said and the stamp is one no commit can have (a typed log built by
+    // hand: a door refuses it). The view is opened over everything before the commit, never guessed.
+    const badStamp = [
+      { ...log[0], idx: 0 },
+      { ...log[1], idx: 1 },
+      { ...log[2], idx: 2, viewAt: 9 },
+    ];
+    const guarded = (keyTimeline(badStamp, 'a', keysReadFromMap({}).lookup).moments ?? []).find(
+      (moment) => moment.stageId === 'fill',
+    );
+    expect([guarded?.builtOnViewIdx, guarded?.builtOnViewPreRun, guarded?.orViewIdxs]).toEqual([
+      undefined,
+      true,
+      [0, 1],
+    ]);
     // With the index said, the same record has one answer.
     const said = [log[0], { ...log[1], idx: 12 }, log[2], log[3]];
     expect(edgesOf(walk(said, 'use', { 'use#0': ['a'] }))).toEqual([
@@ -524,6 +565,49 @@ describe('forward, the timeline and the cause graph', () => {
     expect(formatTimeline(timeline)).toContain(
       "@1 write set — fill (fill#0) (built on the value its step's view held: commit 0)",
     );
+  });
+
+  it.each([
+    [
+      'a marked set of the key: it replaced what P wrote, and was built on a view that held no write',
+      false,
+      { builtOnViewPreRun: true },
+      "(built on the value its step's view held: the value from BEFORE the run)",
+    ],
+    [
+      'a marked row inside the key: folded onto what P wrote, and built on a view that held no write',
+      true,
+      { builtOnWriteIdx: 0, builtOnViewPreRun: true },
+      "(added to the value of commit 0; built on the value its step's view held: the value from BEFORE the run)",
+    ],
+  ])('a view pinned before any write of the key: %s', (_name, inside, fields, words) => {
+    // Fill pins its view (it reads another key) before P writes `a`. P commits. Fill then writes and
+    // commits a row the writer built on that view. "Before the run" is the VIEW's answer here, and it
+    // has its own field: `builtOnPreRun` would say the commit was folded onto the pre-run value, which
+    // is false in both cases. (Found by the second reader: one field said both, and the text read as
+    // "added to the value from BEFORE the run" for a set that added to nothing.)
+    const w = world('delta');
+    const fill = w.frame();
+    fill.read([], 'other');
+    const p = w.frame();
+    p.write(['a'], { p: 1 }, inside ? 'merge' : 'set');
+    commit(p, 'p');
+    if (inside) {
+      fill.write(['a', 'b'], { m: 1 }, 'merge');
+      fill.write(['a', 'b', 'c'], 1, 'set');
+    } else {
+      fill.write(['a'], { m: 1 }, 'merge');
+      fill.write(['a', 'in'], 1, 'set');
+    }
+    commit(fill, 'fill');
+    const timeline = keyTimeline(w.log.list(), 'a', keysReadFromMap({}).lookup);
+    const moment = (timeline.moments ?? []).find((entry) => entry.stageId === 'fill');
+    expect(moment).toMatchObject({ kind: 'write', commitIdx: 1, ...fields });
+    expect(moment?.builtOnPreRun).toBeUndefined();
+    expect(moment?.builtOnViewIdx).toBeUndefined();
+    expect(moment?.orViewIdxs).toBeUndefined();
+    expect(timeline.notes.map((note) => note.code)).toContain('from-initial-state');
+    expect(formatTimeline(timeline)).toContain(`@1 write set — fill (fill#0) ${words}`);
   });
 
   it('a row INSIDE the key has two links, and they can name two writes: the fold and the view', () => {

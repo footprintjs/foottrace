@@ -216,10 +216,10 @@ export interface CausalEdge {
    *     this edge is exact;
    *   - `'built-on-view'`: the child's write is a `set` row the WRITER built on the step's view
    *     (`TraceEntry.builtOnView`). The parent is the write that view held, found by the moment the
-   *     view was pinned (`CommitBundle.viewAt`): one write, for certain. Only in an array that does
-   *     not show where that moment sits (bundles around it say no index) does the edge carry
-   *     `overlap`, as a read's edge does: the parent is then one of the writes the view could have
-   *     held.
+   *     view was pinned (`CommitBundle.viewAt`): one write, for certain. Only where the reader
+   *     cannot place that moment at one position of the array it was handed (`windowPlacement.ts`
+   *     has the cases; bundles that say no index are the usual one) does the edge carry `overlap`,
+   *     as a read's edge does: the parent is then one of the writes the view could have held.
    * Both are registered in `memory/honesty.ts · HONESTY_CODES`. Absent on an edge a read made, so
    * such an edge keeps its shape. When the child ALSO read `key` from this parent, for certain, the
    * read's edge stands alone and no second one is added; beside a read that is only a possible
@@ -747,7 +747,7 @@ function buildCausalChain(
     // A `'view'` item is dated differently: the row holds what the step's VIEW held, so its sources
     // are the read rule's, asked with the view of the commit that carries the row (`CommitBundle.
     // viewAt`; a later commit of a step has a view of its own). That is one write, for certain. Only
-    // where the array does not show where the view sits (bundles around it say no index) is there
+    // where the view cannot be placed at one position of the array (`windowPlacement.ts`) is there
     // more than one, and then each is a possible source and its edge says so (`overlap`).
     const pending = [...partials];
     while (pending.length > 0) {

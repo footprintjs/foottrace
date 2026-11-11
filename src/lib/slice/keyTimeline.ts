@@ -37,8 +37,10 @@
  * what the view held, as of the moment the view was pinned
  * (`CommitBundle.viewAt`). That is one write (`builtOnViewIdx`), and it need
  * not be the write the commit was folded onto: a commit with such a row
- * INSIDE the key has both links. Only where the array does not show where
- * the view sits could it have held other writes too (`orViewIdxs`).
+ * INSIDE the key has both links. A view that held no write of the key says
+ * so in its own field too (`builtOnViewPreRun`). Only where the reader
+ * cannot place the view at one position of the array could it have held
+ * other writes (`orViewIdxs`).
  *
  * DAG position: memory ← slice. Imports memory/ only (see README.md).
  */
@@ -170,8 +172,11 @@ export function keyTimeline(
       const seen = readFromView(bundle, normalisedKey)
         ? readSourcesOf(normalisedKey, index.views.get(idx) ?? { start: idx, end: idx }, writeBefore)
         : undefined;
-      const preRun = under === -1 || (seen !== undefined && seen.before < 0);
-      if (preRun) restsOnPreRun = true;
+      // Each link has its own way to say "nothing in the log is under it": the two can differ (a row
+      // inside the key, folded onto an earlier commit, whose view was pinned before any write).
+      const foldPreRun = under === -1;
+      const viewPreRun = seen !== undefined && seen.before < 0;
+      if (foldPreRun || viewPreRun) restsOnPreRun = true;
       moments.push({
         kind: 'write',
         commitIdx: idx,
@@ -180,8 +185,9 @@ export function keyTimeline(
         stageName: bundle.stage,
         ...(entry !== undefined && { verb: entry.verb }),
         ...(under !== undefined && under >= 0 && { builtOnWriteIdx: under }),
-        ...(preRun && { builtOnPreRun: true as const }),
+        ...(foldPreRun && { builtOnPreRun: true as const }),
         ...(seen !== undefined && seen.before >= 0 && { builtOnViewIdx: seen.before }),
+        ...(viewPreRun && { builtOnViewPreRun: true as const }),
         ...(seen !== undefined && seen.during.length > 0 && { orViewIdxs: [...seen.during] }),
       });
     }

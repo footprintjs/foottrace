@@ -272,11 +272,16 @@ write. Both writes are under the value, for certain:
 @2 write set — fill (fill#0) (added to the value of commit 1; built on the value its step's view held: commit 0)
 ```
 
-Only an array that does not show where the view sits (a slice, or rows taken
-out, so that bundles around the commit say no index) leaves other writes the
-view could have held. `orViewIdxs` lists them, the line reads
-`(built on the value its step's view held: commit 0 or commit 1)`, and none
-of them is certain.
+A view that held no write of the key says so in its own field too
+(`builtOnViewPreRun`; the line reads `built on the value its step's view
+held: the value from BEFORE the run`). `builtOnPreRun` stays the fold's.
+
+Only where the reader cannot place the view at one position of the array it
+was handed are there other writes the view could have held (the usual case:
+a slice, or rows taken out, so that bundles around the commit say no index;
+`memory/windowPlacement.ts` has the others). `orViewIdxs` lists them, the
+line reads `(built on the value its step's view held: commit 0 or commit 1)`,
+and none of them is certain. A log as its writer wrote it never has this.
 
 Such a commit is a write moment only. Its step read nothing, so the timeline
 shows no read for it.
@@ -404,7 +409,7 @@ with the names it recorded (`test/lib/slice/nested-rows.test.ts`).
   says `← built on box`.
 - `CausalEdge.builtOn: 'built-on-view'` (backward), `ForwardRead.builtOnView`
   and `ForwardEdge.basis: 'built-on-view'` (forward),
-  `KeyMoment.builtOnViewIdx` / `orViewIdxs` (timeline): a `set` row the WRITER built on its
+  `KeyMoment.builtOnViewIdx` / `builtOnViewPreRun` / `orViewIdxs` (timeline): a `set` row the WRITER built on its
   step's view (`TraceEntry.builtOnView`). The row replaces the value in the
   fold and still holds what the view held, so the walk goes on to the write
   that view held. No read by the step is behind it, and every answer says so

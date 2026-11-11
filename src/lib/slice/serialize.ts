@@ -249,14 +249,13 @@ const MAYBE_READ_WORDS: Record<ReadOverlap, string> = {
 function builtOnWords(moment: KeyMoment): string {
   const parts: string[] = [];
   if (moment.builtOnWriteIdx !== undefined) parts.push(`added to the value of commit ${moment.builtOnWriteIdx}`);
-  const viewed = moment.builtOnViewIdx !== undefined || (moment.orViewIdxs?.length ?? 0) > 0;
-  if (viewed) {
-    const held = [
-      moment.builtOnViewIdx !== undefined ? `commit ${moment.builtOnViewIdx}` : 'the value from BEFORE the run',
-      ...(moment.orViewIdxs ?? []).map((idx) => `commit ${idx}`),
-    ];
-    parts.push(`built on the value its step's view held: ${held.join(' or ')}`);
-  } else if (moment.builtOnPreRun) parts.push('added to the value from BEFORE the run');
+  else if (moment.builtOnPreRun) parts.push('added to the value from BEFORE the run');
+  const held = [
+    ...(moment.builtOnViewIdx !== undefined ? [`commit ${moment.builtOnViewIdx}`] : []),
+    ...(moment.builtOnViewPreRun ? ['the value from BEFORE the run'] : []),
+    ...(moment.orViewIdxs ?? []).map((idx) => `commit ${idx}`),
+  ];
+  if (held.length > 0) parts.push(`built on the value its step's view held: ${held.join(' or ')}`);
   return parts.length > 0 ? ` (${parts.join('; ')})` : '';
 }
 

@@ -67,9 +67,10 @@ export interface BuiltOnParents {
  *   - the write just before it, when this one did not replace the value (certain; it may be an
  *     earlier commit of the same step);
  *   - what its view held, when the writer built a `set` row of it on the view: the last write
- *     before the moment the view was pinned, for certain. Only where the array does not show where
- *     that moment sits (bundles around it say no index) can a write lie inside the range it could
- *     be in; then each of those writes is a possible source.
+ *     before the moment the view was pinned, for certain. Only where that moment cannot be placed
+ *     at one position of the record's log (`memory/windowPlacement.ts`; bundles that say no index
+ *     are the usual case) can a write lie inside the range it could be in; then each of those
+ *     writes is a possible source.
  *
  * @param limit  How many edges the caller can use. Pass one more than its cap, so that it still sees
  *               that there were too many.

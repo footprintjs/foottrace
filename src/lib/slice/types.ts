@@ -422,8 +422,9 @@ export interface KeyMoment {
    * moment just before it in this timeline, whichever step made it (an
    * earlier commit of the same step included; `memory/builtOn.ts`). A read
    * that saw this write also saw that one, and so on back to a write that
-   * carries none of the links (this field, `builtOnViewIdx`,
-   * `builtOnPreRun`): that one replaced the value and holds nothing older.
+   * carries none of the links (this field, `builtOnPreRun`,
+   * `builtOnViewIdx`, `builtOnViewPreRun`): that one replaced the value and
+   * holds nothing older.
    * One number per write: follow it from the write a read names
    * (`fromWriteIdx`, `orWriteIdxs`).
    */
@@ -432,7 +433,8 @@ export interface KeyMoment {
    * `'write'` moments only: the write did not replace the value and no
    * commit before it wrote the key, so it was folded onto what the key held
    * before the run, which the log cannot see. The timeline then carries a
-   * `'from-initial-state'` note.
+   * `'from-initial-state'` note. It speaks of the FOLD only: a row the writer
+   * built on a view that held no write says so in `builtOnViewPreRun`.
    */
   builtOnPreRun?: true;
   /**
@@ -442,7 +444,7 @@ export interface KeyMoment {
    * before the moment the view was pinned (`CommitBundle.viewAt`). What the
    * row holds of the key is that write's value with the step's own writes
    * folded in, so a read that saw this write also saw that one. Absent when
-   * no commit before the view wrote the key (`builtOnPreRun` says so).
+   * no commit before the view wrote the key (`builtOnViewPreRun` says so).
    *
    * It is a link of its own beside `builtOnWriteIdx`, and the two can name
    * different writes: a commit with such a row INSIDE the key was folded
@@ -451,13 +453,27 @@ export interface KeyMoment {
    */
   builtOnViewIdx?: number;
   /**
+   * `'write'` moments only, for a commit with such a row: no commit before
+   * the moment its view was pinned wrote the key, so what the row holds of
+   * the key was built on the value from before the run (or on nothing),
+   * which the log cannot see. The timeline then carries a
+   * `'from-initial-state'` note. WHY NOT `builtOnPreRun`: that one says the
+   * commit was FOLDED onto the pre-run value. A marked `set` of the key is
+   * folded onto nothing (it replaced whatever a sibling had committed), and
+   * a marked row inside the key can be folded onto a commit while its view
+   * held none. The two say different things and can both be there.
+   */
+  builtOnViewPreRun?: true;
+  /**
    * `'write'` moments only: the OTHER writes the view of such a commit could
-   * have held, ascending. Present only when the array does not show where
-   * the view sits (bundles around the commit say no index: a slice, or rows
-   * taken out). The view then held `builtOnViewIdx` (or the value from
-   * before the run) or one of these, and the record cannot say which: each
-   * is a possible source, none the certain one. Absent in an unbroken log,
-   * where the view has one source.
+   * have held, ascending. Present only when the reader cannot place the view
+   * at one position of the array it was handed (`windowPlacement.ts` has the
+   * cases: bundles around the commit that say no index, as in a slice or a
+   * log with rows taken out; an array of several logs; a `viewAt` that
+   * cannot be one). The view then held `builtOnViewIdx` (or the value from
+   * before the run, `builtOnViewPreRun`) or one of these, and the record
+   * cannot say which: each is a possible source, none the certain one.
+   * Absent for a log as its writer wrote it, where a view has one source.
    */
   orViewIdxs?: number[];
 }
