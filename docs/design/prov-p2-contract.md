@@ -1,11 +1,12 @@
-# P2 contract for Foottrace 1.7.0: proposal for review
+# P2 contract for the PROV export: proposal, not shipped
 
-Status: **design only; revised after the owner's external review**. This PR adds
-no runtime capability, public export, version bump or release. P1 and P1.1 are
-merged; published 1.6.0 remains the compatibility baseline. The changes below
-record the requested demand order and person-label boundary; the revised contract
-still returns for final review before implementation. Each implementation PR must
-receive tests, independent security then code reviews, and final external review.
+Status: **not shipped; no release target.** None of the options below exist:
+`src/lib/prov/options.ts · provOptions` accepts only `base`, `values` and the
+export limits, and refuses any other key. The proposal was written for a 1.7.0
+release that did not include it; the 1.7.0 wording below is kept as history.
+Any future implementation returns for review first, and each implementation PR
+must receive tests, independent security then code reviews, and final external
+review.
 
 ## Purpose and ownership
 
@@ -227,7 +228,5 @@ For each code PR: write tests red first, full Node22/24 checks and coverage,
 unchanged default/no-values golden and tight-cap differential probes, fresh packed
 CJS/ESM/strict TypeScript/browser consumers, independent SECURITY then CODE review,
 then PR and stop for the owner's other reviewer. Keep zero runtime dependencies
-and root-door tree shaking. In the next code packet, also document that
-`ProvCommitContext.hides` must be side-effect-free: no budget spending or I/O.
-Leave speculative live-fact
+and root-door tree shaking. Leave speculative live-fact
 precomputation alone. P3 live delivery still waits for a real consumer and review.

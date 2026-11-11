@@ -14,7 +14,7 @@
  *   2. Paths are scrubbed in the set's order, against the tree as scrubbed so far: a path under one
  *      already scrubbed finds a string, not a container, and is left alone.
  *   3. The input patch is never edited. `scrubPatch` copies only the spine of each scrubbed path
- *      (and nothing at all when nothing is scrubbed); `redactPatch` hands back a fresh deep copy.
+ *      (and nothing at all when nothing is scrubbed).
  */
 
 import { nativeGet, nativeHas, nativeSet, ownedRootOf, ownSpine } from './pathOps.js';
@@ -32,15 +32,15 @@ import type { MemoryPatch } from './types.js';
  *   - no path to scrub (no policy, no per-call mark — the common case) → `patch` ITSELF, no copy at all;
  *   - otherwise → a new root and a shallow copy of each container on a scrubbed path (`pathOps ·
  *     ownSpine`), every other subtree shared with `patch`. `patch` is never edited.
- * The engine called the public {@link redactPatch} (a whole `structuredClone`) twice per commit before
+ * The engine called a public `redactPatch` (a whole `structuredClone`) twice per commit before
  * 9.33.0. The bytes are the same: a scrubbed path holds the placeholder, every other path the value the
  * buffer cloned (pinned by the 9.18.1 / 9.19.1 redaction byte tests).
  *
  * Paths are scrubbed in the set's order, against the tree as scrubbed so far: a path under one already
  * scrubbed finds a string, not a container, and is left alone (as before).
  *
- * INTERNAL — the result shares structure with `patch`. A caller outside the commit path wants
- * {@link redactPatch}.
+ * INTERNAL — the result shares structure with `patch`. A caller that needs an independent copy
+ * clones `patch` first.
  *
  * @param redactedPaths DELIM-joined paths (`TransactionBuffer`'s `redactedPaths`; a bundle's
  *   `redactedPaths` array works too).
@@ -60,16 +60,4 @@ export function scrubPatch(patch: MemoryPatch, redactedPaths: Iterable<string>):
     nativeSet(out, segs, LOG_PLACEHOLDER);
   }
   return out ?? patch;
-}
-
-/**
- * Private historical copy-and-scrub helper, with its contract unchanged since FootPrint 4.x:
- * a fresh deep copy of `patch` (`structuredClone`) with
- * {@link LOG_PLACEHOLDER} at every listed path that holds a defined value. Shares nothing with `patch`
- * and never edits it. (It lived in `memory/utils.ts` until 9.33.0 and in `memory/redaction.ts` until
- * C4; the live commit path uses the clone-free {@link scrubPatch}.) Kept here to preserve the
- * extracted implementation and its tests; this helper has no foottrace public entry point.
- */
-export function redactPatch(patch: MemoryPatch, redactedSet: Set<string>): MemoryPatch {
-  return scrubPatch(structuredClone(patch), redactedSet);
 }

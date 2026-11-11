@@ -135,8 +135,8 @@ base: `commitValueAt` never receives `initialState`, so a key seeded before the
 run and not `set` or `delete`d in range folds from absent there (`stateAt`
 with the base reports the whole value). Its twin closes it (F4b, same minor):
 `commitValueAtWithBasis(log, i, key, { initialState })` folds such a key from
-the base — the value `stateAt` gives with it (pinned by
-property/value-basis.property.test.ts) — and its `basis` says
+the base — the value `stateAt` gives with it (pinned by FootPrint's
+[test/lib/memory/property/value-basis.property.test.ts](https://github.com/footprintjs/footPrint/blob/main/test/lib/memory/property/value-basis.property.test.ts)) — and its `basis` says
 `'from-initial-state'`; without the base, the same code marks the answer
 partial. `findLastWriter`, the slice layer and
 the cursor's stops read the same rows; a write that reached the key only
@@ -392,7 +392,7 @@ stateAt(snapshot, 1).state;                      // same values, a separate froz
 timeTravel(snapshot).stops[0].prologue;          // undefined — the shipped axis's start is the raw base
 ```
 
-Run `examples/post-execution/time-travel/03-compose-a-strategy.ts`: the
+Run FootPrint's [`examples/post-execution/time-travel/03-compose-a-strategy.ts`](https://github.com/footprintjs/footPrint/blob/main/examples/post-execution/time-travel/03-compose-a-strategy.ts): the
 per-stage start has 0 keys; the beat axis's start has 3 (`tenant`, `needle`,
 `prepared`) and `prologue: true`.
 
@@ -505,7 +505,7 @@ for (const invalid of [[resumed, paused], [paused, someOtherChartsResumedLeg]]) 
 }
 ```
 
-Run `examples/post-execution/time-travel/04-chain-a-pause-and-resume.ts` for
+Run FootPrint's [`examples/post-execution/time-travel/04-chain-a-pause-and-resume.ts`](https://github.com/footprintjs/footPrint/blob/main/examples/post-execution/time-travel/04-chain-a-pause-and-resume.ts) for
 the measured axis: 3 + 2 bundles, 7 stops, one pair of bookends.
 
 ### 5. A stored recording needs no cast
@@ -545,7 +545,7 @@ stateAt(stored, 2).skipped;                      // undefined on a clean log —
 //   skipped: [{ index: 1, reason: 'not an object (null)' }]
 ```
 
-Run `examples/post-execution/time-travel/05-a-stored-recording-needs-no-cast.ts`.
+Run FootPrint's [`examples/post-execution/time-travel/05-a-stored-recording-needs-no-cast.ts`](https://github.com/footprintjs/footPrint/blob/main/examples/post-execution/time-travel/05-a-stored-recording-needs-no-cast.ts).
 
 ### 6. A stored record reads back — even a run that never ended (1.1.0)
 
@@ -627,7 +627,7 @@ Only the first was missing from the record. Its laws:
    rule, below) or telemetry (`$emit`) — never the log.
 2. **Absent when empty.** An untagged chart's log, snapshot, checkpoint and
    every recorder output are byte-identical to 9.20.0
-   (`test/lib/engine/scenario/declared-tags-byte-identity.test.ts`, reference
+   (FootPrint's [`test/lib/engine/scenario/declared-tags-byte-identity.test.ts`](https://github.com/footprintjs/footPrint/blob/main/test/lib/engine/scenario/declared-tags-byte-identity.test.ts), reference
    generated on the 9.20.0 tree).
 3. **The tag is the fact; a derivation is the fallback.** A consumer that
    classified stops from ids reads `bundle.tags` first and derives only for

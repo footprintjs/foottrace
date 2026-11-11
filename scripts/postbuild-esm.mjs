@@ -8,14 +8,11 @@
  * reparse) and stricter loaders can fail. This writes that 2-line manifest.
  *
  * Safe because every relative import in src already carries a `.js` extension
- * (true-ESM-resolvable) and the only `require()` (worker-thread detach driver)
- * is guarded by `typeof require === 'function'`, so it degrades gracefully in
- * ESM instead of crashing.
+ * (true-ESM-resolvable) and src makes no `require()` call.
  *
  * `sideEffects: false` MUST be repeated here: bundlers resolve sideEffects from
  * the NEAREST enclosing package.json, so this manifest would otherwise shadow
- * the root declaration for every ESM file — measured +40% retained bytes on
- * representation-only bundles (ScopeFacade et al. kept despite being unused).
+ * the root declaration for every ESM file.
  */
 import { writeFileSync } from 'node:fs';
 

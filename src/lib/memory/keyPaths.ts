@@ -87,8 +87,6 @@ export interface PathNode {
   readonly positions: number[];
   /** The subset of {@link positions} whose row here is a `set` or a `delete` (it decides the value alone). */
   readonly totals: number[];
-  /** Positions of commits with a recognized `set`, `merge` or `append` row exactly on this path. */
-  readonly writes: number[];
   /** The next segment → its node. */
   readonly children: Map<string, PathNode>;
   /** Memo of {@link subtreePositions}. */
@@ -106,7 +104,7 @@ export interface WriterIndex {
 }
 
 function nodeOf(path: string): PathNode {
-  return { path, positions: [], totals: [], writes: [], children: new Map() };
+  return { path, positions: [], totals: [], children: new Map() };
 }
 
 /** Append `i` to an ascending list unless it is already its last element. */
@@ -142,8 +140,6 @@ export function buildWriterIndex(
       }
       pushOnce(node.positions, i);
       if (verb === 'set' || verb === 'delete') pushOnce(node.totals, i);
-      // Value-free metadata contributes path positions only, never a fabricated write verb.
-      if (verb === 'set' || verb === 'merge' || verb === 'append') pushOnce(node.writes, i);
     }
   }
   return { roots };

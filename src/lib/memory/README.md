@@ -5,7 +5,7 @@ This directory owns the record, not the engine that produces it. It was extracte
 ## One rule per owner
 
 - Leaves: record types, encoded paths, safe nested access, value equality and merging.
-- Verb law: one implementation of set/update/append/delete replay, used by live commits and readers.
+- Verb law: one implementation of set/merge/append/delete replay, used by live commits and readers.
 - Staging and commit: the private transaction buffer, admission, encoding, scrub bytes and bundle construction.
 - Staged reads: `hardWriteCoverage.ts` checks literal path prefixes; the buffer owns hard-write keys and `RecordFrame` uses them only for an undefined read. Hard sets/deletes own their path and descendants; merges alone do not mask live fallback.
 - Public writer: `SharedMemory` holds copy-on-write state, `EventLog` owns the frozen base and append-only bundles, and `RecordFrame` stages one step's reads/writes and commits them.
