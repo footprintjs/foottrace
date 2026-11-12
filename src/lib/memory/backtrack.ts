@@ -80,6 +80,7 @@
 import type { CausalChainOptions, CausalEdge, CausalNode, KeysReadLookup } from './backtrackTypes.js';
 import { builtOnBefore, readFromView, replacesValue, viewOverlapOf } from './builtOn.js';
 import { buildCommitIndex } from './commitLogUtils.js';
+import { requireControlDepsFunction } from './controlDeps.js';
 import { queryWork, relation, writesOnlyInside } from './keyPaths.js';
 import { overlapOf, readSourcesOf } from './readWindow.js';
 import { type BuiltOn, type SourceOverlap, takeLink } from './parentEdges.js';
@@ -183,6 +184,9 @@ function buildCausalChain(
   const maxDepth = options?.maxDepth ?? 20;
   const maxNodes = options?.maxNodes ?? 100;
   const controlDeps = options?.controlDeps;
+  // Refused here, at the call and before the log is read: a wrong value (a saved map) would otherwise fail
+  // from deep inside the walk, or never, when the start id is absent.
+  requireControlDepsFunction(controlDeps, 'causalChain');
   const weigh = options?.weigh;
   const perWrite = options?.edgeAttribution === 'per-write';
 

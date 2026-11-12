@@ -358,6 +358,21 @@ A missing source tree should remain unknown in its consumer, not be replaced
 with an invented empty tree. A producer such as HCI that supplies a read map
 continues to use `keysReadFromMap`; no tree is required or fabricated.
 
+## Control edges from a saved map
+
+`sliceForKey` (and `causalChain`) take `controlDeps` as a FUNCTION. A tool that saved a run's control edges as plain data (`{ 'high#2': { deciderId: 'route#1', label: 'score over 50' } }`) makes it with `controlDepsFromMap(map)`, which lives in `memory/controlDeps.ts` and is exported from the root door beside `keysReadFromMap`:
+
+```ts
+import { causalChain, controlDepsFromMap, keysReadFromMap } from 'foottrace';
+
+const saved = JSON.parse(text); // { 'high#2': { deciderId: 'route#1', label: 'score over 50' } }
+const reads = keysReadFromMap({ 'route#1': ['score'] });
+const slice = sliceForKey(commitLog, 'result', reads, { controlDeps: controlDepsFromMap(saved) });
+// slice.root walks high#2 ← [control: score over 50] route#1 ← via score seed#0
+```
+
+Why a helper and not the object: the map is a file's data, so the lookup reads own data properties only (never the prototype or a getter), answers an edge only when `deciderId` is a string and `label` is absent or a string, and gives `undefined` otherwise, never throwing. It reads the object LIVE, as `keysReadFromMap` does. A `controlDeps` that is not a function is refused at the call (`TypeError`, naming the option and the helper), also when the log is empty or the key was never written. Runnable: `examples/post-execution/slice/01-saved-control-map.ts` (the `causalChain` form).
+
 ## Subflow boundaries (read this before slicing agent charts)
 
 A subflow runs in an **isolated runtime**: its commits live in

@@ -15,6 +15,7 @@
   "src/lib/memory/backtrackViews.ts": 0,
   "src/lib/memory/builtOn.ts": 0,
   "src/lib/memory/commitLogUtils.ts": 3,
+  "src/lib/memory/controlDeps.ts": 0,
   "src/lib/memory/deltaEncoding.ts": 2,
   "src/lib/memory/deltaRows.ts": 2,
   "src/lib/memory/equality.ts": 0,

@@ -23,7 +23,7 @@ source version numbers alone do not establish npm availability.
 
 | Import | Responsibility |
 | --- | --- |
-| `foottrace` | Record types, runtime and attempt IDs, replay, time-travel cursors, causal and variable slices, honesty codes, the stored-record reader, the run-evidence reader |
+| `foottrace` | Record types, runtime and attempt IDs, replay, time-travel cursors, causal and variable slices (with `controlDepsFromMap` for a saved control map), honesty codes, the stored-record reader, the run-evidence reader |
 | `foottrace/write` | `SharedMemory`, `EventLog`, `RecordFrame`, encoding and write types, writer-owned freezing, the record sink port and `memorySink`, a run's evidence shapes |
 | `foottrace/paths` | Record-path encoding/decoding, nested access and safe diagnostic writes |
 | `foottrace/cause` | Optional bounded attention, cause and impact queries; in-memory and lazily loaded stored-record adapters |
@@ -161,6 +161,23 @@ The producer owns delivery and scope attribution: transport settlement alone doe
 The [offline host-adapter example](examples/call-answer-adapter.ts) reopens stored observations and uses existing `CauseGraph` ports. It is a local synthetic producer fixture with no provider calls. Missing producer evidence stays unknown. The native record graph and value-free PROV projection disclose unprojected call ancestry rather than inventing external nodes. Stored notes remain opaque, and `memorySink` supplies no durability guarantee.
 
 `causalChain` and `sliceForKey` remain **state-key-only** views: they do not project `readAttempts` into parents. An empty `parents` array therefore does **not** rule out external dependencies. Inspect the saved writer's `trace[].readAttempts` and use a host `CauseGraph` adapter for call context; the example retains `conservative` and `not-collected` gaps. A positive omission count also produces `truncated`; even a host projecting every retained ID cannot call the ancestry complete. Calling `callAnswerAdapterExample(34)` demonstrates why a matching stored note cannot restore an evicted per-write witness.
+
+## Walk back from saved control edges
+
+A control recorder saves which decision let which step run as plain data: a plain object from a step's `runtimeStageId` to `{ deciderId, label? }`. `causalChain` and `sliceForKey` take `controlDeps` as a function, so a reader that only has the saved object makes the function with `controlDepsFromMap(map)`, the control-edge twin of `keysReadFromMap`:
+
+```ts
+import { causalChain, controlDepsFromMap, keysReadFromMap } from 'foottrace';
+
+const saved = JSON.parse(text); // { 'high#2': { deciderId: 'route#1', label: 'score over 50' } }
+const reads = keysReadFromMap({ 'route#1': ['score'] });
+const root = causalChain(commitLog, 'high#2', reads.lookup, { controlDeps: controlDepsFromMap(saved) });
+// high (high#2) [wrote: result]
+//   route (route#1) ← [control: score over 50]
+//     seed (seed#0) ← via score [wrote: score]
+```
+
+The map is data from a file someone else may have written. The lookup reads own data properties only (`__proto__`, `constructor` or `toString` as a step id give `undefined`; a getter never runs), returns an edge only when `deciderId` is a string and `label` is absent or a string, and gives `undefined` for anything else; it never throws at lookup time. Like `keysReadFromMap` it reads the object you gave it live, not a copy. `controlDepsFromMap` throws a `TypeError` for an argument that is not a plain object. It does not look at the log: a `deciderId` the log does not hold gives no edge, and one that ran after the step is linked as the map says. There is one way in: a `controlDeps` that is not a function is refused at the `causalChain` or `sliceForKey` call with a `TypeError` that names the helper. Runnable: [`examples/post-execution/slice/01-saved-control-map.ts`](examples/post-execution/slice/01-saved-control-map.ts), run and checked against its printed output by `test/examples/run-examples.test.ts`.
 
 ## Paths are not interchangeable
 

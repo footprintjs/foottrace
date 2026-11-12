@@ -10,7 +10,7 @@ This directory owns the record, not the engine that produces it. It was extracte
 - Staged reads: `hardWriteCoverage.ts` checks literal path prefixes; the buffer owns hard-write keys and `RecordFrame` uses them only for an undefined read. Hard sets/deletes own their path and descendants; merges alone do not mask live fallback.
 - Public writer: `SharedMemory` holds copy-on-write state, `EventLog` owns the frozen base and append-only bundles, and `RecordFrame` stages one step's reads/writes and commits them.
 - Sink port (1.1.0): `RecordSink` and `memorySink` (`sink.ts`) — where a log's entries go as they land. `EventLog` delivers, counts and reports; the log's own record never depends on the sink.
-- Readers: commit queries and causal analysis; slice and time-travel libraries compose these rules. The walk back is `backtrack.ts`, with what it hands out and takes in (`backtrackTypes.ts`), the two ways to read its result (`backtrackViews.ts`) and its writer lookup (`writerLookup.ts`) beside it.
+- Readers: commit queries and causal analysis; slice and time-travel libraries compose these rules. The walk back is `backtrack.ts`, with what it hands out and takes in (`backtrackTypes.ts`), the two ways to read its result (`backtrackViews.ts`) and its writer lookup (`writerLookup.ts`) beside it. `controlDeps.ts` is the door from a saved control map to its `controlDeps` option (`controlDepsFromMap`) and the one refusal of a `controlDeps` that is not a function.
 
 Dependency ranks are explicit in `scripts/layers.json`. The checker rejects unranked source, upward runtime edges, cycles, external imports and unresolved or opaque imports. This package loads no engine, scope, runner, provider or Node API.
 

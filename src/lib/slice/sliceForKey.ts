@@ -19,6 +19,7 @@ import {
   causalChainFromCommit,
   flattenCausalDAG,
 } from '../memory/backtrack.js';
+import { requireControlDepsFunction } from '../memory/controlDeps.js';
 import { commitValueAtWithBasis, findLastWriterWithBasis } from '../memory/commitLogUtils.js';
 import type { CommitBundle } from '../memory/types.js';
 import { normaliseStateKey } from '../record-paths/codec.js';
@@ -63,6 +64,8 @@ export function sliceForKey(
   keysRead: KeysReadSource | KeysReadLookup,
   options?: SliceForKeyOptions,
 ): VariableSlice {
+  // Refused at the call: an empty log or a key never written would return before the walk could refuse it.
+  requireControlDepsFunction(options?.controlDeps, 'sliceForKey');
   const source = resolveKeysReadSource(keysRead);
   const normalisedKey = normaliseStateKey(key);
   const base: Pick<VariableSlice, 'key' | 'before' | 'keysReadKind' | 'readsCoverage'> = {
