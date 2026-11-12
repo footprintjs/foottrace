@@ -113,11 +113,12 @@ export function controlDepsFromMap(map: Readonly<Record<string, ControlDependenc
 }
 
 /**
- * Refuse a `controlDeps` option that is not a function, at the call and by name. `undefined` is the
- * option absent. `where` is the public function the caller called.
+ * Refuse a `controlDeps` option that is not a function, at the call and by name. `undefined` and `null`
+ * are the option absent (a caller that passes `x ?? null` has always worked and still does). `where` is
+ * the public function the caller called.
  */
 export function requireControlDepsFunction(value: unknown, where: string): void {
-  if (value !== undefined && typeof value !== 'function') {
+  if (value !== undefined && value !== null && typeof value !== 'function') {
     throw new TypeError(
       `${where}: controlDeps must be a function; for a saved map use controlDepsFromMap(map) (got ${kindOf(value)})`,
     );

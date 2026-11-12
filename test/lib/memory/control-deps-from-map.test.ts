@@ -250,7 +250,6 @@ describe('a controlDeps that is not a function is refused at the call', () => {
     ['the saved object', saved],
     ['an empty object', {}],
     ['a Map', new Map()],
-    ['null', null],
     ['an array', []],
     ['a string', 'high#2'],
     ['a number', 1],
@@ -279,7 +278,15 @@ describe('a controlDeps that is not a function is refused at the call', () => {
     expect(() => causalChain(log, 'high#2', reads.lookup, { controlDeps: new Map() as never })).toThrow(
       /\(got a Map\)$/,
     );
-    expect(() => causalChain(log, 'high#2', reads.lookup, { controlDeps: null as never })).toThrow(/\(got null\)$/);
+  });
+
+  it('treats null as the option absent, as before: same chain as without the option, no control edges', () => {
+    const without = causalChain(log, 'high#2', reads.lookup)!;
+    const withNull = causalChain(log, 'high#2', reads.lookup, { controlDeps: null as never })!;
+    expect(formatCausalChain(withNull)).toBe(formatCausalChain(without));
+    expect(withNull.parentEdges.filter((edge) => edge.kind === 'control')).toEqual([]);
+    const slice = sliceForKey(log, 'result', reads, { controlDeps: null as never });
+    expect(formatCausalChain(slice.root!)).toBe(formatCausalChain(sliceForKey(log, 'result', reads).root!));
   });
 
   it('leaves the accepted ways alone: a function, and no option at all', () => {
