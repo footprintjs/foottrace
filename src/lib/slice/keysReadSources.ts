@@ -82,8 +82,16 @@ export function keysReadFromExecutionTree(tree: unknown): KeysReadSource {
     if (children !== undefined && !Array.isArray(children)) {
       throw new TypeError(`keysReadFromExecutionTree: ${path}.children must be an array when present`);
     }
-    if (branches !== undefined && !(Array.isArray(branches) && branches.every((chain) => Array.isArray(chain)))) {
-      throw new TypeError(`keysReadFromExecutionTree: ${path}.branches must be an array of arrays when present`);
+    if (branches !== undefined) {
+      if (!Array.isArray(branches)) {
+        throw new TypeError(`keysReadFromExecutionTree: ${path}.branches must be an array when present`);
+      }
+      // Indexed, not every(): every() skips holes, and a hole is invalid evidence.
+      for (let b = 0; b < branches.length; b++) {
+        if (!Array.isArray(branches[b])) {
+          throw new TypeError(`keysReadFromExecutionTree: ${path}.branches[${b}] must be an array`);
+        }
+      }
     }
     if (runtimeStageId) {
       steps++;
@@ -97,11 +105,10 @@ export function keysReadFromExecutionTree(tree: unknown): KeysReadSource {
       for (let i = 0; i < children.length; i++) stack.push({ node: children[i], path: `${path}.children[${i}]` });
     }
     if (branches !== undefined) {
-      // Pushed in reverse so the stack pops each chain in the order it ran.
-      for (let b = branches.length - 1; b >= 0; b--) {
+      // Pushed in the same order as a root list (and `children`), so a duplicated id resolves the same way in both.
+      for (let b = 0; b < branches.length; b++) {
         const chain = branches[b] as unknown[];
-        for (let i = chain.length - 1; i >= 0; i--)
-          stack.push({ node: chain[i], path: `${path}.branches[${b}][${i}]` });
+        for (let i = 0; i < chain.length; i++) stack.push({ node: chain[i], path: `${path}.branches[${b}][${i}]` });
       }
     }
   }

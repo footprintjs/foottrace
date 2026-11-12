@@ -93,8 +93,10 @@ export function admitTree(tree: unknown, budget: ProvBudget): TreeEvidence {
       const branches = dataField(value, 'branches', budget);
       if (branches !== undefined)
         for (const chain of dataList(branches, budget.remaining('nodes'), budget)) {
-          if (!Array.isArray(chain)) throw new ProvDataRefusal();
-          schedule(chain, depth + 1);
+          // A bad branch is a gap of its own, so its valid siblings are still read (as for `children`).
+          if (!Array.isArray(chain))
+            budget.addGap({ code: 'invalid-data', reason: 'execution tree evidence unavailable' });
+          else schedule(chain, depth + 1);
         }
     } catch (error) {
       budget.addGap({ code: refusalCode(error), reason: 'execution tree evidence unavailable' });

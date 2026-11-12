@@ -48,7 +48,8 @@ function mountIdsFrom(tree: ExecutionTree | ExecutionChain | undefined): Set<str
     }
     work.push(node.next);
     if (Array.isArray(node.children)) for (const child of node.children) work.push(child);
-    if (Array.isArray(node.branches)) for (const chain of node.branches) work.push(chain);
+    // Only a list is a branch: an item of another shape names no mount, as keysReadFromExecutionTree refuses it.
+    if (Array.isArray(node.branches)) for (const chain of node.branches) if (Array.isArray(chain)) work.push(chain);
   }
   return ids;
 }

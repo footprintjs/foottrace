@@ -54,6 +54,11 @@ describe('commitStops reads the list form', () => {
     expect(commitStops(LOG, tree as never).map((s) => s.kind)).toEqual(['start', 'commit', 'mount', 'end']);
   });
 
+  it('reads a branch item that is not a list as no mount', () => {
+    const tree = [stage('a#0', { branches: [stage('sf#1', { subflowId: 'sf' })] })];
+    expect(commitStops(LOG, tree as never).map((s) => s.kind)).toEqual(['start', 'commit', 'commit', 'end']);
+  });
+
   it('reads the same stops from either form', () => {
     const linked = stage('a#0', { next: stage('sf#1', { subflowId: 'sf' }) });
     const listed = [stage('a#0'), stage('sf#1', { subflowId: 'sf' })];
@@ -76,8 +81,26 @@ describe('keysReadFromExecutionTree reads the list form', () => {
 
   it('refuses branches that are not lists of lists, naming the path', () => {
     expect(() => keysReadFromExecutionTree([stage('a#0', { branches: [stage('b#1')] })])).toThrow(
-      /\$\[0\]\.branches must be an array of arrays/,
+      /\$\[0\]\.branches\[0\] must be an array/,
     );
+  });
+
+  it('refuses a hole in branches, naming its index', () => {
+    // eslint-disable-next-line no-sparse-arrays
+    const tree = [stage('a#0', { branches: [, [stage('b#1')]] })];
+    expect(() => keysReadFromExecutionTree(tree)).toThrow(/\$\[0\]\.branches\[0\] must be an array/);
+  });
+
+  it('refuses a chain that holds itself as a stage', () => {
+    const tree: unknown[] = [stage('a#0')];
+    tree.push(tree);
+    expect(() => keysReadFromExecutionTree(tree)).toThrow(/must be an object/);
+  });
+
+  it('resolves a duplicated id the same way in a root list and in branches (the first wins)', () => {
+    const twice = [stage('d#0', { stageReads: { first: 1 } }), stage('d#0', { stageReads: { second: 1 } })];
+    expect(keysReadFromExecutionTree(twice).lookup('d#0')).toEqual(['first']);
+    expect(keysReadFromExecutionTree([stage('f#9', { branches: [twice] })]).lookup('d#0')).toEqual(['first']);
   });
 
   it('reads a 30,000-stage chain, which is one level deep', () => {
@@ -102,9 +125,42 @@ describe('provenance admission reads the list form', () => {
     expect(result.reads?.get('left#1')).toEqual(['l']);
   });
 
-  it('records a gap for a branch that is not a chain', () => {
-    const tree = [stage('fork#0', { branches: [stage('left#1')] })];
+  it('records a gap for a branch that is not a chain, and still reads its valid siblings', () => {
+    const tree = [stage('fork#0', { branches: ['x', [stage('ok#1', { stageReads: { k: null } })]] })];
     const result = admitProvRecord({ commitLog: [], executionTree: tree }, options());
-    expect(result.gaps.length).toBeGreaterThan(0);
+    expect(result.gaps.map((gap) => gap.code)).toContain('invalid-data');
+    expect(result.gaps.filter((gap) => gap.code === 'invalid-data')).toHaveLength(1);
+    expect(result.reads?.get('ok#1')).toEqual(['k']);
+  });
+
+  it('ends on a chain that holds itself, with a cycle gap', () => {
+    const tree: unknown[] = [stage('a#0', { stageReads: { k: null } })];
+    tree.push(tree);
+    const result = admitProvRecord({ commitLog: [], executionTree: tree }, options());
+    expect(result.reads?.get('a#0')).toEqual(['k']);
+    expect(result.gaps.some((gap) => gap.code === 'cycle')).toBe(true);
+  });
+
+  it('never runs a getter on branches', () => {
+    let calls = 0;
+    const fork = stage('fork#0');
+    Object.defineProperty(fork, 'branches', {
+      enumerable: true,
+      get: () => {
+        calls++;
+        return [];
+      },
+    });
+    admitProvRecord({ commitLog: [], executionTree: [fork] }, options());
+    expect(calls).toBe(0);
+  });
+
+  it('bounds many branches by the node allowance', () => {
+    const branches = Array.from({ length: 50 }, (_, i) => [stage(`b${i}#${i + 1}`)]);
+    const result = admitProvRecord(
+      { commitLog: [], executionTree: [stage('fork#0', { branches })] },
+      provOptions({ base: 'urn:example:run:one/', maxNodes: 10 }),
+    );
+    expect(result.gaps.some((gap) => gap.code === 'truncated')).toBe(true);
   });
 });
