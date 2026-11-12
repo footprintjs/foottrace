@@ -48,6 +48,12 @@ describe('commitStops reads the list form', () => {
     expect(commitStops(LOG, tree as never).map((s) => s.kind)).toEqual(['start', 'commit', 'mount', 'end']);
   });
 
+  it('ends on a chain that is its own item', () => {
+    const tree: unknown[] = [stage('a#0'), stage('sf#1', { subflowId: 'sf' })];
+    tree.push(tree);
+    expect(commitStops(LOG, tree as never).map((s) => s.kind)).toEqual(['start', 'commit', 'mount', 'end']);
+  });
+
   it('reads the same stops from either form', () => {
     const linked = stage('a#0', { next: stage('sf#1', { subflowId: 'sf' }) });
     const listed = [stage('a#0'), stage('sf#1', { subflowId: 'sf' })];

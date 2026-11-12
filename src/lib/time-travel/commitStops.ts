@@ -34,7 +34,10 @@ function mountIdsFrom(tree: ExecutionTree | ExecutionChain | undefined): Set<str
   while (work.length > 0) {
     const node = work.pop();
     if (Array.isArray(node)) {
-      // A chain (the list form): its stages, read like any node.
+      // A chain (the list form): its stages, read like any node. Read once, like a node: a chain
+      // that holds itself is no endless walk.
+      if (seen.has(node)) continue;
+      seen.add(node);
       for (const stage of node) work.push(stage);
       continue;
     }
