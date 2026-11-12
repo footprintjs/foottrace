@@ -72,7 +72,7 @@ export function keysReadFromExecutionTree(tree: unknown): KeysReadSource {
     if (!isReadTreeObject(node)) throw new TypeError(`keysReadFromExecutionTree: ${path} must be an object`);
     if (visited.has(node)) continue;
     visited.add(node);
-    const { runtimeStageId, stageReads, next, children } = node;
+    const { runtimeStageId, stageReads, next, children, branches } = node;
     if (runtimeStageId !== undefined && typeof runtimeStageId !== 'string') {
       throw new TypeError(`keysReadFromExecutionTree: ${path}.runtimeStageId must be a string when present`);
     }
@@ -81,6 +81,9 @@ export function keysReadFromExecutionTree(tree: unknown): KeysReadSource {
     }
     if (children !== undefined && !Array.isArray(children)) {
       throw new TypeError(`keysReadFromExecutionTree: ${path}.children must be an array when present`);
+    }
+    if (branches !== undefined && !(Array.isArray(branches) && branches.every((chain) => Array.isArray(chain)))) {
+      throw new TypeError(`keysReadFromExecutionTree: ${path}.branches must be an array of arrays when present`);
     }
     if (runtimeStageId) {
       steps++;
@@ -92,6 +95,14 @@ export function keysReadFromExecutionTree(tree: unknown): KeysReadSource {
     if (next !== undefined) stack.push({ node: next, path: `${path}.next` });
     if (children !== undefined) {
       for (let i = 0; i < children.length; i++) stack.push({ node: children[i], path: `${path}.children[${i}]` });
+    }
+    if (branches !== undefined) {
+      // Pushed in reverse so the stack pops each chain in the order it ran.
+      for (let b = branches.length - 1; b >= 0; b--) {
+        const chain = branches[b] as unknown[];
+        for (let i = chain.length - 1; i >= 0; i--)
+          stack.push({ node: chain[i], path: `${path}.branches[${b}][${i}]` });
+      }
     }
   }
   return {

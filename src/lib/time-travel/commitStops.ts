@@ -11,7 +11,8 @@
 
 import { isExecutionKey, isWithinSubflow, parseRuntimeStageId, stageIdOf } from '../ids/runtimeStageId.js';
 import { buildCommitIndex, inferLegacyPhases, recordsPhases } from '../memory/commitLogUtils.js';
-import type { CommitBundle, CommitPhase, ExecutionTree } from '../memory/types.js';
+import type { CommitBundle, CommitPhase, ExecutionChain, ExecutionTree } from '../memory/types.js';
+import { firstStageOf } from './bundles.js';
 import { isPlainish } from './bundles.js';
 import type { Stop, TimeTravelStrategy } from './types.js';
 
@@ -23,7 +24,7 @@ import type { Stop, TimeTravelStrategy } from './types.js';
  * tree names it. Only a log written before 9.39.0 AND handed over without its
  * tree falls back to the legacy inference (`inferLegacyPhases`).
  */
-function mountIdsFrom(tree: ExecutionTree | undefined): Set<string> {
+function mountIdsFrom(tree: ExecutionTree | ExecutionChain | undefined): Set<string> {
   const ids = new Set<string>();
   // The tree can come from a file or be built by hand, so a node is read only when it is a plain
   // object, and once: a null child is no crash, and a `next` or a child that points back is no
@@ -32,6 +33,11 @@ function mountIdsFrom(tree: ExecutionTree | undefined): Set<string> {
   const work: unknown[] = [tree];
   while (work.length > 0) {
     const node = work.pop();
+    if (Array.isArray(node)) {
+      // A chain (the list form): its stages, read like any node.
+      for (const stage of node) work.push(stage);
+      continue;
+    }
     if (!isPlainish(node) || seen.has(node)) continue;
     seen.add(node);
     if (node.subflowId && typeof node.runtimeStageId === 'string' && node.runtimeStageId !== '') {
@@ -39,6 +45,7 @@ function mountIdsFrom(tree: ExecutionTree | undefined): Set<string> {
     }
     work.push(node.next);
     if (Array.isArray(node.children)) for (const child of node.children) work.push(child);
+    if (Array.isArray(node.branches)) for (const chain of node.branches) work.push(chain);
   }
   return ids;
 }
@@ -85,7 +92,7 @@ function mountIdsFrom(tree: ExecutionTree | undefined): Set<string> {
  */
 export function commitStops(
   commitLog: readonly CommitBundle[],
-  executionTree?: ExecutionTree,
+  executionTree?: ExecutionTree | ExecutionChain,
   subflowResults?: unknown,
 ): Stop[] {
   if (commitLog.length === 0) return [];
@@ -210,7 +217,7 @@ export const commitStopsStrategy: TimeTravelStrategy = { stopsFor: commitStops }
  */
 function seedCommits(
   commitLog: readonly CommitBundle[],
-  executionTree?: ExecutionTree,
+  executionTree?: ExecutionTree | ExecutionChain,
   subflowResults?: unknown,
 ): number {
   const head = commitLog[0]?.runtimeStageId;
@@ -225,7 +232,7 @@ function seedCommits(
   if (executionTree === undefined && opensOwnMount(subflowResults, head, commitLog[0])) return next;
   const address = stageIdOf(head);
   if (next >= commitLog.length) {
-    const rootId = executionTree?.id;
+    const rootId = firstStageOf(executionTree)?.id;
     return typeof rootId === 'string' && isWithinSubflow(rootId, address) ? next : 0;
   }
   return parseRuntimeStageId(commitLog[next].runtimeStageId).subflowPath === address ? next : 0;

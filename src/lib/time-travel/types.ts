@@ -21,7 +21,7 @@
  */
 
 import type { RegisteredCode } from '../memory/honesty.js';
-import type { CommitBundle, ExecutionTree } from '../memory/types.js';
+import type { CommitBundle, ExecutionChain, ExecutionTree } from '../memory/types.js';
 
 // ── Sources ────────────────────────────────────────────────────────────────
 
@@ -404,7 +404,11 @@ export interface Mark {
  * by this signature.
  */
 export interface TimeTravelStrategy<TMeta = unknown> {
-  stopsFor(commitLog: readonly CommitBundle[], executionTree?: ExecutionTree, subflowResults?: unknown): Stop<TMeta>[];
+  stopsFor(
+    commitLog: readonly CommitBundle[],
+    executionTree?: ExecutionTree | ExecutionChain,
+    subflowResults?: unknown,
+  ): Stop<TMeta>[];
 }
 
 // ── The cursor ─────────────────────────────────────────────────────────────

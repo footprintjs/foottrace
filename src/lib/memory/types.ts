@@ -268,8 +268,14 @@ export type CommitValuesMode = 'full' | 'delta';
 /**
  * The execution tree as the record's readers read it (C6): the fields a reader touches and
  * nothing else. `commitStops` (and so `tagStops` and every strategy built on it) reads the mount
- * marker (`subflowId`) and the root's `id`; `keysReadFromExecutionTree` reads the keys of
- * `stageReads`; both key on `runtimeStageId` and walk `next` and `children`.
+ * marker (`subflowId`) and the first stage's `id`; `keysReadFromExecutionTree` reads the keys of
+ * `stageReads`; both key on `runtimeStageId`.
+ *
+ * Two forms, both read by every reader. The LIST form (footprintjs 12): a tree is an
+ * {@link ExecutionChain}, the stages in the order they ran, and a fork's children are `branches`,
+ * one chain each, so a tree is only as deep as its forks nest, never as long as the run. The
+ * LINKED form (footprintjs 11 and older, and stored recordings): a node, each stage holding the
+ * next in `next` and a fork's children in `children`, one level deeper per stage.
  *
  * A structural type the record owns, so the readers name nothing of the engine. The engine's
  * `StageSnapshot` (`getSnapshot().executionTree`) is one — a supertype of it, so every caller
@@ -278,12 +284,12 @@ export type CommitValuesMode = 'full' | 'delta';
  *
  * @example
  * ```typescript
- * import { type ExecutionTree, keysReadFromExecutionTree } from 'foottrace';
+ * import { type ExecutionChain, keysReadFromExecutionTree } from 'foottrace';
  *
- * const tree: ExecutionTree = {
- *   runtimeStageId: 'seed#0',
- *   next: { runtimeStageId: 'decide#1', stageReads: { creditTier: 'A' } },
- * };
+ * const tree: ExecutionChain = [
+ *   { runtimeStageId: 'seed#0' },
+ *   { runtimeStageId: 'decide#1', stageReads: { creditTier: 'A' } },
+ * ];
  * keysReadFromExecutionTree(tree).lookup('decide#1'); // ['creditTier']
  * ```
  */
@@ -298,8 +304,13 @@ export interface ExecutionTree {
   readonly subflowId?: string;
   /** What the stage tracked-read, by key. Only the KEYS are read: a `'summary'` marker serves as well as a value. */
   readonly stageReads?: Readonly<Record<string, unknown>>;
-  /** The stage that ran next. */
+  /** List form: the chains that ran as this stage's children, one per branch (a fork's branches). */
+  readonly branches?: readonly ExecutionChain[];
+  /** Linked form only: the stage that ran next. */
   readonly next?: ExecutionTree;
-  /** The stages that ran as this one's children (a fork's branches, a decider's chosen branch). */
+  /** Linked form only: the stages that ran as this one's children, each the head of its own `next` links. */
   readonly children?: readonly ExecutionTree[];
 }
+
+/** The list form of an execution tree: stages in the order they ran (see {@link ExecutionTree}). */
+export type ExecutionChain = readonly ExecutionTree[];
