@@ -10,7 +10,7 @@ export type { AttemptId } from './lib/ids/attemptId.js';
 export { buildAttemptId, parseAttemptId } from './lib/ids/attemptId.js';
 export { UnknownVerbError } from './lib/memory/verbs.js';
 export type { CommitBundle, MemoryPatch, TraceEntry } from './lib/memory/types.js';
-export type { ExecutionTree } from './lib/memory/types.js';
+export type { ExecutionChain, ExecutionTree } from './lib/memory/types.js';
 export { applySmartMerge } from './lib/memory/verbs.js';
 export type {
   ValueBasis,

@@ -45,7 +45,12 @@ export function admitTree(tree: unknown, budget: ProvBudget): TreeEvidence {
     const { value, depth } = stack.pop()!;
     try {
       requireSpend(budget, 'work');
-      if (!value || typeof value !== 'object' || Array.isArray(value)) throw new ProvDataRefusal();
+      if (Array.isArray(value)) {
+        // A chain (the list form): its stages run one after another, so they sit at the chain's own depth.
+        for (const stage of dataList(value, budget.remaining('nodes'), budget)) schedule(stage, depth);
+        continue;
+      }
+      if (!value || typeof value !== 'object') throw new ProvDataRefusal();
       const rawId = dataField(value, 'runtimeStageId', budget),
         rawReads = dataField(value, 'stageReads', budget);
       const id = rawId === undefined ? undefined : dataString(rawId, budget);
@@ -85,6 +90,14 @@ export function admitTree(tree: unknown, budget: ProvBudget): TreeEvidence {
       if (next !== undefined) schedule(next, depth + 1);
       if (children !== undefined)
         for (const child of dataList(children, budget.remaining('nodes'), budget)) schedule(child, depth + 1);
+      const branches = dataField(value, 'branches', budget);
+      if (branches !== undefined)
+        for (const chain of dataList(branches, budget.remaining('nodes'), budget)) {
+          // A bad branch is a gap of its own, so its valid siblings are still read (as for `children`).
+          if (!Array.isArray(chain))
+            budget.addGap({ code: 'invalid-data', reason: 'execution tree evidence unavailable' });
+          else schedule(chain, depth + 1);
+        }
     } catch (error) {
       budget.addGap({ code: refusalCode(error), reason: 'execution tree evidence unavailable' });
       if (budget.exhausted('work') || budget.exhausted('fields')) break;
