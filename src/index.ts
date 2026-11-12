@@ -95,6 +95,7 @@ export type {
   KeysReadLookup,
 } from './lib/memory/backtrack.js';
 export { causalChain, flattenCausalDAG, formatCausalChain } from './lib/memory/backtrack.js';
+export { controlDepsFromMap } from './lib/memory/controlDeps.js';
 export type { UntrackedSource } from './lib/memory/types.js';
 export type {
   ArrayProvenance,

@@ -86,3 +86,24 @@ it('examples/cause-record.ts answers the same from the in-memory and the stored 
   expect(stored).toEqual(local);
   expect(log).not.toHaveBeenCalled();
 });
+
+it('examples/post-execution/slice/01-saved-control-map.ts prints what its comments say', async () => {
+  await import('../../examples/post-execution/slice/01-saved-control-map');
+  expect(log.mock.calls).toEqual([
+    ['saved: {"high#2":{"deciderId":"route#1","label":"score over 50"}}'],
+    ['\n=== The walk back from high#2, controlDeps from the saved map ===\n'],
+    [
+      'high (high#2) [wrote: result]\n' +
+        '  route (route#1) ← [control: score over 50]\n' +
+        '    seed (seed#0) ← via score [wrote: score]',
+    ],
+    ['\n=== The object itself is not a lookup: one way in, and the refusal says which ===\n'],
+    ['  causalChain: controlDeps must be a function; for a saved map use controlDepsFromMap(map) (got an object)'],
+    ['\n=== A hostile name finds nothing, and the helper refuses what is not a plain object ===\n'],
+    ['  constructor: undefined   __proto__: undefined'],
+    [
+      "  controlDepsFromMap: expected a plain object (a literal, JSON.parse's result) from a step's runtimeStageId to " +
+        '{ deciderId, label? }, got a Map',
+    ],
+  ]);
+});

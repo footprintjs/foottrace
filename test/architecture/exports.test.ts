@@ -353,6 +353,17 @@ describe('a minor removes nothing', () => {
   });
 });
 
+describe('the door from a saved control map', () => {
+  it('puts controlDepsFromMap on the root door beside keysReadFromMap, on no other door, and keeps its guard private', () => {
+    expect(exportsByDoor['.'].has('keysReadFromMap')).toBe(true);
+    expect(exportsByDoor['.'].has('controlDepsFromMap')).toBe(true);
+    for (const [door, exports] of Object.entries(exportsByDoor)) {
+      if (door !== '.') expect(exports.has('controlDepsFromMap'), door).toBe(false);
+      expect(exports.has('requireControlDepsFunction'), door).toBe(false);
+    }
+  });
+});
+
 describe('cause reader public ownership', () => {
   it('keeps producer attention types at the root and reader algorithms on their optional door', () => {
     for (const name of ['Attention', 'AttentionKind']) {
