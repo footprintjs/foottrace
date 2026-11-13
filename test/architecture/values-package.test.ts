@@ -2,12 +2,16 @@
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { webcrypto } from 'node:crypto';
-import { resolve } from 'node:path';
+import { delimiter, dirname, resolve } from 'node:path';
 import { runInNewContext } from 'node:vm';
 import { build } from 'esbuild';
 import { describe, expect, it } from 'vitest';
 
 const root = resolve(__dirname, '../..');
+const childEnv: NodeJS.ProcessEnv = {
+  PATH: [dirname(process.execPath), process.env.PATH].filter(Boolean).join(delimiter),
+  ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
+};
 const witness = `
 const table = createValueTable({redact: value => value});
 const result = await table.intern('rule', 'exact text');
@@ -38,6 +42,7 @@ describe('optional record-value package surfaces', () => {
       ['--input-type=' + format, '-e', imports + '(async()=>{' + witness + '})().then(console.log);'],
       {
         cwd: root,
+        env: childEnv,
         encoding: 'utf8',
         timeout: 10000,
       },

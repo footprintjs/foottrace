@@ -205,6 +205,7 @@ describe('a table reader and the explicit record envelope', () => {
   it('owns all entries before awaiting verification and keeps borrowed input mutable', async () => {
     const writer = createValueTable({ redact: identity });
     const ref = reference(await writer.intern('one', { n: 1 }));
+    const secondRef = reference(await writer.intern('two', { n: 2 }));
     const table = copy(writer.snapshot());
     const real = globalThis.crypto.subtle.digest.bind(globalThis.crypto.subtle);
     let finish!: () => void;
@@ -216,9 +217,12 @@ describe('a table reader and the explicit record envelope', () => {
       return real(algorithm, data);
     });
     const pending = readValueTable(table);
-    (table.entries[0].value as { n: number }).n = 2;
+    (table.entries[0].value as { n: number }).n = 8;
+    (table.entries[1].value as { n: number }).n = 9;
     finish();
-    expect((await pending).resolve(ref)).toEqual({ n: 1 });
+    const reader = await pending;
+    expect(reader.resolve(ref)).toEqual({ n: 1 });
+    expect(reader.resolve(secondRef)).toEqual({ n: 2 });
     expect(Object.isFrozen(table)).toBe(false);
   });
   it('rejects tampering, duplicate ids, unsupported formats and table limits by name', async () => {

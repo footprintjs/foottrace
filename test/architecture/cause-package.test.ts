@@ -56,6 +56,7 @@ describe('the optional cause package door', () => {
       ['tsc', '-p', 'test/consumer/cause/tsconfig.json'],
       ['tsc', '-p', 'test/consumer/prov/tsconfig.json'],
       ['tsc', '-p', 'test/consumer/metadata/tsconfig.json'],
+      ['tsc', '-p', 'test/consumer/values/tsconfig.json'],
     ]);
     expect(pkg.scripts['check:package']).not.toMatch(/--(?:ignore|exclude-entrypoints|entrypoints)(?:\s|=)/);
   });
