@@ -61,7 +61,7 @@ describe('the optional cause package door', () => {
   });
 
   it('exports typed ESM and CommonJS cause targets using the existing public-door pattern', () => {
-    for (const name of ['index', 'write', 'paths', 'cause', 'prov', 'metadata']) {
+    for (const name of ['index', 'write', 'paths', 'cause', 'prov', 'metadata', 'canonical-json', 'values']) {
       const door = name === 'index' ? '.' : './' + name;
       expect(pkg.exports[door]).toEqual({
         import: { types: './dist/esm/' + name + '.d.ts', default: './dist/esm/' + name + '.js' },
