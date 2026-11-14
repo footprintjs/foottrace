@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.17.0 — 2026-11-14
+
+### Added
+
+- Add opt-in bounded content-addressed value tables and strict canonical JSON through `foottrace/values` and `foottrace/canonical-json`; callers supply the inline redaction law before hashing, omitted writes are disclosed, missing references are refused by name, and old records remain unchanged.
+
 ## 1.16.0 — 2026-11-12
 
 ### Added
