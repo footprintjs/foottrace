@@ -21,22 +21,45 @@ export interface OwnedJsonSnapshot {
   readonly text: string;
   readonly bytes: number;
 }
-export type OwnedJsonErrorCode =
-  | 'unsupported'
-  | 'unicode'
-  | 'cycle'
-  | 'unreadable'
-  | 'depth'
-  | 'nodes'
-  | 'fields'
-  | 'string-bytes'
-  | 'sort-work'
-  | 'output-bytes';
+// One private code vocabulary shared by the core and canonical policy boundary.
+// `options` belongs to the latter; the core itself takes only validated bounds.
+const codes = [
+  'options',
+  'unsupported',
+  'unicode',
+  'cycle',
+  'unreadable',
+  'depth',
+  'nodes',
+  'fields',
+  'string-bytes',
+  'sort-work',
+  'output-bytes',
+] as const;
+export type OwnedJsonErrorCode = (typeof codes)[number];
+export const isOwnedJsonErrorCode = (input: unknown): input is OwnedJsonErrorCode =>
+  typeof input === 'string' && (codes as readonly string[]).includes(input);
 
-/** Internal fixed refusal; boundary adapters translate it without forwarding trap exception text. */
+/** Read only a known own DATA code; never use instanceof or message/code access on foreign throws. */
+export function ownedJsonFailureCode(error: unknown): OwnedJsonErrorCode {
+  try {
+    const descriptor =
+      error !== null && typeof error === 'object' ? Object.getOwnPropertyDescriptor(error, 'code') : undefined;
+    if (descriptor && Object.hasOwn(descriptor, 'value') && isOwnedJsonErrorCode(descriptor.value))
+      return descriptor.value;
+  } catch {
+    // A thrown object's descriptor trap is not a second disclosure channel.
+  }
+  return 'unreadable';
+}
+
+/** New fixed refusal after admission; no incoming exception identity or message is retained. */
 export class OwnedJsonError extends Error {
-  constructor(readonly code: OwnedJsonErrorCode) {
-    super('Owned JSON refused: ' + code);
+  readonly code: OwnedJsonErrorCode;
+  constructor(code: OwnedJsonErrorCode) {
+    const safe = isOwnedJsonErrorCode(code) ? code : 'unreadable';
+    super('Owned JSON refused: ' + safe);
+    this.code = safe;
     this.name = 'OwnedJsonError';
   }
 }

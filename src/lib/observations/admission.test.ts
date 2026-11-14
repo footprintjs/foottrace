@@ -4,11 +4,29 @@ import { createObservationRecord, memorySink } from '../../write.js';
 import type { StoredRecord } from '../../index.js';
 import type { ObservationRecordOptions } from '../../write.js';
 import { address, observation, reopen, saved, subject } from '../../../test/lib/observations/fixtures.js';
+import { OwnedJsonError } from '../owned-json/types.js';
 
 const create = (input: unknown) => createObservationRecord(input as ObservationRecordOptions);
 const gapCodes = (entries: unknown[]) => reopen(entries).gaps.map((gap) => gap.code);
 
 describe('observation admission, bounds and immutable owned data', () => {
+  it('does not consult a forged private error code getter thrown by a payload trap', () => {
+    let calls = 0;
+    const thrown = Object.create(OwnedJsonError.prototype, {
+      code: { get: () => (++calls, 'string-bytes') },
+    });
+    const input = new Proxy(
+      { event: 'service.response' },
+      {
+        ownKeys: () => {
+          throw thrown;
+        },
+      },
+    );
+    const writer = createObservationRecord({ sink: memorySink(), address, subject });
+    const outcome = writer.note(input);
+    expect({ calls, outcome }).toEqual({ calls: 0, outcome: { status: 'omitted', reason: 'invalid-data' } });
+  });
   it.each([
     { maxRows: 0 },
     { maxRows: 257 },

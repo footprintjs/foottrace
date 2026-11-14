@@ -3,7 +3,11 @@
 One shared strict data-admission and serialization core, without public option
 policy, producer logic, crypto or environment capabilities. It is not a public
 package door. Capability adapters supply concrete validated bounds and translate
-fixed internal refusals and thrown descriptor traps into their own safe errors.
+fixed internal refusals into their own safe errors. The snapshot boundary first
+normalizes every thrown object into a fresh fixed private error using only a
+known own data code; foreign code/message getters and exception identity never
+reach capability adapters. The private code list also preserves canonical public
+options refusals without a second vocabulary.
 
 `admit.ts` owns data-descriptor copying, Unicode validation, occurrence charging
 and freezing. `snapshot.ts` serializes that detached value with sorted raw UTF-16

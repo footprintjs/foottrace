@@ -12,6 +12,56 @@ const bounds = {
   maxBytes: 4096,
 };
 
+it('normalizes a foreign thrown object into a fixed private refusal without reading its getters', () => {
+  let calls = 0;
+  const thrown = Object.create(null, {
+    code: { get: () => (++calls, 'output-bytes') },
+    message: { get: () => (++calls, 'PRIVATE') },
+  });
+  const input = new Proxy(
+    {},
+    {
+      ownKeys: () => {
+        throw thrown;
+      },
+    },
+  );
+  let caught: unknown;
+  try {
+    ownedJsonSnapshot(input, bounds);
+  } catch (error) {
+    caught = error;
+  }
+  expect(caught === thrown).toBe(false);
+  expect(caught).toBeInstanceOf(OwnedJsonError);
+  expect(Object.getOwnPropertyDescriptor(caught, 'code')).toMatchObject({ value: 'unreadable' });
+  expect(Object.getOwnPropertyDescriptor(caught, 'message')).toMatchObject({ value: 'Owned JSON refused: unreadable' });
+  expect(calls).toBe(0);
+});
+
+it('replaces even a mutated private error and refuses an unrecognized thrown data code', () => {
+  for (const thrown of [Object.assign(new OwnedJsonError('cycle'), { message: 'PRIVATE' }), { code: 'PRIVATE' }]) {
+    const input = new Proxy(
+      {},
+      {
+        ownKeys: () => {
+          throw thrown;
+        },
+      },
+    );
+    try {
+      ownedJsonSnapshot(input, bounds);
+      throw new Error('Expected refusal');
+    } catch (error) {
+      expect(error).not.toBe(thrown);
+      expect(error).toBeInstanceOf(OwnedJsonError);
+      expect((error as Error).message).toBe(
+        'Owned JSON refused: ' + (thrown.code === 'cycle' ? 'cycle' : 'unreadable'),
+      );
+    }
+  }
+});
+
 it('returns the same sorted JSON, with detached deeply frozen data and exact UTF-8 bytes', () => {
   const input = { '2': 2, '10': 10, nested: ['€😀', -0] };
   const snapshot = ownedJsonSnapshot(input, bounds);
