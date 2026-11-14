@@ -158,5 +158,6 @@
   "src/lib/observations/limits.ts": 1,
   "src/lib/observations/codec.ts": 3,
   "src/lib/observations/writer.ts": 3,
+  "src/lib/observations/sink.ts": 1,
   "src/lib/observations/reader.ts": 3
 }

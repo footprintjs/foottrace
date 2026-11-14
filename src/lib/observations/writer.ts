@@ -1,21 +1,11 @@
 import { EventLog } from '../memory/EventLog.js';
 import type { RecordSink } from '../memory/sink.js';
 import { addressKey, addressOf, inputPayload, storedRow, subjectOf } from './codec.js';
-import { fields, own } from './fields.js';
+import { fields } from './fields.js';
+import { observationSink } from './sink.js';
 import { observationLimits, OBSERVATION_VERSION } from './limits.js';
 import { ObservationError } from './types.js';
 import type { ObservationOmission, ObservationRecordOptions, ObservationWriter } from './types.js';
-
-function sinkOf(input: unknown): RecordSink {
-  if (!input || typeof input !== 'object') throw new ObservationError('invalid-options');
-  for (const name of ['opened', 'commit', 'note', 'closed'])
-    if (typeof own(input, name) !== 'function') throw new ObservationError('invalid-options');
-  for (const name of ['flush', 'onFailure']) {
-    const value = own(input, name);
-    if (value !== undefined && typeof value !== 'function') throw new ObservationError('invalid-options');
-  }
-  return input as RecordSink;
-}
 
 /** Opt-in notes on an independent existing EventLog. The host serves/redacts input before this call. */
 export function createObservationRecord(options: ObservationRecordOptions): ObservationWriter {
@@ -30,7 +20,7 @@ export function createObservationRecord(options: ObservationRecordOptions): Obse
     limits = observationLimits(config.limits as ObservationRecordOptions['limits']);
     address = addressOf(config.address);
     subject = subjectOf(config.subject);
-    sink = sinkOf(config.sink);
+    sink = observationSink(config.sink);
     if (addressKey(address) === addressKey(subject.nativeAddress)) throw new ObservationError('invalid-options');
   } catch {
     throw new ObservationError('invalid-options');
