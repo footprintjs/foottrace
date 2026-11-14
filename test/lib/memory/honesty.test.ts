@@ -1,7 +1,7 @@
 /**
  * honesty.ts — the ONE vocabulary for what a reader cannot see (F4a).
  *
- *   unit      the registry is frozen and closed, holds exactly the twenty-nine codes, and every explanation is
+ *   unit      the registry is frozen and closed, holds exactly the forty declared codes, and every explanation is
  *             ONE sentence
  *   boundary  the TYPES, asked of the real compiler: a code the registry does not hold FAILS TO COMPILE; the
  *             six public unions are exactly the members they were (they did not widen); the sentences are
@@ -110,6 +110,20 @@ const READ_OVERLAPS = ['replaced-while-running', 'written-while-running'];
 /** Why a source of a `set` row built on a view is only possible (`builtOn.ts · ViewOverlap`). Also a slice note. */
 const VIEW_OVERLAPS = ['view-not-placed'];
 const SIGNALS_WITHOUT_A_CODE_FIELD = ['log-gap', 'incomplete-sources', 'redacted', 'unread-entry'];
+// Observation evidence gaps and omissions share the existing unread-entry signal.
+const OBSERVATION_CODES = [
+  'not-collected',
+  'unsupported-version',
+  'invalid-data',
+  'scope-mismatch',
+  'incomplete-record',
+  'missing-note',
+  'duplicate-sequence',
+  'count-mismatch',
+  'omitted',
+  'row-limit',
+  'byte-limit',
+];
 
 // ════════════════════════════════════════════════════════════════════════════
 // unit — the registry
@@ -131,7 +145,7 @@ describe('HONESTY_CODES — unit', () => {
     }).toThrow(TypeError);
   });
 
-  it('holds exactly twenty-nine codes — nine slice notes, three missing reasons, three fed-edge and three birth bases, two fold bases, two value bases, two read overlaps, one view overlap, four codeless signals', () => {
+  it('holds exactly forty codes — the existing vocabularies and eleven new observation limitations', () => {
     const all = [
       ...SLICE_CODES,
       ...MISSING_REASONS,
@@ -142,8 +156,9 @@ describe('HONESTY_CODES — unit', () => {
       ...READ_OVERLAPS,
       ...VIEW_OVERLAPS,
       ...SIGNALS_WITHOUT_A_CODE_FIELD,
+      ...OBSERVATION_CODES,
     ];
-    expect(all).toHaveLength(29);
+    expect(all).toHaveLength(40);
     expect(Object.keys(HONESTY_CODES).sort()).toEqual(all.sort());
   });
 
@@ -183,6 +198,7 @@ const HEADER = [
   "import type { HonestyCode, RegisteredCode } from './honesty.js';",
   "import type { ReadOverlap } from './readWindow.js';",
   "import type { ViewOverlap } from './builtOn.js';",
+  "import type { ObservationGapCode, ObservationOmission } from '../observations/types.js';",
   "type Today = 'conservative-fed-edges' | 'concurrent-write' | 'nested-rows' | 'partial-write' | 'pre-run-origin' | 'reads-not-recorded' | 'unknown-key' | 'truncated' | 'redacted' | 'from-initial-state' | 'pre-run-view' | 'view-not-placed';",
   "type TodayBasis = 'initial+log' | 'log-only';",
   "type TodayMissing = 'empty-log' | 'never-written';",
@@ -195,11 +211,13 @@ const HEADER = [
   "type TodayViewOverlap = 'view-not-placed';",
   // every declared vocabulary, plus the four codes a field carries instead of a `code` value
   'type Declared = HonestyNoteCode | MissingSliceReason | MissingProvenanceReason | FedBasis | AttributionBasis | FoldBasis | ' +
-    'ValueBasis | WriterBasis | ReadOverlap | ViewOverlap | ' +
+    'ValueBasis | WriterBasis | ReadOverlap | ViewOverlap | ObservationGapCode | ObservationOmission | ' +
     "'log-gap' | 'incomplete-sources' | 'redacted' | 'unread-entry';",
 ];
 
 const CASES: Record<string, string> = {
+  oldExhaustiveMappingNeedsNewCodes:
+    "type BeforeObservations = Exclude<HonestyCode, Exclude<ObservationGapCode, 'unread-entry'>>; const oldMapping = {} as Record<BeforeObservations, string>; const expandedMapping: Record<HonestyCode, string> = oldMapping;",
   // RegisteredCode — the gate every vocabulary-of-codes union goes through
   registeredMembersCompile: "type A = RegisteredCode<'unknown-key' | 'truncated'>;",
   aMisspeltMemberFails: "type B = RegisteredCode<'unknown-keyy'>;",
@@ -339,6 +357,10 @@ describe('the types — asked of the real compiler', () => {
   it('every registered code belongs to a declared vocabulary or a codeless signal — and the check bites', () => {
     expect(byCase.get('everyCodeIsDeclared')).toBeUndefined();
     expect(byCase.get('aCodeLeftOverFails')).toEqual(['TS2322']);
+  });
+
+  it('requires a formerly exhaustive consumer mapping to handle the eleven new observation codes', () => {
+    expect(byCase.get('oldExhaustiveMappingNeedsNewCodes')).toEqual(['TS2740']);
   });
 
   it('the sentences are typed `string`, not literal types — an `as const` on the registry fails here', () => {

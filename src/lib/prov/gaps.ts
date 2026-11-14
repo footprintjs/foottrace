@@ -1,4 +1,4 @@
-import { utf8Bytes } from './encoding.js';
+import { utf8Bytes } from '../owned-json/utf8.js';
 import type { ProvExportGap } from './types.js';
 
 /** Only these known limitations aggregate; exceptional evidence keeps its native location. */

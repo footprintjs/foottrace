@@ -1,5 +1,5 @@
-import { canonicalSnapshot } from '../canonical-json/canonical.js';
-import { CanonicalJsonError } from '../canonical-json/types.js';
+import { ownedJsonSnapshot } from '../owned-json/snapshot.js';
+import { OwnedJsonError } from '../owned-json/types.js';
 import { boundedName } from '../evidence/admission.js';
 import { parseAttemptId } from '../ids/attemptId.js';
 import type { LogAddress } from '../memory/eventPosition.js';
@@ -9,6 +9,14 @@ import { ObservationError } from './types.js';
 import type { ObservationBounds } from './limits.js';
 import type { ObservationInput, ObservationOmission, ObservationSubject } from './types.js';
 
+const subjectBounds = Object.freeze({
+  maxDepth: 64,
+  maxNodes: 128,
+  maxFields: 128,
+  maxStringBytes: 8192,
+  maxSortWork: 200_000,
+  maxBytes: 8192,
+});
 const refuse = () => new ObservationError('invalid-data');
 const label = (input: unknown, max = 128): string => boundedName(input, max, refuse);
 const machine = (input: unknown): string => {
@@ -30,7 +38,7 @@ export function addressOf(input: unknown): LogAddress {
 }
 export const addressKey = (address: LogAddress): string => JSON.stringify([address.logRunId, ...address.drillPath]);
 export function subjectOf(input: unknown): ObservationSubject {
-  const snapshot = canonicalSnapshot(input, { maxBytes: 8192, maxStringBytes: 8192, maxNodes: 128, maxFields: 128 });
+  const snapshot = ownedJsonSnapshot(input, subjectBounds);
   const value = fields(
     snapshot.value,
     ['nativeAddress', 'runId', 'runtimeStageId', 'attemptId', 'operationRef'],
@@ -51,7 +59,7 @@ export function subjectOf(input: unknown): ObservationSubject {
     operationRef,
   });
 }
-export const subjectKey = (subject: ObservationSubject): string => canonicalSnapshot(subject).text;
+export const subjectKey = (subject: ObservationSubject): string => ownedJsonSnapshot(subject, subjectBounds).text;
 
 function inputOf(value: Record<string, unknown>): ObservationInput {
   const event = machine(value.event);
@@ -92,16 +100,17 @@ function inputOf(value: Record<string, unknown>): ObservationInput {
 }
 function rowSnapshot(input: unknown, limits: ObservationBounds) {
   try {
-    return canonicalSnapshot(input, {
+    return ownedJsonSnapshot(input, {
       maxBytes: limits.maxRowBytes,
       maxStringBytes: limits.maxRowBytes,
       maxNodes: 64,
       maxFields: 48,
       maxDepth: 8,
+      maxSortWork: 200_000,
     });
   } catch (error) {
     throw new ObservationError(
-      error instanceof CanonicalJsonError && ['output-bytes', 'string-bytes'].includes(error.code)
+      error instanceof OwnedJsonError && ['output-bytes', 'string-bytes'].includes(error.code)
         ? 'byte-limit'
         : 'invalid-data',
     );

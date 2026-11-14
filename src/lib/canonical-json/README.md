@@ -1,15 +1,18 @@
 # Strict canonical JSON
 
-One synchronous owned-JSON admission and RFC 8785 serializer, exposed only by
-`foottrace/canonical-json`. It has no crypto, PROV or engine dependency.
+Public canonical JSON policy and RFC 8785 serialization, exposed only by
+`foottrace/canonical-json`. It has no crypto, PROV or engine dependency. The
+private shared `../owned-json/` core also serves observation data admission;
+readers do not depend on this optional public capability.
 
-`admit.ts` copies data descriptors into owned frozen JSON. It refuses accessors,
+`../owned-json/admit.ts` copies data descriptors into owned frozen JSON. It refuses accessors,
 unsupported own members/instances, holes, cycles and lone surrogates without
 calling getters, coercion or `toJSON`. Shared acyclic objects are copied and
 charged on every occurrence. Callers are never frozen. Plain objects from this
 realm and null-prototype objects are supported; cross-realm prototypes are not.
 
-`canonical.ts` emits sorted raw UTF-16 names directly, including integer-like
+`canonical.ts` validates public options and translates failures into the existing
+fixed `CanonicalJsonError`. Its shared `../owned-json/snapshot.ts` emits sorted raw UTF-16 names directly, including integer-like
 names. Arrays and Unicode spelling stay ordered and unchanged. Numbers use
 ECMAScript serialization, including -0 -> 0. The input is already parsed JS:
 raw duplicate names and precision lost during parsing cannot be recovered.

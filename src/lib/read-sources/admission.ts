@@ -3,7 +3,7 @@ import { boundedList, boundedName, ownData } from '../evidence/admission.js';
 import { parseAttemptId } from '../ids/attemptId.js';
 import { nativeExecution } from '../ids/nativeExecution.js';
 import type { LogAddress } from '../memory/eventPosition.js';
-import { utf8Bytes } from '../prov/encoding.js';
+import { utf8Bytes } from '../owned-json/utf8.js';
 import type { ReadSourceLimits, ReadSourceOwner } from './types.js';
 
 const refuse = () => new TypeError('read sources: invalid data');

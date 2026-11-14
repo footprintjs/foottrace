@@ -1,5 +1,7 @@
+import type { OwnedJsonValue } from '../owned-json/types.js';
+
 /** The strict JSON domain. Admission returns an owned, frozen value. */
-export type JsonValue = null | boolean | number | string | readonly JsonValue[] | { readonly [key: string]: JsonValue };
+export type JsonValue = OwnedJsonValue;
 
 export interface CanonicalJsonOptions {
   readonly maxDepth?: number;

@@ -1,4 +1,4 @@
-/** Exact UTF-8 size of owned, well-formed JSON text, including stringify's escaping. */
+/** Exact UTF-8 size of a well-formed string; callers validate Unicode or pass JSON.stringify output. */
 export function utf8Bytes(value: string): number {
   let bytes = 0;
   for (let index = 0; index < value.length; index++) {

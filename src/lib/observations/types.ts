@@ -1,5 +1,6 @@
 import type { LogAddress } from '../memory/eventPosition.js';
 import type { RecordSink } from '../memory/sink.js';
+import type { RegisteredCode } from '../memory/honesty.js';
 
 /** Host-bound lookup identity, not producer authentication or authorization from file contents. */
 export interface ObservationSubject {
@@ -23,8 +24,8 @@ export interface ObservationLimits {
   readonly maxBytes?: number;
   readonly maxRowBytes?: number;
 }
-export type ObservationOmission = 'invalid-data' | 'row-limit' | 'byte-limit';
-export type ObservationGapCode =
+export type ObservationOmission = RegisteredCode<'invalid-data' | 'row-limit' | 'byte-limit'>;
+export type ObservationGapCode = RegisteredCode<
   | 'not-collected'
   | 'unsupported-version'
   | 'invalid-data'
@@ -36,7 +37,8 @@ export type ObservationGapCode =
   | 'omitted'
   | 'row-limit'
   | 'byte-limit'
-  | 'unread-entry';
+  | 'unread-entry'
+>;
 export interface ObservationGap {
   readonly code: ObservationGapCode;
   readonly sequence?: number;

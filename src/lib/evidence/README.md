@@ -86,7 +86,7 @@ codes such as `cycle`, `node-limit`, `edge-limit`, `call-limit` and
 `strategy-failed` are refused in these fields. Generic cause gaps and
 `RequirementValidationError.code` retain the broader `GapCode` vocabulary.
 Membership and both runtime predicates derive from the one canonical registry.
-Existing `HonestyCode` reader diagnostics remain unchanged. An adapter may retain
+These producer reasons remain distinct from `HonestyCode` reader explanations; observation gaps and omissions are separately registered in that reader vocabulary. An adapter may retain
 its more specific meaning in a namespaced `detail` and reference the actual
 check/attempt evidence.
 
