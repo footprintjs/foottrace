@@ -2,7 +2,7 @@
   "name": "foottrace",
   "version": "1.16.0",
   "type": "commonjs",
-  "description": "Execution records, replay, time travel and honest attribution — independent of the engine that produced them",
+  "description": "Execution records, replay, time travel and honest attribution \u2014 independent of the engine that produced them",
   "license": "MIT",
   "author": "Sanjay Krishna Anbalagan <sanjay@footprintjs.dev>",
   "repository": {
@@ -84,6 +84,26 @@
         "types": "./dist/types/metadata.d.ts",
         "default": "./dist/metadata.js"
       }
+    },
+    "./canonical-json": {
+      "import": {
+        "types": "./dist/esm/canonical-json.d.ts",
+        "default": "./dist/esm/canonical-json.js"
+      },
+      "require": {
+        "types": "./dist/types/canonical-json.d.ts",
+        "default": "./dist/canonical-json.js"
+      }
+    },
+    "./values": {
+      "import": {
+        "types": "./dist/esm/values.d.ts",
+        "default": "./dist/esm/values.js"
+      },
+      "require": {
+        "types": "./dist/types/values.d.ts",
+        "default": "./dist/values.js"
+      }
     }
   },
   "typesVersions": {
@@ -102,6 +122,12 @@
       ],
       "metadata": [
         "dist/types/metadata.d.ts"
+      ],
+      "canonical-json": [
+        "dist/types/canonical-json.d.ts"
+      ],
+      "values": [
+        "dist/types/values.d.ts"
       ]
     }
   },
@@ -111,7 +137,7 @@
     "test:coverage": "vitest run --coverage",
     "typecheck": "tsc -p tsconfig.test.json",
     "check:layering": "node scripts/check-layering.mjs",
-    "check:package": "publint && attw --pack --profile strict && tsc -p test/consumer/cause/tsconfig.json && tsc -p test/consumer/prov/tsconfig.json && tsc -p test/consumer/metadata/tsconfig.json",
+    "check:package": "publint && attw --pack --profile strict && tsc -p test/consumer/cause/tsconfig.json && tsc -p test/consumer/prov/tsconfig.json && tsc -p test/consumer/metadata/tsconfig.json && tsc -p test/consumer/values/tsconfig.json",
     "lint": "eslint 'src/**/*.ts'",
     "format": "prettier --check 'src/**/*.ts' 'test/**/*.ts'",
     "test:examples": "tsc -p examples/tsconfig.json",

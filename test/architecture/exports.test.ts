@@ -15,6 +15,8 @@ const entries = {
   './cause': 'cause',
   './prov': 'prov',
   './metadata': 'metadata',
+  './canonical-json': 'canonical-json',
+  './values': 'values',
 } as const;
 const config = ts.parseJsonConfigFileContent(
   ts.readConfigFile(join(root, 'tsconfig.json'), ts.sys.readFile).config,
@@ -58,7 +60,7 @@ function duplicates(doors: typeof exportsByDoor): string[][] {
 }
 
 describe('foottrace public ownership', () => {
-  it('has six code doors with matching public ESM and CommonJS targets', () => {
+  it('matches every public code door to ESM and CommonJS targets', () => {
     expect(
       Object.keys(pkg.exports)
         .filter((key) => key !== './package.json')
@@ -152,7 +154,10 @@ describe('foottrace public ownership', () => {
  * Every public name foottrace 1.0.3 shipped, by door — read off `main` at 1.0.3 with this file's own checker.
  * A minor keeps every one on the same door (1.1.0 only adds); only a major may drop or move one.
  */
-const SHIPPED_1_0_3: Record<Exclude<keyof typeof entries, './cause' | './prov' | './metadata'>, readonly string[]> = {
+const SHIPPED_1_0_3: Record<
+  Exclude<keyof typeof entries, './cause' | './prov' | './metadata' | './canonical-json' | './values'>,
+  readonly string[]
+> = {
   '.': [
     'ArrayProvenance',
     'AttributionBasis',
