@@ -168,3 +168,20 @@ export {
   RequirementValidationError,
   REQUIREMENT_RESULT_LIMITS,
 } from './lib/evidence/requirements.js';
+
+// Opt-in host observations on existing stored records; never causal or authentication claims.
+export { readObservationRecord } from './lib/observations/reader.js';
+export { OBSERVATION_LIMITS } from './lib/observations/limits.js';
+export { ObservationError } from './lib/observations/types.js';
+export type {
+  ObservationSubject,
+  ObservationInput,
+  ObservationRow,
+  ObservationLimits,
+  ObservationOmission,
+  ObservationGapCode,
+  ObservationGap,
+  ObservationEvidence,
+  ObservationReadRequest,
+  ObservationErrorCode,
+} from './lib/observations/types.js';

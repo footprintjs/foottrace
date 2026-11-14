@@ -152,5 +152,11 @@
   "src/lib/values/limits.ts": 1,
   "src/lib/values/digest.ts": 0,
   "src/lib/values/writer.ts": 3,
-  "src/lib/values/reader.ts": 3
+  "src/lib/values/reader.ts": 3,
+  "src/lib/observations/types.ts": 0,
+  "src/lib/observations/fields.ts": 1,
+  "src/lib/observations/limits.ts": 1,
+  "src/lib/observations/codec.ts": 3,
+  "src/lib/observations/writer.ts": 3,
+  "src/lib/observations/reader.ts": 3
 }

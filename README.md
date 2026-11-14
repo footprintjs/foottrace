@@ -136,6 +136,32 @@ A failing sink never stops the writer: a throw or a rejected promise is counted 
 
 A log that declares what it collects also keeps why a stage ran: which execution led to which, what a decider weighed, why a stage stopped early. `readRunEvidence` reads that back from the file alone, and every answer says `collected`, `partial` or `not-collected`, so a file with no evidence never reads as nothing having happened. See [run-evidence](src/lib/run-evidence/README.md) and the [runnable example](examples/post-execution/time-travel/09-run-evidence.ts).
 
+## Bounded host observations beside a native run
+
+Optional gateway, service or queue observations can use the same storage sink on an independent log. The authorized host supplies the expected native subject; imported labels are never authentication.
+
+```ts
+import { readObservationRecord, readStoredRecord } from 'foottrace';
+import { createObservationRecord, memorySink } from 'foottrace/write';
+
+const sink = memorySink();
+const address = { logRunId: 'observations-1', drillPath: [] };
+const subject = {
+  nativeAddress: { logRunId: 'run-1', drillPath: [] },
+  runId: 'run-1', runtimeStageId: 'request#0',
+  attemptId: 'request#0@1', operationRef: 'operation-1',
+}; // Obtain this tuple from authorized host/native execution state.
+const observations = createObservationRecord({ sink, address, subject });
+observations.note({ event: 'gateway.response', facts: { status: 504 } });
+observations.close(); // Seals this observation cut, not a successful business operation.
+const saved = JSON.parse(JSON.stringify(sink.entries));
+const evidence = readObservationRecord(readStoredRecord(saved), { address, subject });
+evidence.status; // 'collected': the declared observation cut was read completely.
+evidence.authenticity; // Always 'unverified'; no root cause follows from HTTP 504.
+```
+
+The host serves/redacts the facts first and owns flushing/durability. `noted` means dispatch acceptance only. The bounded reader detects missing tails and omissions, preserves unknown evidence and does not join clocks or create cause edges. See the [observation contract, fixed limits and recovery guidance](src/lib/observations/README.md). Existing native records and package entry points are unchanged.
+
 ## Attempt IDs
 
 An attempt under a stage execution has its own ID: `charge#4@2` is attempt 2 of `charge#4`, and `charge#4@2.1@3` is attempt 3 of the first call that stage attempt made. Counts start at 1.
