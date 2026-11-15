@@ -5,3 +5,7 @@ This library translates admitted execution records and cause evidence into PROV 
 `ids.ts` owns PROV identifiers and IRI encoding. Canonical execution admission belongs to `../ids/nativeExecution.ts`, shared with cause and read-source admission. PROV depends on cause evidence; cause does not import this exporter.
 
 Existing exporter behavior tests remain in `test/lib/prov/`; the shared execution admission has its own test beside its code.
+
+Exact UTF-8 byte counting is shared through `../owned-json/utf8.ts`; this exporter
+passes owned JSON text, whose string escapes preserve the counter's well-formed
+Unicode precondition. It does not own a second encoder implementation.

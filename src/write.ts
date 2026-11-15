@@ -98,3 +98,7 @@ export type {
   ReadSourceOwner,
   ReadSourceSnapshot,
 } from './lib/read-sources/types.js';
+
+// The same RecordSink/EventLog framing; noted never means durable storage.
+export { createObservationRecord } from './lib/observations/writer.js';
+export type { ObservationRecordOptions, ObservationWriter } from './lib/observations/types.js';

@@ -1,4 +1,5 @@
-import { utf8Bytes, wellFormed } from '../canonical-json/admit.js';
+import { wellFormed } from '../owned-json/admit.js';
+import { utf8Bytes } from '../owned-json/utf8.js';
 import { valueFields } from './fields.js';
 import { ValueTableError } from './types.js';
 import type { ValueTableLimits } from './types.js';

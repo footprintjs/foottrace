@@ -95,6 +95,48 @@ it('sanitizes even a forged public error thrown by a descriptor trap', () => {
   }
 });
 
+it.each([
+  'options',
+  'unsupported',
+  'unicode',
+  'cycle',
+  'unreadable',
+  'depth',
+  'nodes',
+  'fields',
+  'string-bytes',
+  'sort-work',
+  'output-bytes',
+])('retains the existing public fixed refusal mapping for own data code %s', (code) => {
+  const input = new Proxy(
+    {},
+    {
+      ownKeys: () => {
+        throw { code, message: 'PRIVATE' };
+      },
+    },
+  );
+  expect(() => canonicalizeJson(input)).toThrowError('Canonical JSON refused: ' + code);
+});
+
+it('does not read a foreign exception code or message accessor at the public boundary', () => {
+  let calls = 0;
+  const thrown = Object.create(CanonicalJsonError.prototype, {
+    code: { get: () => (++calls, 'output-bytes') },
+    message: { get: () => (++calls, 'PRIVATE') },
+  });
+  const input = new Proxy(
+    {},
+    {
+      ownKeys: () => {
+        throw thrown;
+      },
+    },
+  );
+  expect(() => canonicalizeJson(input)).toThrowError('Canonical JSON refused: unreadable');
+  expect(calls).toBe(0);
+});
+
 // Factual binary64 vectors from RFC 8785 Appendix B, https://www.rfc-editor.org/rfc/rfc8785#appendix-B
 it.each([
   ['0000000000000000', '0'],

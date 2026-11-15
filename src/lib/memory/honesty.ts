@@ -60,6 +60,29 @@
  * on purpose: the sentences are for a screen and may be reworded; a consumer branches on the KEY.
  */
 export const HONESTY_CODES = /* @__PURE__ */ Object.freeze({
+  // ── optional host observation gaps and omissions, never proof of remote events ─────
+  'not-collected':
+    'No supported matching observation opening was admitted, so the requested local observations are unknown rather than absent.',
+  'unsupported-version':
+    'An observation declaration uses an unsupported format version, so that part of the local observation cut cannot be interpreted.',
+  'invalid-data':
+    'Observation data or metadata could not be admitted as the supported bounded own-data shape, so the refused evidence remains unknown.',
+  'scope-mismatch':
+    'The observation address or subject does not match the tuple supplied by the host, so those observations cannot answer this request.',
+  'incomplete-record':
+    'The observation cut lacks an admitted complete close or its generic record has gaps, so it cannot establish a complete local observation history.',
+  'missing-note':
+    'The retained observation sequence does not match the expected local note order, so some notes may be missing or reordered.',
+  'duplicate-sequence':
+    'Two observation notes claim the same local sequence number, so the duplicate is refused and the observation cut is partial.',
+  'count-mismatch':
+    'The admitted observation rows do not match a supported declared final count, so the local observation cut cannot be treated as complete.',
+  omitted:
+    'The observation close reports one or more refused notes, so those missing observations keep the saved cut partial.',
+  'row-limit':
+    'A configured observation row limit refused or stopped admission of more notes, so evidence beyond that bound remains unknown.',
+  'byte-limit':
+    'A configured observation byte limit refused or stopped admission of more data, so the unadmitted evidence remains unknown.',
   // ── a slice's notes — `HonestyNote.code` (slice/) ─────────────────────────
   'conservative-fed-edges':
     "At least one 'fed' edge is stage-level (conservative): its write carries no per-write read provenance, so the edge may not be real — turn on writeProvenance: 'reads-prefix' for exact edges.",

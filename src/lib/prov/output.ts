@@ -1,6 +1,6 @@
 import { ProvBudget } from './budget.js';
 import { PROV_CONTEXT } from './context.js';
-import { utf8Bytes } from './encoding.js';
+import { utf8Bytes } from '../owned-json/utf8.js';
 import type { ProvExport, ProvNode, ProvValue } from './types.js';
 
 const envelopeBytes = utf8Bytes(

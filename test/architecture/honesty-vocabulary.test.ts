@@ -32,6 +32,8 @@ const TRACE = join(REPO, 'src/index.ts');
  * literal union, or the scenario below fails.
  */
 const NOT_HONESTY: Record<string, string> = {
+  ObservationErrorCode:
+    'a refused API operation, including invalid caller options, not the gap carried by returned evidence; ObservationGapCode and ObservationOmission use RegisteredCode instead',
   AxisRefusal:
     'what splitAxis answers when a list of stops has no bookended axis — a verdict on the stops, not a gap in the recording',
   CommitValuesMode: 'how a record encodes committed values (full / delta) — encoding, not missing evidence',
@@ -51,6 +53,8 @@ const NOT_HONESTY: Record<string, string> = {
 
 /** The vocabularies the registry exists to guard — the scan must SEE each of them, or it proves nothing. */
 const GUARDED = [
+  'ObservationGapCode',
+  'ObservationOmission',
   'HonestyCode',
   'HonestyNoteCode',
   'MissingSliceReason',
