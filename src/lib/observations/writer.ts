@@ -34,13 +34,17 @@ export function createObservationRecord(options: ObservationRecordOptions): Obse
     omissions[reason] = Math.min(Number.MAX_SAFE_INTEGER, omissions[reason] + 1);
     return Object.freeze({ status: 'omitted' as const, reason });
   };
+  const afterClose = () => Object.freeze({ status: 'omitted' as const, reason: 'closed' as const });
   return Object.freeze({
     note(input: unknown) {
-      if (closed) return Object.freeze({ status: 'omitted' as const, reason: 'closed' as const });
+      if (closed) return afterClose();
       if (rows >= limits.maxRows) return omitted('row-limit');
       try {
-        const payload = inputPayload(input, limits),
-          sequence = rows + 1;
+        const payload = inputPayload(input, limits);
+        // Descriptor traps can reenter this writer; accept only against the current sealed state and budget.
+        if (closed) return afterClose();
+        if (rows >= limits.maxRows) return omitted('row-limit');
+        const sequence = rows + 1;
         const data = { v: OBSERVATION_VERSION, sequence, ...payload },
           admitted = storedRow(data, limits);
         if (bytes + admitted.bytes > limits.maxBytes) return omitted('byte-limit');
@@ -49,6 +53,7 @@ export function createObservationRecord(options: ObservationRecordOptions): Obse
         log.note('observation', data);
         return Object.freeze({ status: 'noted' as const, sequence });
       } catch (error) {
+        if (closed) return afterClose();
         return omitted(
           error instanceof ObservationError && error.code === 'byte-limit' ? 'byte-limit' : 'invalid-data',
         );
