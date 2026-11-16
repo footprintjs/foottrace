@@ -66,6 +66,8 @@ export interface LogFold {
   readonly commits: Set<string>;
   /** First bundles that came with no `about`. */
   readonly missing: Set<string>;
+  /** Annotation presence or refusal by execution, not admitted facts: its precise taint already explains a refusal. */
+  readonly suppliedAbouts: Set<string>;
   readonly abouts: Map<string, { readonly about: CommitAbout; readonly index: number }>;
   readonly untracked: Map<string, Set<UntrackedSource>>;
   readonly edges: LocalEdge[];
@@ -115,6 +117,7 @@ export function newFold(log: StoredLog): LogFold {
     unread: [],
     commits: new Set(),
     missing: new Set(),
+    suppliedAbouts: new Set(),
     abouts: new Map(),
     untracked: new Map(),
     edges: [],
@@ -136,12 +139,19 @@ function readCommit(fold: LogFold, entry: unknown, index: number, a: Admission):
   try {
     const bundle = ownField(entry, 'bundle');
     const raw = ownField(bundle, 'runtimeStageId');
-    const about = ownField(entry, 'about');
-    const phase = ownField(bundle, 'phase');
     const id = executionId(raw, a);
     const seed = id === mountOf(fold.address);
     // A seed is the mount's own act in its own log: it says nothing about the mount's execution, whose row is in the parent log.
     if (!seed) fold.commits.add(id);
+    let about: unknown;
+    try {
+      about = ownField(entry, 'about');
+    } catch (error) {
+      fold.suppliedAbouts.add(id);
+      throw error;
+    }
+    if (about !== undefined) fold.suppliedAbouts.add(id);
+    const phase = ownField(bundle, 'phase');
     const untracked = admitUntracked(ownField(bundle, 'untrackedSources'), a);
     if (untracked.length > 0) {
       const held = fold.untracked.get(id) ?? new Set();
@@ -295,14 +305,15 @@ export function mergeEdges(folds: readonly LogFold[]): Map<string, LocalEdge & {
   return merged;
 }
 
-/** Entry and commits prove execution, not empty reads or attention. Only its own retained about supplies that coverage. */
+/** Entry and commits prove execution, not empty annotations. A refused about keeps its precise gap; an absent one has none. */
 function checkAnnotationCoverage(folds: readonly LogFold[], edges: Iterable<LocalEdge & { fold: LogFold }>): void {
   const uncovered = new Set<LogFold>();
+  const absent = (fold: LogFold, id: string) => !fold.abouts.has(id) && !fold.suppliedAbouts.has(id);
   for (const fold of folds) {
-    for (const id of fold.commits) if (!fold.abouts.has(id)) uncovered.add(fold);
+    for (const id of fold.commits) if (absent(fold, id)) uncovered.add(fold);
   }
-  // Reconcile first: an about refused for disagreeing with its entry cannot certify that entry's annotations.
-  for (const edge of edges) if (!edge.fold.abouts.has(edge.id)) uncovered.add(edge.fold);
+  // Reconcile first: refused annotations retain their invalid-data/truncated taints, never collected coverage.
+  for (const edge of edges) if (absent(edge.fold, edge.id)) uncovered.add(edge.fold);
   for (const fold of uncovered) {
     for (const channel of ['reads', 'attention'] as const) {
       const gaps = fold.taint.get(channel) ?? new Set<GapCode>();

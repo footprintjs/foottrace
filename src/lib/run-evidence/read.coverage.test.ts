@@ -307,10 +307,75 @@ describe('coverage belongs to the admitted execution in its own log', () => {
     const e = evidence(w);
     expect(e.unread).toHaveLength(1);
     expect(e.reads.rows.map((row) => row.id)).toEqual(['seed#0', 'p#1']);
-    expectMissing(e.reads);
-    expectMissing(e.attention);
-    expect(e.reads).toHaveProperty('gaps', expect.arrayContaining(['invalid-data']));
+    expect(e.reads).toMatchObject({ status: 'partial', gaps: ['invalid-data'] });
+    expect(e.attention).toEqual({ status: 'partial', rows: [], gaps: ['invalid-data'] });
     expect(e.stages.rows.find((row) => row.id === 'a#2')).toMatchObject({ parent: 'seed#0', committed: true });
+  });
+
+  it('a refusal for one execution does not hide another execution whose annotation is absent', () => {
+    const w = writer();
+    commit(w, 'seed#0', { reads: ['kept'] });
+    commit(w, 'p#1', { parent: 'seed#0' });
+    w.log.noteRun('run.stage', { id: 'a#2', parent: 'seed#0' });
+    commit(w, 'a#2', { parent: 'p#1', reads: ['refused'] });
+    w.log.noteRun('run.stage', { id: 'b#3', parent: 'seed#0' });
+    w.log.close('failed');
+    const e = evidence(w);
+    expect(e.reads).toEqual({
+      status: 'partial',
+      rows: [
+        { id: 'seed#0', address: ROOT, keys: ['kept'] },
+        { id: 'p#1', address: ROOT, keys: [] },
+      ],
+      gaps: ['invalid-data', 'not-collected'],
+    });
+    expect(e.attention).toEqual({ status: 'partial', rows: [], gaps: ['invalid-data', 'not-collected'] });
+    expect(e.stages.rows.find((row) => row.id === 'b#3')).toEqual({
+      id: 'b#3',
+      address: ROOT,
+      parent: 'seed#0',
+      committed: false,
+    });
+    expect(e.stages).toHaveProperty('gaps', ['invalid-data']);
+    expect(e.unread).toHaveLength(1);
+  });
+
+  it.each(['reads', 'marks'] as const)(
+    'a valid writer annotation refused by a lowered %s cap stays exactly truncated',
+    (cap) => {
+      const w = writer();
+      const mark = { kind: 'retried', reason: 'RETRY_RECORDED' as const, evidence: ['attempt:a#0@1'] };
+      w.log.noteRun('run.stage', { id: 'a#0' });
+      commit(w, 'a#0', { reads: ['kept'], attention: [mark] });
+      w.log.close('ok');
+      const stored = readStoredRecord(w.sink.entries);
+      const full = readRunEvidence(stored, 'r');
+      expect(full.reads).toEqual({ status: 'collected', rows: [{ id: 'a#0', address: ROOT, keys: ['kept'] }] });
+      expect(full.attention).toEqual({ status: 'collected', rows: [{ id: 'a#0', address: ROOT, marks: [mark] }] });
+      const limited = readRunEvidence(stored, 'r', { [cap]: 0 });
+      expect(limited.reads).toEqual({ status: 'partial', rows: [], gaps: ['truncated'] });
+      expect(limited.attention).toEqual({ status: 'partial', rows: [], gaps: ['truncated'] });
+      expect(limited.unread).toHaveLength(1);
+    },
+  );
+
+  it('a same-ID annotation accessor is refused without running its getter or claiming the annotation was absent', () => {
+    const w = writer();
+    w.log.noteRun('run.stage', { id: 'a#0' });
+    commit(w, 'a#0', {});
+    w.log.close('ok');
+    const getter = vi.fn(() => ({ reads: ['must-not-run'] }));
+    const entries = w.sink.entries.map((row) =>
+      row.kind === 'commit' ? Object.defineProperty({ ...row }, 'about', { enumerable: true, get: getter }) : row,
+    );
+    const stored = readStoredRecord(entries);
+    expect(stored.unread).toEqual([]);
+    expect(stored.root('r')).toMatchObject({ complete: true, outcome: 'ok' });
+    const e = readRunEvidence(stored, 'r');
+    expect(getter).not.toHaveBeenCalled();
+    expect(e.reads).toEqual({ status: 'partial', rows: [], gaps: ['invalid-data'] });
+    expect(e.attention).toEqual({ status: 'partial', rows: [], gaps: ['invalid-data'] });
+    expect(e.unread).toHaveLength(1);
   });
 
   it('a duplicate stage remains refused and writer note counts are not repaired', () => {

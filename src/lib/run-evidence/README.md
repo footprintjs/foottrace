@@ -44,7 +44,7 @@ A file with no `collects`, including every file an older writer made, reads `not
 
 `about.reads` joins `bundle.untrackedSources`, which reads `partial` (`untracked-input`): that stage also read what no name shows.
 
-An admitted entry or non-seed commit without its own retained `about` leaves reads and attention `partial` (`not-collected`), even when the log closed with accurate counts. A first commit can fail before storing its annotation; a continuation cannot replace it. Known stage and control facts remain usable. A log with no entered execution can still have genuinely collected-empty channels, and an explicit `reads: off` remains `not-collected` (`reads-off`).
+An admitted entry or non-seed commit whose first `about` was never supplied leaves reads and attention `partial` (`not-collected`), even when the log closed with accurate counts. A supplied but refused annotation retains its precise `invalid-data` or `truncated` gap; it cannot certify empty coverage. A first commit can fail before storing its annotation; a continuation cannot replace it. Known stage and control facts remain usable. A log with no entered execution can still have genuinely collected-empty channels, and an explicit `reads: off` remains `not-collected` (`reads-off`).
 
 ## Threat model: a record file is untrusted input
 
