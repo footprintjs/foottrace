@@ -125,6 +125,9 @@ async function outputChildren(
   maximum: number,
   state: ForwardState,
 ): Promise<void> {
+  // A legacy local scope did not opt into native cross-scope discovery.
+  // Its drill address alone authorizes neither an extra parent load nor wider impact.
+  if (!source.scope.subflows?.record) return;
   const parent = nativeParentOf(source.scope.address);
   if (!parent) return;
   if (!spendSubflowWork(state.work)) {

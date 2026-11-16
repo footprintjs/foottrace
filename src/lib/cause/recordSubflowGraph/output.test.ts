@@ -41,7 +41,10 @@ function recorded(output: boolean = true) {
       collections: [],
     },
   });
-  const graph = createRecordGraph([source, scope(child, childLog)]);
+  const graph = createRecordGraph([
+    source,
+    { ...scope(child, childLog), subflows: { version: 1, status: 'partial', mounts: [], collections: [] } },
+  ]);
   const target = graph.nodeId(parent, { runtimeStageId: 'mount#0', commitIdx: 0, key: 'final' });
   const writer = graph.nodeId(child, { runtimeStageId: 'mount/work#1', commitIdx: 0, key: 'a.b' });
   return { graph, source, target, writer, outputHandoff };

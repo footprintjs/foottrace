@@ -56,7 +56,10 @@ function fixture() {
   return {
     rootBundle,
     root: { ...scope(parent, [rootBundle]), subflows: inventory },
-    nested: scope(child, [commit('mount/value#1', 0, 'value')]),
+    nested: {
+      ...scope(child, [commit('mount/value#1', 0, 'value')]),
+      subflows: { version: 1 as const, status: 'partial' as const, mounts: [], collections: [] },
+    },
   };
 }
 function stored(scope: RecordScope): StoredRecordScope {
@@ -136,6 +139,42 @@ describe('authorized storage subflow projection', () => {
     const selected = graph.nodeId(parent, { runtimeStageId: 'mount#0', commitIdx: 0, key: 'final' });
     const result = await explain(graph, selected, { includeBackward: true });
     expect(result.backward?.gaps.find((gap) => gap.code === 'conservative')?.evidence).toContain('subflow:output:0');
+  });
+
+  it('keeps a legacy child-only scope local without discovering an optional parent', async () => {
+    const local = scope(child, [commit('local#1', 0, 'value')]);
+    const loadLog = vi.fn((address: LogAddress) => {
+      assertSameRequestedScope(address);
+      return stored(local);
+    });
+    function assertSameRequestedScope(address: LogAddress) {
+      expect(key(address)).toBe(key(child));
+    }
+    const graph = createStoredRecordGraph({ loadLog });
+    const selected = graph.nodeId(child, { runtimeStageId: 'local#1', commitIdx: 0, key: 'value' });
+    // This direct child query has no declared subflow port and no native seed crossing.
+    expect((await graph.children(selected, ctx())).complete).toBe(true);
+    expect(loadLog.mock.calls.map(([address]) => key(address))).toEqual([key(child)]);
+  });
+
+  it('keeps admitted stored local edges when the optional subflow field is an accessor', async () => {
+    const local = scope(parent, [commit('source#0', 0, 'input'), commit('use#1', 1, 'final', ['input'])]);
+    let calls = 0;
+    const loaded = Object.defineProperty(stored(local), 'subflows', {
+      enumerable: true,
+      get() {
+        calls++;
+        throw new Error('SYNTHETIC_PRIVATE_METADATA');
+      },
+    });
+    const graph = createStoredRecordGraph({ loadLog: () => loaded });
+    const selected = graph.nodeId(parent, { runtimeStageId: 'use#1', commitIdx: 1, key: 'final' });
+    const source = graph.nodeId(parent, { runtimeStageId: 'source#0', commitIdx: 0, key: 'input' });
+    expect((await graph.parents(selected, ctx())).edges.some((edge) => edge.nodeId === source)).toBe(true);
+    expect(calls).toBe(0);
+    const gaps = await graph.gaps(selected, ctx());
+    expect(gaps.some((gap) => gap.code === 'invalid-data')).toBe(true);
+    expect(JSON.stringify(gaps)).not.toContain('SYNTHETIC_PRIVATE_METADATA');
   });
 
   it('does not load a child after cancellation of an already admitted graph', async () => {

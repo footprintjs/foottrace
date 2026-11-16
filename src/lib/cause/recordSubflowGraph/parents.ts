@@ -245,6 +245,14 @@ async function outputParents(
       result.addGap('scope-boundary', evidence);
       continue;
     }
+    for (const code of child.subflows?.gaps ?? []) result.addGap(code, evidence);
+    // Both scopes explicitly participate in the native port; a legacy local child stays local.
+    // A refused channel cannot be replaced with a one-way join from whichever scope named it.
+    if (!child.subflows?.record) {
+      rejectReads(writes, work, result, first);
+      result.addGap('scope-boundary', evidence);
+      continue;
+    }
     if (!child.complete || handoff.child.beforeCommitIdx !== child.log.length) {
       rejectReads(writes, work, result, first);
       result.addGap('scope-boundary', evidence);

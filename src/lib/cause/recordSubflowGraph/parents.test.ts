@@ -27,6 +27,7 @@ async function fixture(
     omitted?: 'all' | 'selected';
     cutoff?: number;
     missingChild?: boolean;
+    sourcePort?: 'absent' | 'refused';
   } = {},
 ) {
   const parent = { logRunId: 'output-work', drillPath: [] as string[] };
@@ -62,11 +63,19 @@ async function fixture(
     },
   });
   const childLoads: RecordScope['address'][] = [];
+  const childScope = scope(child, childLog);
+  if (options.sourcePort === 'refused') {
+    Object.defineProperty(childScope, 'subflows', { value: { version: 99 } });
+  } else if (options.sourcePort !== 'absent') {
+    Object.assign(childScope, {
+      subflows: { version: 1 as const, status: 'partial' as const, mounts: [], collections: [] },
+    });
+  }
   const loader = createRecordScopeLoader((address) => {
     if (!address.drillPath.length) return { scope: parentScope };
     childLoads.push(address);
     if (options.missingChild) throw Error('fixture unavailable');
-    return { scope: scope(child, childLog) };
+    return { scope: childScope };
   }, recordOptions({}));
   const context = { signal: new AbortController().signal };
   const selected = await resolveRecordNode(
@@ -106,6 +115,20 @@ describe('subflow boundary source work', () => {
     expect(result.adjacency.edges[0].evidence).toContain('write:1');
     expect(work.left).toBe(0);
   });
+
+  it.each(['absent', 'refused'] as const)(
+    'keeps an output source whose subflow port is %s behind a boundary',
+    async (sourcePort) => {
+      const { selected, context, loader } = await fixture({ sourcePort });
+      const work = { left: 1 };
+      const result = await subflowParents(selected, context, loader, 1, work);
+      expect(result.adjacency.edges).toEqual([]);
+      expect(result.gaps.map((gap) => gap.code)).toEqual(expect.arrayContaining(['conservative', 'scope-boundary']));
+      if (sourcePort === 'refused') expect(result.gaps.some((gap) => gap.code === 'invalid-data')).toBe(true);
+      expect(result.adjacency.complete).toBe(false);
+      expect(work.left).toBe(0);
+    },
+  );
 
   it('refuses exhausted source work before loading the child payload', async () => {
     const { selected, context, loader, childLoads } = await fixture();

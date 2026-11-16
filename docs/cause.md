@@ -128,6 +128,11 @@ For an authorized native adapter, copy each actual input/output observation
 without changing its addresses, landed indexes, paths, limitations or status.
 Copy the enclosing snapshot's `fanoutCollections.collections` once into
 `subflows.collections` (or an empty list if absent), keeping inventory `partial`.
+Each participating native scope supplies its explicit port, including a partial
+empty inventory for a source scope with no retained outgoing metadata. A plain
+legacy scope remains local: its drill address alone does not opt it into parent
+discovery or wider impact. An output join into an undeclared source scope keeps
+a boundary gap; no query-order-dependent registry supplies missing opt-in.
 The host remains responsible for authorization and loading every referenced
 child/parent log. Ordinary stored entries do not implicitly contain this
 separate snapshot metadata.

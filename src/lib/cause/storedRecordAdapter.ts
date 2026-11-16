@@ -171,13 +171,20 @@ export function createStoredRecordGraph(host: StoredRecordHost, options: RecordG
                   budget,
                 );
           const stored: Gap['code'][] = record.unread.length ? ['not-collected'] : [];
+          let subflows: RecordScope['subflows'];
+          try {
+            subflows = recordOwn(loaded, 'subflows') as RecordScope['subflows'];
+          } catch (error) {
+            // Refusing this optional channel must not discard separately admitted local entries.
+            stored.push(error instanceof RecordRefusal ? error.code : 'invalid-data');
+          }
           return {
             scope: {
               address,
               commitLog: log.commitLog,
               initialState: log.initialState,
               readSources: recordOwn(loaded, 'readSources') as RecordScope['readSources'],
-              subflows: recordOwn(loaded, 'subflows') as RecordScope['subflows'],
+              subflows,
               reads: hostReads ?? own?.reads,
               controlDeps: hostControl ?? own?.controlDeps,
               attention: hostMarks ?? own?.attention,
