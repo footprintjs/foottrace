@@ -89,7 +89,8 @@ See the [record contract](docs/guides/record-contract.md), [time-travel contract
 Producers can opt into `frame.useEncoding({ commitValues: 'full', writeProvenance: 'reads-prefix', nestedReadTracking: true })`
 and use `frame.readTracked(path, key)` at the point a tracked read occurs. It returns the native value once and records its
 canonical absolute path using the same codec as writes. A namespaced frame records the namespace actually selected by the
-read, including root fallback. `readWithSource` retains the same canonical prefix in this mode; its separate bounded
+read, including root fallback. `readGlobalTracked(key)` retains a known live root read (for mappers), while `readGlobal`
+stays silent. `readWithSource` retains the same canonical prefix in this mode; its separate bounded
 scalar-source contract is unchanged. Internal `read` calls stay silent, and `noteRead` adds no legacy alias in this mode.
 
 The record layer does not observe JavaScript property access automatically: the producer's proxy must call the tracked
@@ -98,6 +99,10 @@ the historical `read` plus `noteRead` behavior, including dotted nested labels. 
 declaration alongside a saved log (FootprintJS uses `nestedReadTracking: true` on its snapshot). Without that declaration,
 a legacy dotted read name cannot distinguish a literal key from nested segments; readers must leave it unresolved rather
 than translate it or match a possibly unrelated literal key. Existing recordings cannot acquire missing leaf reads.
+
+Keep one read-name encoding for an entire saved capture. `useEncoding` refuses to change `nestedReadTracking` on a
+frame after its first captured prefix name, even after `release()` or `discard()`. Other encoding dials retain their
+existing behavior. A producer that changes this mode must start a fresh capture rather than label a mixed log canonical.
 
 ## Evidence requirements — 1.3.0
 

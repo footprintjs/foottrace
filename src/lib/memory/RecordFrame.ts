@@ -112,6 +112,8 @@ export class RecordFrame {
    * "last write's prefix == union" hold in delta mode.
    */
   private readKeys?: Set<string>;
+  /** A frame never mixes name encodings, including after release/discard. */
+  private readKeysCanonical?: boolean;
   /** Bounded recency window, independent of the monotonic state readKeys prefix. */
   private readAttempts?: Set<string>;
   private readAttemptsOmitted?: number;
@@ -149,8 +151,14 @@ export class RecordFrame {
     this._address = address;
   }
 
-  /** The two dials the frame encodes under from its next buffer and its next read on (law 4, 5). */
+  /**
+   * The dials the frame encodes under from its next buffer/read (law 4, 5).
+   * Once a prefix name was captured, its encoding cannot change on this frame.
+   * Clearing a failed attempt's reads does not change that encoding contract.
+   */
   useEncoding(encoding: RecordEncoding): void {
+    if (this.readKeysCanonical !== undefined && this.readKeysCanonical !== (encoding.nestedReadTracking === true))
+      throw new TypeError('Read-key encoding cannot change after prefix capture');
     this.encoding = encoding;
   }
 
@@ -464,6 +472,7 @@ export class RecordFrame {
    */
   noteRead(path: readonly string[], key: string): void {
     if (this.encoding?.writeProvenance === 'reads-prefix' && !this.encoding.nestedReadTracking) {
+      this.readKeysCanonical ??= false;
       (this.readKeys ??= new Set()).add(path.length > 0 ? [...path, key].join('.') : key);
     }
   }
@@ -473,6 +482,7 @@ export class RecordFrame {
     // `readValue` always selects this from the actual native traversal. Never
     // invent the frame's address when no selection was observed.
     if (observation.selectedAddress === undefined) return;
+    this.readKeysCanonical ??= true;
     (this.readKeys ??= new Set()).add(normaliseStateKey([...observation.selectedAddress, ...path, key]));
   }
 
@@ -503,6 +513,18 @@ export class RecordFrame {
   readGlobal(key: string) {
     this.sawAt(this.log?.length);
     return this.state.getValue([], [], key);
+  }
+
+  /**
+   * Read live ROOT state once and retain that known root name. Mapper reads
+   * use this port rather than the frame's pinned view or address fallback.
+   * `readGlobal` remains silent. Failed reads retain no prefix.
+   */
+  readGlobalTracked(key: string) {
+    const value = this.readGlobal(key);
+    if (this.encoding?.nestedReadTracking) this.noteCanonicalRead([], key, { dataOnly: true, selectedAddress: [] });
+    else this.noteRead([], key);
+    return value;
   }
 
   /**

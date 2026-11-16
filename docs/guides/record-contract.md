@@ -314,6 +314,12 @@ a flowchart wrote, and it keeps the laws above by construction:
   mode declaration with the log: historical dotted names without it are
   ambiguous and cannot be repaired by parsing dots. This adds no automatic
   object traversal, derivation proof or cross-log handoff evidence.
+  Mappers that deliberately read current root state use `readGlobalTracked(key)`;
+  it retains the known root name from the single live read, while `readGlobal`
+  remains silent.
+  A frame refuses to change its read-name encoding after capturing a prefix,
+  including after release/discard. Producers must keep the mode fixed across
+  every frame and resumed leg of a capture before declaring the log canonical.
 - **A secret** is written with the bytes of a redaction verdict: the scrub
   `{ whole: true }` puts `'REDACTED'` in the log at the path, and
   `{ fields: [...] }` at each field inside the value; the heap keeps the value.

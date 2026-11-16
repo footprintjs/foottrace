@@ -125,4 +125,65 @@ describe('RecordFrame canonical tracked read prefixes', () => {
     commit(frame);
     expect(log.list()[0].trace[0].readKeys).toEqual(['cfg\u001ffee']);
   });
+
+  it.each([false, true])('tracks an actual live root read exactly once, canonical mode %s', (nestedReadTracking) => {
+    const { state, frame, log } = setup({ count: 1, runs: { item: { count: 99 } } }, ['runs', 'item']);
+    frame.useEncoding({ ...CANONICAL, nestedReadTracking });
+    expect(frame.read([], 'count')).toBe(99); // pin the local view, silently
+    const sibling = new RecordFrame(state, log);
+    sibling.write(['count'], 2, 'set');
+    commit(sibling, 'sibling');
+    expect(frame.readGlobalTracked('count')).toBe(2); // live root, not 99 or the pinned root 1
+    frame.noteRead([], 'count'); // existing producer notification must not duplicate it
+    frame.write(frame.at([], 'result'), 2, 'set');
+    commit(frame);
+    expect(log.list()[1].trace[0].readKeys).toEqual(['count']);
+  });
+
+  it('keeps silent global reads silent and does not retain a failed live-root read', () => {
+    const { state, frame, log } = setup({ count: 1 });
+    expect(frame.readGlobal('count')).toBe(1);
+    let calls = 0;
+    Object.defineProperty(state.getState(), 'bad', {
+      get: () => {
+        calls++;
+        throw new Error('failed live read');
+      },
+    });
+    expect(() => frame.readGlobalTracked('bad')).toThrow('failed live read');
+    expect(calls).toBe(1);
+    frame.write(['result'], 1, 'set');
+    commit(frame);
+    expect(log.list()[0].trace[0].readKeys).toEqual([]);
+  });
+
+  it.each([false, true])('refuses to mix captured prefix encodings, starting canonical %s', (nestedReadTracking) => {
+    const { frame, log } = setup({ cfg: { n: 1 } });
+    frame.useEncoding({ ...CANONICAL, nestedReadTracking });
+    frame.readTracked(['cfg'], 'n');
+    const changed = { ...CANONICAL, nestedReadTracking: !nestedReadTracking };
+    expect(() => frame.useEncoding(changed)).toThrow('Read-key encoding cannot change after prefix capture');
+    frame.release();
+    expect(() => frame.useEncoding(changed)).toThrow('Read-key encoding cannot change after prefix capture');
+    frame.discard();
+    expect(() => frame.useEncoding(changed)).toThrow('Read-key encoding cannot change after prefix capture');
+    // Refusal is atomic; the original mode still works and discard cleared its names.
+    frame.readTracked(['cfg'], 'n');
+    frame.write(['result'], 1, 'set');
+    commit(frame);
+    expect(log.list()[0].trace[0].readKeys).toEqual([nestedReadTracking ? 'cfg\u001fn' : 'cfg.n']);
+  });
+
+  it('allows mode selection before prefix capture and legacy encoding/dial changes', () => {
+    const { frame, log } = setup({ cfg: { n: 1 } });
+    frame.read(['cfg'], 'n'); // silent reads do not lock the mode
+    frame.useEncoding({ ...CANONICAL, nestedReadTracking: false });
+    frame.readTracked(['cfg'], 'n');
+    // Explicit false and omitted retain the same legacy name encoding.
+    frame.useEncoding({ commitValues: 'delta', writeProvenance: 'off' });
+    frame.useEncoding({ commitValues: 'full', writeProvenance: 'reads-prefix' });
+    frame.write(['result'], 1, 'set');
+    commit(frame);
+    expect(log.list()[0].trace[0].readKeys).toEqual(['cfg.n']);
+  });
 });
