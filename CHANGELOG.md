@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.0.0 — 2026-11-16
+
+### Added
+
+- Add opt-in bounded host observation records through the existing sink framing, with exact expected subject matching, once-only closure and explicit missing/omitted evidence. Structural completeness remains unauthenticated and does not establish causation, customer delivery or durability.
+
+- Migration: observation gaps and omissions add eleven keys to `HONESTY_CODES` and widen exported `HonestyCode`; exhaustive switches and `Record<HonestyCode, ...>` consumers must handle the added cases. This requires a major release even though observation capture is opt-in and existing stored wire formats are unchanged. The separately reviewed release proposal must run the major-version consumer compatibility process; this feature does not bump or publish a package version.
+- Allow read-source records to declare canonical run-evidence collection on the same log and sink.
+- Add opt-in bounded content-addressed value tables and strict canonical JSON through `foottrace/values` and `foottrace/canonical-json`; callers supply the inline redaction law before hashing, omitted writes are disclosed, missing references are refused by name, and old records remain unchanged.
+
+### Fixed
+
+- Keep reads and attention partial when a known execution has no retained first-commit annotation, including a failed first commit or a continuation alone.
+
 ## 1.16.0 — 2026-11-12
 
 ### Added
