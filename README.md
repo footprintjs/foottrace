@@ -84,6 +84,21 @@ Writers record during execution. Readers query what was recorded; they do not re
 
 See the [record contract](docs/guides/record-contract.md), [time-travel contract](src/lib/time-travel/README.md), and [slice contract](src/lib/slice/README.md).
 
+### Canonical nested-read prefixes (unreleased)
+
+Producers can opt into `frame.useEncoding({ commitValues: 'full', writeProvenance: 'reads-prefix', nestedReadTracking: true })`
+and use `frame.readTracked(path, key)` at the point a tracked read occurs. It returns the native value once and records its
+canonical absolute path using the same codec as writes. A namespaced frame records the namespace actually selected by the
+read, including root fallback. `readWithSource` retains the same canonical prefix in this mode; its separate bounded
+scalar-source contract is unchanged. Internal `read` calls stay silent, and `noteRead` adds no legacy alias in this mode.
+
+The record layer does not observe JavaScript property access automatically: the producer's proxy must call the tracked
+port during execution. A prefix records reads preceding a write, not proof of semantic derivation. The default remains
+the historical `read` plus `noteRead` behavior, including dotted nested labels. Carry the producer's canonical-mode
+declaration alongside a saved log (FootprintJS uses `nestedReadTracking: true` on its snapshot). Without that declaration,
+a legacy dotted read name cannot distinguish a literal key from nested segments; readers must leave it unresolved rather
+than translate it or match a possibly unrelated literal key. Existing recordings cannot acquire missing leaf reads.
+
 ## Evidence requirements — 1.3.0
 
 `RequirementResult` and `readRequirementResults(unknown)` on the root door carry
