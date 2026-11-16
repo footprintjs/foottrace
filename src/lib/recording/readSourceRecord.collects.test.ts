@@ -44,7 +44,7 @@ describe('read-source record collection', () => {
 
     expect(record.log.keepsEvidence).toBe(true);
     expect(sink.entries[0]).toMatchObject({ kind: 'opened', collects: { v: 1, reads: 'keys' } });
-    expect(sink.entries.filter((entry) => entry.kind === 'note').map((entry) => entry.data.seq)).toEqual([0, 1]);
+    expect(sink.entries.flatMap((entry) => (entry.kind === 'note' ? [entry.data.seq] : []))).toEqual([0, 1]);
     expect(sink.entries.at(-1)).toMatchObject({ kind: 'closed', runNotes: 2 });
     const evidence = readRunEvidence(readStoredRecord(sink.entries), address.logRunId);
     expect(evidence.reads).toMatchObject({ status: 'collected', rows: [{ id: 'step#0', keys: ['count'] }] });
@@ -191,7 +191,11 @@ describe('read-source record collection', () => {
         return Reflect.getOwnPropertyDescriptor(target, key);
       },
     });
-    const record = createReadSourceRecord(new SharedMemory(undefined, {}), address, options);
+    const record = createReadSourceRecord(
+      new SharedMemory(undefined, {}),
+      address,
+      options as unknown as ReadSourceRecordOptions,
+    );
 
     expect(record.log.keepsEvidence).toBe(true);
     expect(sink.entries[0]).toMatchObject({ collects: { v: 1, reads: 'keys' } });
@@ -299,7 +303,7 @@ describe('read-source record collection', () => {
 
     expect(record.log.length).toBe(1);
     expect(record.log.sinkFailures).toBe(1);
-    expect(sink.entries.filter((entry) => entry.kind === 'note').map((entry) => entry.data.seq)).toEqual([1]);
+    expect(sink.entries.flatMap((entry) => (entry.kind === 'note' ? [entry.data.seq] : []))).toEqual([1]);
     expect(sink.entries.at(-1)).toMatchObject({ runNotes: 2 });
     const evidence = readRunEvidence(readStoredRecord(sink.entries), address.logRunId);
     expect(evidence.stops.status).toBe('partial');
