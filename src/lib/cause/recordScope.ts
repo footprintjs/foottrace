@@ -1,4 +1,5 @@
 import { prepareReadSources } from './recordSources.js';
+import { prepareRecordSubflows, type PreparedRecordSubflows } from './recordSubflows.js';
 import type { LogAddress } from '../memory/eventPosition.js';
 import { placedAt } from '../memory/readWindow.js';
 import { RUN_EVIDENCE_LIMITS } from '../run-evidence/kinds.js';
@@ -53,6 +54,7 @@ export function prepareRecordScope(
   address: LogAddress,
   maximumCommits: number,
   maximumFields: number,
+  maximumScopes = 32,
 ): PreparedRecordScope {
   if (addressKey(addressOf(recordOwn(value, 'address'))) !== addressKey(address)) throw new RecordRefusal();
   const rawLog = recordList(recordOwn(value, 'commitLog'), maximumCommits),
@@ -97,6 +99,13 @@ export function prepareRecordScope(
     sources === undefined ? undefined : recordOwn(value, 'initialState'),
     budget,
   );
+  let subflows: PreparedRecordSubflows;
+  try {
+    subflows = prepareRecordSubflows(recordOwn(value, 'subflows'), address, log, budget, maximumScopes);
+  } catch (error) {
+    // A refused optional channel does not erase already admitted local commits.
+    subflows = { gaps: [error instanceof RecordRefusal ? error.code : 'invalid-data'] };
+  }
   const scope: PreparedRecordScope = {
     address,
     log,
@@ -105,6 +114,7 @@ export function prepareRecordScope(
     marks,
     complete: recordOwn(value, 'complete') === true,
     ...(readSources ? { readSources } : {}),
+    subflows,
   };
   if (readSources) scope.sourceCoveredExecutions = sourceCoveredExecutions(scope);
   return scope;

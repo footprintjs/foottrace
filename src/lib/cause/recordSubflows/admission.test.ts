@@ -97,8 +97,8 @@ function fanout(): Fixture {
   f.inventory.collections = [f.collection];
   return f;
 }
-async function inspect(f: Fixture, options: Parameters<typeof createRecordGraph>[1] = {}) {
-  const graph = createRecordGraph([f.parentScope, f.childScope], options);
+async function inspect(f: Fixture, options: Parameters<typeof createRecordGraph>[1] = {}, includeChild = true) {
+  const graph = createRecordGraph(includeChild ? [f.parentScope, f.childScope] : [f.parentScope], options);
   const target = graph.nodeId(parent, { runtimeStageId: f.targetId, commitIdx: 1, key: 'final' });
   const local = graph.nodeId(parent, { runtimeStageId: 'local#0', commitIdx: 0, key: 'input' });
   const remote = graph.nodeId(child, { runtimeStageId: 'child/work#2', commitIdx: 1, key: 'childValue' });
@@ -107,8 +107,8 @@ async function inspect(f: Fixture, options: Parameters<typeof createRecordGraph>
   expect(parents.edges.map((edge) => edge.nodeId)).toContain(local);
   return { parents, gaps, remote };
 }
-async function refused(f: Fixture, options: Parameters<typeof createRecordGraph>[1] = {}) {
-  const result = await inspect(f, options);
+async function refused(f: Fixture, options: Parameters<typeof createRecordGraph>[1] = {}, includeChild = true) {
+  const result = await inspect(f, options, includeChild);
   expect(result.parents.complete).toBe(false);
   expect(result.gaps.some((gap) => ['invalid-data', 'unsupported', 'node-limit'].includes(gap.code))).toBe(true);
   return result;
@@ -503,7 +503,8 @@ describe('proposed subflows admission: bounded data work', () => {
     const f = fixture();
     const other = { runtimeStageId: 'other#2', child: { ...child, drillPath: ['other#2'] } };
     Object.assign(f.inventory, { mounts: [f.mount, other] });
-    await refused(f, { maxScopes: 1 });
+    // Supply one scope: this case measures the metadata inventory cap, not the source-scope cap.
+    await refused(f, { maxScopes: 1 }, false);
   });
   it('refuses oversized lists before reading their accessors', async () => {
     const f = fixture();

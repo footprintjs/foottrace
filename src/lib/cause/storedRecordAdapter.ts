@@ -177,6 +177,7 @@ export function createStoredRecordGraph(host: StoredRecordHost, options: RecordG
               commitLog: log.commitLog,
               initialState: log.initialState,
               readSources: recordOwn(loaded, 'readSources') as RecordScope['readSources'],
+              subflows: recordOwn(loaded, 'subflows') as RecordScope['subflows'],
               reads: hostReads ?? own?.reads,
               controlDeps: hostControl ?? own?.controlDeps,
               attention: hostMarks ?? own?.attention,

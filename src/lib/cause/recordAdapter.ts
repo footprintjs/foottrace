@@ -4,6 +4,7 @@ import { attentionForRecordNode, gapForRecordFailure } from './recordCoverage.js
 import { nodeIdFor } from './recordIdentity.js';
 import { createRecordScopeLoader, openRecordScope } from './recordLoading.js';
 import { createRecordQuery, whenResolved } from './recordQuery.js';
+import { subflowChildren } from './recordSubflowGraph.js';
 import { recordOptions } from './recordScope.js';
 import type {
   RecordCauseGraph,
@@ -41,15 +42,15 @@ export function createLazyRecordGraph(
     async parents(nodeId: NodeId, context: GraphContext) {
       return whenResolved(
         await query.resolve(nodeId, context),
-        (node) => query.inspect(node, context).adjacency,
-        unavailableAdjacency,
+        async (node) => (await query.parents(node, context)).adjacency,
+        async () => unavailableAdjacency(),
       );
     },
     async gaps(nodeId: NodeId, context: GraphContext) {
       return whenResolved(
         await query.resolve(nodeId, context),
-        (node) => query.inspect(node, context).gaps,
-        (failure) => gapForRecordFailure(failure.failure),
+        async (node) => (await query.parents(node, context)).gaps,
+        async (failure) => gapForRecordFailure(failure.failure),
       );
     },
     async attention(nodeId: NodeId, context: GraphContext) {
@@ -58,8 +59,15 @@ export function createLazyRecordGraph(
     async children(nodeId: NodeId, context: GraphContext) {
       return whenResolved(
         await query.resolve(nodeId, context),
-        (node) => childrenForRecordNode(node, limits.maxEdges, query.inspect(node, context)),
-        unavailableAdjacency,
+        (node) =>
+          subflowChildren(
+            node,
+            context,
+            loader,
+            limits.maxEdges,
+            childrenForRecordNode(node, limits.maxEdges, query.inspect(node, context)),
+          ),
+        async () => unavailableAdjacency(),
       );
     },
   });
