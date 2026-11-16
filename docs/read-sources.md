@@ -28,6 +28,10 @@ namespaces from original descriptors before base cloning. These are declared
 native addresses, not business-object paths. An undeclared late namespace can
 record future native writes, but its old base stays unknown: cloning can flatten
 a getter and cannot prove its origin. No old heap is retained to recover it later.
+Optional `sink` and `collects: { reads: 'keys' }` enable canonical run evidence
+on this same log. An explicit declaration requires a real sink; `reads: 'off'`
+keeps run evidence without read names. Omitting `collects` keeps the existing
+source-only behavior. Collection is not retrofitted onto an existing log.
 The log remains the ordinary value-bearing native log; only
 `selected.occurrence` and `snapshot()` are value-free metadata. They contain no
 value fingerprints. Keep the existing log's redaction and authorization rules.
