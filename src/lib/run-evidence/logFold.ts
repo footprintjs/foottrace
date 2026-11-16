@@ -291,7 +291,25 @@ export function mergeEdges(folds: readonly LogFold[]): Map<string, LocalEdge & {
       }
     }
   }
+  checkAnnotationCoverage(folds, merged.values());
   return merged;
+}
+
+/** Entry and commits prove execution, not empty reads or attention. Only its own retained about supplies that coverage. */
+function checkAnnotationCoverage(folds: readonly LogFold[], edges: Iterable<LocalEdge & { fold: LogFold }>): void {
+  const uncovered = new Set<LogFold>();
+  for (const fold of folds) {
+    for (const id of fold.commits) if (!fold.abouts.has(id)) uncovered.add(fold);
+  }
+  // Reconcile first: an about refused for disagreeing with its entry cannot certify that entry's annotations.
+  for (const edge of edges) if (!edge.fold.abouts.has(edge.id)) uncovered.add(edge.fold);
+  for (const fold of uncovered) {
+    for (const channel of ['reads', 'attention'] as const) {
+      const gaps = fold.taint.get(channel) ?? new Set<GapCode>();
+      gaps.add('not-collected');
+      fold.taint.set(channel, gaps);
+    }
+  }
 }
 
 /** Read one log's entries, then its whole-log checks. */
