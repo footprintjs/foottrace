@@ -1,10 +1,20 @@
-import type { GapCode } from './codes.js';
+import { isGapCode, type GapCode } from './codes.js';
+
+const refusalIdentities = new WeakMap<object, { code: GapCode; family: symbol | undefined }>();
 
 /** One refusal representation; subclasses preserve the graph-port and record-loader boundaries. */
 export class EvidenceRefusal extends Error {
-  constructor(readonly code: GapCode, message: string) {
+  constructor(readonly code: GapCode, message: string, family: symbol | undefined = undefined) {
     super(message);
+    if (isGapCode(code)) refusalIdentities.set(this, { code, family });
   }
+}
+
+/** Classify only minted identities: unknown errors must never run a prototype walk or field accessor. */
+export function evidenceRefusalCode(error: unknown, family?: symbol): GapCode | undefined {
+  if (error === null || (typeof error !== 'object' && typeof error !== 'function')) return undefined;
+  const held = refusalIdentities.get(error);
+  return held && (family === undefined || held.family === family) ? held.code : undefined;
 }
 
 export type RefuseEvidence = (code?: GapCode) => Error;
@@ -57,6 +67,21 @@ export function boundedList<T>(
     readonly translateArrayErrors?: boolean;
   },
 ): readonly T[] {
+  return boundedSlots(
+    value,
+    maximum,
+    (index) => read(ownData(value, String(index), options.refuse, options.descriptors)),
+    options,
+  );
+}
+
+/** Admit the outer list before a caller's slot policy runs. A slot policy never changes the raw allowance. */
+export function boundedSlots<T>(
+  value: unknown,
+  maximum: number,
+  read: (index: number) => T,
+  options: Parameters<typeof boundedList>[3],
+): readonly T[] {
   const { refuse, overflow, freeze, descriptors } = options;
   let array: boolean;
   if (options.translateArrayErrors) {
@@ -72,7 +97,7 @@ export function boundedList<T>(
   if (options.expectedLength !== undefined && length !== options.expectedLength) throw refuse();
   if (length > maximum) throw refuse(overflow);
   const result: T[] = [];
-  for (let index = 0; index < length; index++) result.push(read(ownData(value, String(index), refuse, descriptors)));
+  for (let index = 0; index < length; index++) result.push(read(index));
   return freeze ? Object.freeze(result) : result;
 }
 

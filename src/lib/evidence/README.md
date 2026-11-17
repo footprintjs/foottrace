@@ -8,6 +8,10 @@ root requirement imports do not load the optional cause algorithms.
 - `marks.ts` is the one admission of attention marks (a fixed reason, a named kind,
   evidence references only), shared by the writer's `about`, the run-evidence reader
   and the cause graph.
+  Its sealed `marks/` folder holds the shared schema and ordinary slot reader.
+  Generic cause queries alone can opt into retaining valid neighboring marks;
+  rejected slots remain explicit incomplete coverage. Strict writer, stored,
+  native record and PROV admission keeps the whole-batch contract.
 - `readAttempts.ts` holds the read-attempt window: `READ_ATTEMPT_LIMIT`, which
   `RecordFrame` keeps to, and `readAttemptWindow`, which the prov and cause readers
   use to admit `readAttemptsOmitted`.
@@ -19,6 +23,12 @@ its existing named type export on `foottrace/cause`. `RequirementReason` is the
 narrower producer-facing subset, derived from membership in that same registry;
 neither the type nor its reader requires a runtime cause import. The registry
 and admission helpers stay private.
+
+`admission.ts` also owns refusal identity: the original closed code and optional
+private family are retained in a WeakMap at construction. Catch boundaries never
+inspect an unknown error's prototype or fields. Graph, record and PROV families
+stay distinct; ordinary foreign failures retain each reader's fixed fallback.
+Changing a public error field or wrapping an error does not mint new evidence.
 
 ## Structural law
 

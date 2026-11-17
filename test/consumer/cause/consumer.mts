@@ -1,4 +1,11 @@
-import { explain, type BackwardResult, type CauseGraph, type CauseResult, type TraversalLimits } from 'foottrace/cause';
+import {
+  attentionList,
+  explain,
+  type BackwardResult,
+  type CauseGraph,
+  type CauseResult,
+  type TraversalLimits,
+} from 'foottrace/cause';
 import type { Attention } from 'foottrace';
 
 const mark: Attention = { kind: 'error', reason: 'ERROR_RECORDED', evidence: ['proof:source'] };
@@ -39,3 +46,9 @@ const answerRow: TraceEntry = { path: 'result', verb: 'set', readAttempts: ['fet
 // @ts-expect-error Answer ceilings are immutable through the public record type.
 answerRow.readAttempts?.push('fetch#0@1.2@1');
 void answerRow;
+
+// Both public module formats admit the explicit query strategy.
+void explain(graph, 'source', { attentionAdmission: 'retain-valid' });
+void attentionList(graph, { nodeIds: ['source'], attentionAdmission: 'atomic' });
+// @ts-expect-error Unknown policies cannot silently select an admission contract.
+void attentionList(graph, { attentionAdmission: 'salvage-everything' });

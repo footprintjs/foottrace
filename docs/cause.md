@@ -125,6 +125,37 @@ const finding = await explain(graph, selectedNodeId, {
 
 Query defaults are 100 nodes, depth 20, 1,000 edges, 1,000 calls and one second. Hard ceilings are 10,000 nodes, depth 1,000, 100,000 edges/calls and 30 seconds. The same budget covers both directions and ranking. Callbacks are trusted executable code: asynchronous waiting is bounded and receives an abort signal, while synchronous callbacks must cooperate. A late synchronous result is rejected after it returns. Hosts must use non-secret node and evidence IDs; the reader does not classify arbitrary ID strings for personal information.
 
+### Partial attention from a generic graph
+
+`explain` and `attentionList` accept `attentionAdmission: 'atomic' | 'retain-valid'`.
+Omitted or `'atomic'` keeps the existing whole-list admission. A generic graph host
+may explicitly use `'retain-valid'` to retain structurally valid marks beside
+rejected slots. Every timely rejected slot adds the existing `invalid-data` gap
+for that node, even when all marks are rejected. Valid marks retain their order,
+references and duplicates. Affected backward coverage cannot establish a root;
+impact-only gaps do not erase an independently supported backward root.
+
+```ts
+const result = await explain(graph, 'selected', {
+  attentionAdmission: 'retain-valid',
+  includeBackward: true,
+});
+```
+
+The outer list still must be an ordinary array with at most 32 raw slots before
+payload reads or deduplication. Outer shape/cap failure refuses the whole list.
+Each mark retains the 16-reference/512-code-unit ceilings. Accessors are not
+invoked; native reflection/Proxy traps remain executable host code. Cancellation
+and the query deadline can discard a late projection, including its rejection
+flag. Structural admission establishes neither a mark's truth nor its references'
+authenticity.
+
+Migration: adoption is explicit and additive; default output is unchanged.
+Writer `about`, stored run evidence, native record containers and PROV remain
+strict. A native/container refusal occurs before the generic graph port, so this
+option cannot recover marks already discarded there. A writer's malformed
+attention batch omits the whole `about`; the existing commit still survives.
+
 ### Return backward evidence for a viewer
 
 Set the optional boolean `includeBackward: true` to return the reverse walk that `explain` already performed:

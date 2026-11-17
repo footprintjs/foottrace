@@ -16,6 +16,7 @@ import {
   recordName,
   recordOwn,
   RecordRefusal,
+  recordRefusalCode,
   spend,
 } from './recordValidation.js';
 import type { GapCode } from './types.js';
@@ -204,7 +205,7 @@ export function prepareReadSources(
       owners: new Set(),
       byOwner: new Map(),
       byCommit: new Map(),
-      gaps: [error instanceof RecordRefusal ? error.code : 'invalid-data'],
+      gaps: [recordRefusalCode(error) ?? 'invalid-data'],
     };
   }
 }

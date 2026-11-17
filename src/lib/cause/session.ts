@@ -1,5 +1,5 @@
 import type { CauseGraph, ExplainOptions, Gap, GraphContext, NodeId, WalkLimits } from './types.js';
-import { AdmissionError, gap, observePromise, graphOwn, plain } from './validation.js';
+import { AdmissionError, admissionCode, gap, observePromise, graphOwn, plain } from './validation.js';
 import { beginQueryMemo, endQueryMemo } from './queryMemo.js';
 import { QueryBudget, type BudgetView } from './queryBudget.js';
 
@@ -12,6 +12,7 @@ type Method = 'parents' | 'children' | 'attention' | 'gaps' | 'roots';
 export class Session {
   readonly limits: Required<WalkLimits>;
   readonly includeBackward: boolean;
+  readonly attentionAdmission: 'atomic' | 'retain-valid';
   readonly context: GraphContext;
   readonly controller = new AbortController();
   private readonly cache = new Map<string, Promise<Read<unknown>>>();
@@ -31,6 +32,9 @@ export class Session {
       const includeBackward = graphOwn(options, 'includeBackward');
       if (includeBackward !== undefined && typeof includeBackward !== 'boolean') throw new TypeError();
       this.includeBackward = includeBackward === true;
+      const admission = graphOwn(options, 'attentionAdmission');
+      if (admission !== undefined && admission !== 'atomic' && admission !== 'retain-valid') throw new TypeError();
+      this.attentionAdmission = admission ?? 'atomic';
       const rank = graphOwn(options, 'rankRoots');
       if (rank !== undefined && typeof rank !== 'function') throw new TypeError();
       const impactRank = graphOwn(options, 'rankImpact');
@@ -139,7 +143,7 @@ export class Session {
             expired = this.stopGap(id);
           finish(expired ? { gap: expired } : { value });
         } catch (error) {
-          finish({ gap: gap(error instanceof AdmissionError ? error.code : 'invalid-data', id) });
+          finish({ gap: gap(admissionCode(error) ?? 'invalid-data', id) });
         }
       };
       this.controller.signal.addEventListener('abort', abort, { once: true });
@@ -152,7 +156,7 @@ export class Session {
         // Observe native Promises by intrinsic, never assimilate a payload's `then` getter.
         if (!observePromise(returned, accept, () => finish({ gap: gap('unavailable', id) }))) accept(returned);
       } catch (error) {
-        finish({ gap: gap(error instanceof AdmissionError ? error.code : 'unavailable', id) });
+        finish({ gap: gap(admissionCode(error) ?? 'unavailable', id) });
       }
     });
     // A local allowance refusal is not evidence and must never poison the other direction's cache.

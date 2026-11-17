@@ -1,15 +1,17 @@
 import type { Adjacency, Attention, Gap, GapCode, GraphEdge, NodeId } from './types.js';
 
-import { boundedList, boundedName, EvidenceRefusal, ownData } from '../evidence/admission.js';
+import { boundedList, boundedName, EvidenceRefusal, evidenceRefusalCode, ownData } from '../evidence/admission.js';
 import { isGapCode } from '../evidence/codes.js';
-import { admitMarks, ATTENTION_LIMITS } from '../evidence/marks.js';
+import { admitMarks, ATTENTION_LIMITS, retainValidMarks, type MarkProjection } from '../evidence/marks.js';
 
+const admissionFamily = Symbol();
 /** Graph-port refusals carry their code through Session; loader refusals are handled at the record boundary. */
 export class AdmissionError extends EvidenceRefusal {
   constructor(readonly code: GapCode = 'invalid-data') {
-    super(code, 'Invalid cause evidence');
+    super(code, 'Invalid cause evidence', admissionFamily);
   }
 }
+export const admissionCode = (error: unknown): GapCode | undefined => evidenceRefusalCode(error, admissionFamily);
 /**
  * Only ordinary native promise wrappers belong to the async host contract.
  * An own constructor could run an accessor/species during intrinsic then().
@@ -58,6 +60,12 @@ export const refs = (value: unknown): readonly string[] =>
   graphList(value, ATTENTION_LIMITS.refs, (item) => graphName(item, ATTENTION_LIMITS.refLength));
 export function attention(value: unknown): readonly Attention[] {
   return admitMarks(value, { refuse: refuseGraph, descriptors: graphDescriptors });
+}
+/** Query-only policy; strict attention remains the native/PROV admission contract. */
+export function attentionProjection(value: unknown, mode: 'atomic' | 'retain-valid'): MarkProjection {
+  return mode === 'retain-valid'
+    ? retainValidMarks(value, { refuse: refuseGraph, descriptors: graphDescriptors })
+    : Object.freeze({ marks: attention(value), rejected: false });
 }
 export function gaps(value: unknown): readonly Gap[] {
   return graphList(value, 32, (item) => {
