@@ -7,7 +7,7 @@
  * nothing. Every refused row goes to `unread` by position, with a reason that names a field and never echoes the file.
  */
 
-import { EvidenceRefusal } from '../evidence/admission.js';
+import { EvidenceRefusal, evidenceRefusalCode } from '../evidence/admission.js';
 import type { GapCode } from '../evidence/codes.js';
 import { executionIndexOf } from '../ids/runtimeStageId.js';
 import type { LogAddress } from '../memory/eventPosition.js';
@@ -25,10 +25,12 @@ import {
 } from './kinds.js';
 import type { RunEvidenceUnread, RunEvidenceWhy, StoredDecision, StoredStop } from './rows.js';
 
+const refusalReasons = new WeakMap<object, string>();
 /** A refusal with a fixed reason of its own. Any other refusal is named by its row. */
 class Refusal extends EvidenceRefusal {
   constructor(reason: string, code: GapCode = 'invalid-data') {
     super(code, reason);
+    refusalReasons.set(this, reason);
   }
 }
 
@@ -80,7 +82,7 @@ export interface LogFold {
 }
 
 function codeOf(error: unknown): GapCode {
-  return error instanceof EvidenceRefusal ? error.code : 'invalid-data';
+  return evidenceRefusalCode(error) ?? 'invalid-data';
 }
 
 function refused(fold: LogFold, channels: readonly Channel[], index: number, reason: string, code: GapCode): void {
@@ -183,7 +185,11 @@ function readCommit(fold: LogFold, entry: unknown, index: number, a: Admission):
 }
 
 function refusedRow(fold: LogFold, channels: readonly Channel[], index: number, label: string, error: unknown): void {
-  const reason = error instanceof Refusal ? error.message : `${label} (${codeOf(error)})`;
+  const held =
+    error !== null && (typeof error === 'object' || typeof error === 'function')
+      ? refusalReasons.get(error)
+      : undefined;
+  const reason = held ?? `${label} (${codeOf(error)})`;
   refused(fold, channels, index, reason, codeOf(error));
 }
 

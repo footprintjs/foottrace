@@ -13,7 +13,15 @@ import type {
   RecordScopeHost,
   RecordScopeLoader,
 } from './recordTypes.js';
-import { addressKey, addressOf, recordList, recordOwn, projectLoaded, RecordRefusal } from './recordValidation.js';
+import {
+  addressKey,
+  addressOf,
+  recordList,
+  recordOwn,
+  projectLoaded,
+  recordRefusalCode,
+  RecordRefusal,
+} from './recordValidation.js';
 import type { Gap } from './types.js';
 
 interface ScopeLoadState {
@@ -55,7 +63,7 @@ function admitLoadedScope(
       admitGaps(extra.map((code) => ({ code, evidence: [] }))).map((gap) => gap.code),
     );
   } catch (error) {
-    throw error instanceof RecordRefusal ? error : new RecordRefusal();
+    throw recordRefusalCode(error) === undefined ? new RecordRefusal() : error;
   }
   if (performance.now() >= request.deadline) {
     request.controller.abort();
@@ -86,7 +94,7 @@ function startScopeWork(
       request.controller.abort();
       return { failure: 'timeout' };
     }
-    return { failure: error instanceof RecordRefusal ? error.code : 'unavailable' };
+    return { failure: recordRefusalCode(error) ?? 'unavailable' };
   });
   // A timed-out host operation retains its slot until it settles; repeated timeouts cannot grow an unbounded I/O pool.
   void work.then(
