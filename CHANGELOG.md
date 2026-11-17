@@ -1,5 +1,25 @@
 # Changelog
 
+## 2.1.0 — 2026-11-17
+
+### Added
+
+- Host graphs can provide evidence-bearing gaps on an adjacency page. Parent-page reasons
+  stay in backward coverage and children-page reasons stay in impact; node-wide gaps keep
+  their existing meaning. The existing 32 supplied reasons per node and direction are
+  shared between both channels, and incomplete legacy pages retain their fixed fallback.
+- Add an explicit native paired read with bounded, owned literal location
+  segments from the same winning traversal. Existing value/source and canonical
+  read contracts remain unchanged; unsupported or withheld metadata is omitted
+  without upgrading coverage or privacy claims.
+- Add bounded input/output subflow observations to cause record graphs, retaining exact native mount, log, write and source-cutoff identities. Known untraced child seeds now report a scope boundary. Observed-prefix links remain conservative; native inventories stay partial and whole-scope fan-out collections are not traversed. Local commit logs and standalone scope semantics remain unchanged.
+
+### Fixed
+
+- Cause, record and provenance readers classify library refusals by their original
+  private identity and code. Unusual thrown objects cannot run error-property or
+  prototype inspection during fallback handling; existing fixed gap answers remain.
+
 ## 2.0.0 — 2026-11-17
 
 ### Added
