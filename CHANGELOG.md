@@ -1,5 +1,20 @@
 # Changelog
 
+## 2.1.0 — 2026-11-17
+
+### Added
+
+- Host graphs can provide evidence-bearing gaps on an adjacency page. Parent-page reasons
+  stay in backward coverage and children-page reasons stay in impact; node-wide gaps keep
+  their existing meaning. The existing 32 supplied reasons per node and direction are
+  shared between both channels, and incomplete legacy pages retain their fixed fallback.
+
+### Fixed
+
+- Cause, record and provenance readers classify library refusals by their original
+  private identity and code. Unusual thrown objects cannot run error-property or
+  prototype inspection during fallback handling; existing fixed gap answers remain.
+
 ## 2.0.0 — 2026-11-17
 
 ### Added
