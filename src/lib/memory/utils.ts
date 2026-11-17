@@ -15,6 +15,7 @@
  * Zero external dependencies.
  */
 
+import { completeLocationCandidate } from './readLocation.js';
 import { setOwnValue } from '../capture/ownData.js';
 import { isDeniedSegment, nativeGet as _get, observedOwn, type NativeReadObservation } from './pathOps.js';
 import { DELIM } from '../record-paths/codec.js';
@@ -183,9 +184,15 @@ export function getNestedValue(
   observation?: NativeReadObservation,
 ): any {
   const node = path && path.length > 0 ? _get(root, path, undefined, observation) : root;
-  if (field === undefined || node === undefined) return node;
-  if (node !== null && typeof node === 'object' && observedOwn(node, field, observation)) {
-    return node[field];
+  if (field === undefined || node === undefined) {
+    completeLocationCandidate(observation, node !== undefined);
+    return node;
   }
+  if (node !== null && typeof node === 'object' && observedOwn(node, field, observation)) {
+    const value = node[field];
+    completeLocationCandidate(observation, value !== undefined);
+    return value;
+  }
+  completeLocationCandidate(observation, false);
   return undefined;
 }

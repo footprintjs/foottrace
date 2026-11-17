@@ -137,7 +137,7 @@
     "test:coverage": "vitest run --coverage",
     "typecheck": "tsc -p tsconfig.test.json",
     "check:layering": "node scripts/check-layering.mjs",
-    "check:package": "publint && attw --pack --profile strict && tsc -p test/consumer/cause/tsconfig.json && tsc -p test/consumer/prov/tsconfig.json && tsc -p test/consumer/metadata/tsconfig.json && tsc -p test/consumer/values/tsconfig.json",
+    "check:package": "publint && attw --pack --profile strict && tsc -p test/consumer/cause/tsconfig.json && tsc -p test/consumer/prov/tsconfig.json && tsc -p test/consumer/metadata/tsconfig.json && tsc -p test/consumer/values/tsconfig.json && tsc -p test/consumer/read-location/tsconfig.json && node --test test/consumer/read-location/packed.test.cjs",
     "lint": "eslint 'src/**/*.ts'",
     "format": "prettier --check 'src/**/*.ts' 'test/**/*.ts'",
     "test:examples": "tsc -p examples/tsconfig.json",

@@ -1,7 +1,6 @@
 import { READ_ATTEMPT_LIMIT } from '../evidence/readAttempts.js';
 import { parseAttemptId } from '../ids/attemptId.js';
 import { normaliseStateKey } from '../record-paths/codec.js';
-import { sourceOwner } from '../read-sources/admission.js';
 import { captureFor } from '../read-sources/bindings.js';
 /**
  * RecordFrame — the record half of one stage's frame (C3, L3).
@@ -44,7 +43,6 @@ import { captureFor } from '../read-sources/bindings.js';
  */
 
 import { isViewRow } from './builtOn.js';
-import type { OpVerb } from './deltaEncoding.js';
 import type { EventLog } from './EventLog.js';
 import { nativeGet, type NativeReadObservation } from './pathOps.js';
 import type { SourceFrame } from '../read-sources/capture.js';
@@ -52,41 +50,19 @@ import type { ReadSourceOccurrence, ReadSourceOwner } from '../read-sources/type
 import { type CommitStamp, recordCommit } from './recordCommit.js';
 import type { SharedMemory } from './SharedMemory.js';
 import { TransactionBuffer } from './TransactionBuffer.js';
-import type { CommitValuesMode, WriteProvenanceMode } from './types.js';
 
-/**
- * The two dials that shape a frame's bytes: the log's value encoding and the per-row read prefix.
- * Held by reference and swapped whole (`useEncoding`), never edited — the engine hands the run's
- * frozen policy itself. The nested-read mode is captured by `useEncoding` so a retained alias
- * cannot change the selected name encoding. Absent: `'full'` values and no read prefix.
- */
-export interface RecordEncoding {
-  readonly commitValues: CommitValuesMode;
-  readonly writeProvenance: WriteProvenanceMode;
-  /**
-   * Canonical, addressed read prefixes from `readTracked` / `readWithSource`.
-   * Default false keeps historical user-level dotted `noteRead` keys. Silent
-   * `read` calls stay silent; this dial does not inspect objects or collect reads.
-   */
-  readonly nestedReadTracking?: boolean;
-}
-
-/**
- * What a stage can stage (law 7) — the transaction buffer's op verbs (`deltaEncoding.ts · OpVerb`), one
- * union. `append` is not one: it is how the log encodes a grown array (`'delta'`).
- */
-export type WriteVerb = OpVerb;
-
-/**
- * The bytes of a redaction verdict for one write (law 7): which of it the commit log and the redacted
- * mirror must not show. The engine decides it (`redaction.ts · decideWrite`); the frame only writes it.
- */
-export interface WriteScrub {
-  /** The whole value: `LOG_PLACEHOLDER` at the write's path. */
-  readonly whole?: boolean;
-  /** Dot-paths INSIDE the value, relative to it: `LOG_PLACEHOLDER` at each one that holds a value. */
-  readonly fields?: readonly string[];
-}
+import type { RecordEncoding, WriteScrub, WriteVerb } from './RecordFrame/types.js';
+export type { RecordEncoding, WriteScrub, WriteVerb } from './RecordFrame/types.js';
+import { readSource, type SourceReadPort } from './RecordFrame/sourceRead.js';
+import { trackedRead, type TrackedReadPort } from './RecordFrame/trackedRead.js';
+import { absolutePath } from './RecordFrame/absolutePath.js';
+import {
+  beginLocatedRead,
+  endLocatedRead,
+  resetLocationCandidate,
+  takeLocation,
+  type LocatedRead,
+} from './readLocation.js';
 
 export class RecordFrame {
   /** Live committed state — the heap every frame of the run shares. */
@@ -179,16 +155,7 @@ export class RecordFrame {
 
   /** The absolute path of `key` under `path`: the frame's address, then the path, then the key. */
   at(path: readonly string[], key: string): string[] {
-    // Every read and write builds one. The root's is the path and the key; under an address, an
-    // index loop — the double spread `[...address, ...path, key]` costs a third more per call
-    // (as `utils · pathUnder` found for the address and the path).
-    const address = this._address;
-    if (address.length === 0) return [...path, key];
-    const out = new Array<string>(address.length + path.length + 1);
-    for (let i = 0; i < address.length; i++) out[i] = address[i];
-    for (let i = 0; i < path.length; i++) out[address.length + i] = path[i];
-    out[out.length - 1] = key;
-    return out;
+    return absolutePath(this._address, path, key);
   }
 
   /**
@@ -362,15 +329,7 @@ export class RecordFrame {
    * read has no precise key to retain. Internal/silent reads must use `read`.
    */
   readTracked(path: string[], key?: string): unknown {
-    if (!this.nestedReadTracking) {
-      const value = this.read(path, key);
-      if (key !== undefined) this.noteRead(path, key);
-      return value;
-    }
-    const observation: NativeReadObservation = { dataOnly: true };
-    const value = this.readValue(path, key, observation);
-    if (key !== undefined) this.noteCanonicalRead(path, key, observation);
-    return value;
+    return trackedRead(this.#sourcePort(path, key), key);
   }
 
   /** One native read plus a bounded value-free descriptor. Existing string verdicts are unchanged.
@@ -382,77 +341,69 @@ export class RecordFrame {
     owner: ReadSourceOwner,
     privacy: 'visible' | 'redacted' | (() => 'visible' | 'redacted') = 'visible',
   ): { value: unknown; occurrence: ReadSourceOccurrence | undefined } {
-    const bound = captureFor(this.state);
-    const capture = bound && bound === captureFor(this.log) ? bound : undefined;
-    const ordinal = capture?.begin(this.#sourceFrame?.clock);
-    let value: unknown;
-    let occurrence: ReadSourceOccurrence | undefined;
-    let frame: SourceFrame | undefined;
-    let selected: readonly string[] = [];
-    let rootKey: unknown;
-    let source: import('../read-sources/types.js').ReadSource | undefined;
-    let admittedOwner: ReadSourceOwner | undefined;
+    const { value, occurrence } = readSource(this.#sourcePort(path, key), path, key, owner, privacy);
+    return { value, occurrence };
+  }
+
+  /** One winning native traversal plus optional owned literal segments. No privacy-history or semantic-use claim. */
+  readWithLocation(path: string[], key?: string): LocatedRead;
+  readWithLocation(
+    path: string[],
+    key: string,
+    owner: ReadSourceOwner,
+    privacy?: 'visible' | 'redacted' | (() => 'visible' | 'redacted'),
+  ): LocatedRead;
+  readWithLocation(
+    path: string[],
+    key?: string,
+    owner?: ReadSourceOwner,
+    privacy: 'visible' | 'redacted' | (() => 'visible' | 'redacted') = 'visible',
+  ): LocatedRead {
+    const observation = beginLocatedRead();
     try {
-      // Admit/copy identities before user accessors or the verdict can mutate them.
-      try {
-        if (capture) admittedOwner = sourceOwner(owner);
-      } catch {
-        capture?.poison();
-      }
-      const observation: NativeReadObservation = { dataOnly: true };
-      try {
-        this.firstTouch();
-        frame = this.#sourceFrame;
-        value = this.readValue(path, key, capture || this.nestedReadTracking ? observation : undefined);
-        if (this.nestedReadTracking) this.noteCanonicalRead(path, key, observation);
-      } catch (error) {
-        capture?.poison();
-        throw error;
-      }
-      try {
-        selected = [...(observation.selectedAddress ?? this._address)];
-        rootKey = path.length ? path[0] : key;
-        if (capture) {
-          if (selected.length > 64 || typeof rootKey !== 'string' || rootKey.length > 1024)
-            capture.gap('budget-exhausted');
-          else
-            source = capture.select(
-              frame,
-              [...selected, rootKey],
-              value,
-              observation.dataOnly,
-              observation.live === true,
-              'visible',
-              path.length !== 0,
-            );
-        }
-      } catch {
-        capture?.poison();
-      }
-      // No value/source is passed to this callback. Do not await, coerce or retain its result.
-      let verdict: 'visible' | 'redacted';
-      try {
-        verdict = typeof privacy === 'function' ? privacy() : privacy;
-      } catch (error) {
-        capture?.poison();
-        throw error;
-      }
-      if (verdict !== 'visible')
-        source = { kind: 'unavailable', reason: verdict === 'redacted' ? 'redacted' : 'capture-failed' };
-      occurrence =
-        capture && source && admittedOwner
-          ? capture.retain(ordinal, frame, rootKey, selected, admittedOwner, source)
-          : undefined;
-      return { value, occurrence };
+      const result =
+        arguments.length >= 3
+          ? readSource(
+              this.#sourcePort(path, key as string),
+              path,
+              key as string,
+              owner as ReadSourceOwner,
+              privacy,
+              observation,
+            )
+          : { value: trackedRead(this.#sourcePort(path, key), key, observation), occurrence: undefined, visible: true };
+      const location = takeLocation(observation, key, result.value, result.visible);
+      return Object.freeze({
+        value: result.value,
+        occurrence: result.occurrence,
+        ...(location === undefined ? {} : { location }),
+      });
     } finally {
-      if (!occurrence) capture?.omitted(frame, admittedOwner);
-      capture?.finish(ordinal);
+      endLocatedRead(observation);
     }
+  }
+
+  #sourcePort(path: string[], key?: string): SourceReadPort & TrackedReadPort {
+    return {
+      capture: () => {
+        const bound = captureFor(this.state);
+        return bound && bound === captureFor(this.log) ? bound : undefined;
+      },
+      sourceFrame: () => this.#sourceFrame,
+      touch: () => this.firstTouch(),
+      read: (observation) => this.readValue(path, key, observation),
+      tracks: () => this.nestedReadTracking,
+      track: (observation) => this.noteCanonicalRead(path, key as string, observation),
+      plainRead: () => this.read(path, key),
+      legacyNote: () => this.noteRead(path, key as string),
+      address: () => this._address,
+    };
   }
 
   private readValue(path: string[], key?: string, observation?: NativeReadObservation): unknown {
     const address = this._address;
     const at = this.at(path, key as string);
+    resetLocationCandidate(observation);
     const fromSnapshot = this.buffer
       ? this.buffer.get(at, undefined, observation)
       : nativeGet(this.firstTouch(), at, undefined, observation);
@@ -462,6 +413,7 @@ export class RecordFrame {
       return fromSnapshot;
     }
     if (observation) observation.live = true;
+    resetLocationCandidate(observation);
     this.sawAt(this.log?.length);
     const live = this.state.getValue(this._address, path, key, observation);
     // Tier 2 after the first write: keep the diff base exact (see above).

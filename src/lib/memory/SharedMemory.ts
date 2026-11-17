@@ -19,6 +19,7 @@
  * wrote), not O(state).
  */
 
+import { resetLocationCandidate } from './readLocation.js';
 import { mergeContextWins, ownedRootOf, ownSpine, type NativeReadObservation } from './pathOps.js';
 import { captureFor } from '../read-sources/bindings.js';
 import type { MemoryPatch, TraceEntry } from './types.js';
@@ -90,12 +91,14 @@ export class SharedMemory {
    */
   getValue(address?: readonly string[], path?: string[], key?: string, observation?: NativeReadObservation): any {
     const { globalPath, runPath } = getRunAndGlobalPaths(address, path);
+    resetLocationCandidate(observation);
     const value = runPath ? getNestedValue(this.context, runPath, key, observation) : undefined;
     if (typeof value !== 'undefined') {
       if (observation) observation.selectedAddress = address;
       return value;
     }
     if (observation) observation.selectedAddress = [];
+    resetLocationCandidate(observation);
     return getNestedValue(this.context, globalPath, key, observation);
   }
 

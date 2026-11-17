@@ -260,3 +260,7 @@ or unkeyed digest is consistency evidence, not authentication or truth. Hosts ow
 tenant authorization, native/saved-history admission and any trusted signature.
 With `readSources` absent or `undefined`, legacy query and export results retain
 their existing bytes and meaning.
+
+For separately owned literal member segments from the same native read, see
+[native read locations](read-locations.md). Precise location metadata does not
+upgrade a root/composite source occurrence or establish complete read coverage.
