@@ -1,5 +1,6 @@
 import { READ_ATTEMPT_LIMIT } from '../evidence/readAttempts.js';
 import { parseAttemptId } from '../ids/attemptId.js';
+import { normaliseStateKey } from '../record-paths/codec.js';
 import { sourceOwner } from '../read-sources/admission.js';
 import { captureFor } from '../read-sources/bindings.js';
 /**
@@ -27,8 +28,9 @@ import { captureFor } from '../read-sources/bindings.js';
  *   4. LAZY BUFFER. The buffer is built at the first write — on the first-touch base, at the address,
  *      under the encoding. A frame that never writes builds none, and its commit is the empty bundle.
  *   5. READ KEYS. Under `writeProvenance: 'reads-prefix'` every noted read puts its user-level key
- *      (dotted for a nested path) on the frame's list, once, in order; each staged row carries a copy
- *      of the list as it stands when the row is staged.
+ *      (dotted for a nested path) on the frame's list, once, in order. Opt-in `nestedReadTracking`
+ *      instead uses `readTracked` to collect the canonical selected address during the native read.
+ *      Each staged row carries the list as it stands when the row is staged.
  *   6. COMMIT, RELEASE, DISCARD. `commit` takes the buffer's payload (none = the empty commit), then
  *      the names, and hands both to `recordCommit`. `release` drops the buffer and the base; a frame
  *      touched again re-anchors on the state as it stands then. The readKeys list survives a release,
@@ -55,11 +57,18 @@ import type { CommitValuesMode, WriteProvenanceMode } from './types.js';
 /**
  * The two dials that shape a frame's bytes: the log's value encoding and the per-row read prefix.
  * Held by reference and swapped whole (`useEncoding`), never edited — the engine hands the run's
- * frozen policy itself. Absent: `'full'` values and no read prefix.
+ * frozen policy itself. The nested-read mode is captured by `useEncoding` so a retained alias
+ * cannot change the selected name encoding. Absent: `'full'` values and no read prefix.
  */
 export interface RecordEncoding {
   readonly commitValues: CommitValuesMode;
   readonly writeProvenance: WriteProvenanceMode;
+  /**
+   * Canonical, addressed read prefixes from `readTracked` / `readWithSource`.
+   * Default false keeps historical user-level dotted `noteRead` keys. Silent
+   * `read` calls stay silent; this dial does not inspect objects or collect reads.
+   */
+  readonly nestedReadTracking?: boolean;
 }
 
 /**
@@ -90,6 +99,8 @@ export class RecordFrame {
   private _address: readonly string[];
   /** The two dials (law 4, 5); absent → the record's defaults. */
   private encoding?: RecordEncoding;
+  /** Selected name encoding, owned separately from the producer's policy reference. */
+  private nestedReadTracking = false;
   /**
    * The committed generation at the frame's FIRST touch (law 2) — held by REFERENCE, never cloned.
    * See {@link firstTouch} for the algorithm and the immutability invariant that makes a bare
@@ -104,6 +115,8 @@ export class RecordFrame {
    * "last write's prefix == union" hold in delta mode.
    */
   private readKeys?: Set<string>;
+  /** A frame never mixes name encodings, including after release/discard. */
+  private readKeysCanonical?: boolean;
   /** Bounded recency window, independent of the monotonic state readKeys prefix. */
   private readAttempts?: Set<string>;
   private readAttemptsOmitted?: number;
@@ -141,9 +154,17 @@ export class RecordFrame {
     this._address = address;
   }
 
-  /** The two dials the frame encodes under from its next buffer and its next read on (law 4, 5). */
+  /**
+   * The dials the frame encodes under from its next buffer/read (law 4, 5).
+   * Once a prefix name was captured, its encoding cannot change on this frame.
+   * Clearing a failed attempt's reads does not change that encoding contract.
+   */
   useEncoding(encoding: RecordEncoding): void {
+    const nestedReadTracking = encoding.nestedReadTracking === true;
+    if (this.readKeysCanonical !== undefined && this.readKeysCanonical !== nestedReadTracking)
+      throw new TypeError('Read-key encoding cannot change after prefix capture');
     this.encoding = encoding;
+    this.nestedReadTracking = nestedReadTracking;
   }
 
   /** The redacted mirror, if the run keeps one. */
@@ -333,6 +354,25 @@ export class RecordFrame {
     return this.readValue(path, key);
   }
 
+  /**
+   * Read once and retain its name in the per-write prefix. With
+   * `nestedReadTracking`, the SAME traversal selects the canonical absolute
+   * path, including address-to-root fallback. No second value read is needed.
+   * Otherwise this is the historical `read` then `noteRead` sequence. A keyless
+   * read has no precise key to retain. Internal/silent reads must use `read`.
+   */
+  readTracked(path: string[], key?: string): unknown {
+    if (!this.nestedReadTracking) {
+      const value = this.read(path, key);
+      if (key !== undefined) this.noteRead(path, key);
+      return value;
+    }
+    const observation: NativeReadObservation = { dataOnly: true };
+    const value = this.readValue(path, key, observation);
+    if (key !== undefined) this.noteCanonicalRead(path, key, observation);
+    return value;
+  }
+
   /** One native read plus a bounded value-free descriptor. Existing string verdicts are unchanged.
    * An optional value-free verdict runs synchronously AFTER the read, once, even without capture.
    * Its exception is the caller's exception; collector failure must never swallow or replay it. */
@@ -363,7 +403,8 @@ export class RecordFrame {
       try {
         this.firstTouch();
         frame = this.#sourceFrame;
-        value = this.readValue(path, key, capture ? observation : undefined);
+        value = this.readValue(path, key, capture || this.nestedReadTracking ? observation : undefined);
+        if (this.nestedReadTracking) this.noteCanonicalRead(path, key, observation);
       } catch (error) {
         capture?.poison();
         throw error;
@@ -410,11 +451,13 @@ export class RecordFrame {
   }
 
   private readValue(path: string[], key?: string, observation?: NativeReadObservation): unknown {
+    const address = this._address;
     const at = this.at(path, key as string);
     const fromSnapshot = this.buffer
       ? this.buffer.get(at, undefined, observation)
       : nativeGet(this.firstTouch(), at, undefined, observation);
     if (typeof fromSnapshot !== 'undefined' || this.buffer?.hasHardWrite(at)) {
+      if (observation) observation.selectedAddress = address;
       this.sawAt(this.#pinnedAt);
       return fromSnapshot;
     }
@@ -426,11 +469,26 @@ export class RecordFrame {
     return live;
   }
 
-  /** Put a tracked read's user-level key on the readKeys list (law 5) — a no-op unless the frame keeps one. */
+  /**
+   * Put a tracked read's historical user-level key on the prefix (law 5).
+   * Canonical mode uses the native `readTracked` / `readWithSource` traversal,
+   * so this legacy notification is a no-op there: a name alone cannot select
+   * an address without repeating the value read or guessing its source.
+   */
   noteRead(path: readonly string[], key: string): void {
-    if (this.encoding?.writeProvenance === 'reads-prefix') {
+    if (this.encoding?.writeProvenance === 'reads-prefix' && !this.nestedReadTracking) {
+      this.readKeysCanonical ??= false;
       (this.readKeys ??= new Set()).add(path.length > 0 ? [...path, key].join('.') : key);
     }
+  }
+
+  private noteCanonicalRead(path: readonly string[], key: string, observation: NativeReadObservation): void {
+    if (this.encoding?.writeProvenance !== 'reads-prefix') return;
+    // `readValue` always selects this from the actual native traversal. Never
+    // invent the frame's address when no selection was observed.
+    if (observation.selectedAddress === undefined) return;
+    this.readKeysCanonical ??= true;
+    (this.readKeys ??= new Set()).add(normaliseStateKey([...observation.selectedAddress, ...path, key]));
   }
 
   /** Record a delivered answer's native identity under the existing reads-prefix dial.
@@ -460,6 +518,18 @@ export class RecordFrame {
   readGlobal(key: string) {
     this.sawAt(this.log?.length);
     return this.state.getValue([], [], key);
+  }
+
+  /**
+   * Read live ROOT state once and retain that known root name. Mapper reads
+   * use this port rather than the frame's pinned view or address fallback.
+   * `readGlobal` remains silent. Failed reads retain no prefix.
+   */
+  readGlobalTracked(key: string) {
+    const value = this.readGlobal(key);
+    if (this.nestedReadTracking) this.noteCanonicalRead([], key, { dataOnly: true, selectedAddress: [] });
+    else this.noteRead([], key);
+    return value;
   }
 
   /**

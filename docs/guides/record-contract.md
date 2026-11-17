@@ -292,7 +292,7 @@ a flowchart wrote, and it keeps the laws above by construction:
 |---|---|---|
 | `SharedMemory` | The heap: live state, one generation per commit | — |
 | `EventLog` | The log: the base (a copy of the state it is given) and the bundles, each frozen as it is recorded | 1, 2 |
-| `RecordFrame` | One step: its reads (`read`, and `noteRead` to name a read on the rows), its writes (`write(path, value, verb, scrub?)` at `at(path, key)`), and one `commit` | 3, 4 |
+| `RecordFrame` | One step: its reads (`read`, and `noteRead` to name a legacy read; opt-in `readTracked` for canonical addressed names), its writes (`write(path, value, verb, scrub?)` at `at(path, key)`), and one `commit` | 3, 4 |
 
 - **One step, one frame, one bundle.** `commit(stampOf)` records the bundle
   the step staged — the empty bundle when it staged nothing — named by the
@@ -305,6 +305,21 @@ a flowchart wrote, and it keeps the laws above by construction:
   `commitValues: 'full' | 'delta'` (a grown array is an `append` of its tail
   under `'delta'`) and `writeProvenance: 'off' | 'reads-prefix'` (each row
   names the reads noted before it, `readKeys`).
+- **Canonical nested-read names are opt-in.** Add `nestedReadTracking: true`
+  to the encoding and use `readTracked(path, key)` during the real read. The
+  same native traversal chooses the actual address or root fallback and uses
+  the write-path codec, preserving dots inside literal segments. `readWithSource`
+  also retains these names in this mode. `read` stays silent; legacy `noteRead`
+  cannot choose an address and is a no-op in canonical mode. Keep the producer's
+  mode declaration with the log: historical dotted names without it are
+  ambiguous and cannot be repaired by parsing dots. This adds no automatic
+  object traversal, derivation proof or cross-log handoff evidence.
+  Mappers that deliberately read current root state use `readGlobalTracked(key)`;
+  it retains the known root name from the single live read, while `readGlobal`
+  remains silent.
+  A frame refuses to change its read-name encoding after capturing a prefix,
+  including after release/discard. Producers must keep the mode fixed across
+  every frame and resumed leg of a capture before declaring the log canonical.
 - **A secret** is written with the bytes of a redaction verdict: the scrub
   `{ whole: true }` puts `'REDACTED'` in the log at the path, and
   `{ fields: [...] }` at each field inside the value; the heap keeps the value.
