@@ -1,5 +1,24 @@
 # Changelog
 
+## 2.0.0 — 2026-11-17
+
+### Added
+
+- Add opt-in canonical addressed read prefixes through `RecordEncoding.nestedReadTracking`, `RecordFrame.readTracked` and `readGlobalTracked`. The actual native traversal selects namespace or root fallback without repeating the value read. A frame refuses to change name encoding after prefix capture. Default dotted prefixes and silent reads remain unchanged. Producers must keep the encoding consistent across a capture and retain its declaration with saved logs; ambiguous legacy dotted names and missing leaf reads cannot be reconstructed.
+- Add opt-in bounded host observation records through the existing sink framing, with exact expected subject matching, once-only closure and explicit missing/omitted evidence. Structural completeness remains unauthenticated and does not establish causation, customer delivery or durability.
+
+- Migration: observation gaps and omissions add eleven keys to `HONESTY_CODES` and widen exported `HonestyCode`; exhaustive switches and `Record<HonestyCode, ...>` consumers must handle the added cases. This requires a major release even though observation capture is opt-in and existing stored wire formats are unchanged. The separately reviewed release proposal must run the major-version consumer compatibility process; this feature does not bump or publish a package version.
+- Allow read-source records to declare canonical run-evidence collection on the same log and sink.
+- Add opt-in bounded content-addressed value tables and strict canonical JSON through `foottrace/values` and `foottrace/canonical-json`; callers supply the inline redaction law before hashing, omitted writes are disclosed, missing references are refused by name, and old records remain unchanged.
+
+### Fixed
+
+- Keep reads and attention partial when a known execution has no retained first-commit annotation, including a failed first commit or a continuation alone.
+
+### Documentation
+
+- Identify canonical nested-read prefixes and repeated-value entry points as Foottrace 2.0 APIs instead of leaving their availability marked unreleased. Canonical nested-read prefixes first appear in 2.0.0-rc.1; stable 1.x packages do not provide these additions.
+
 ## 1.16.0 — 2026-11-12
 
 ### Added
