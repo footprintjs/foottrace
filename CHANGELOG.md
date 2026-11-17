@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.0.1 — 2026-11-17
+
+### Fixed
+
+- Cause, record and provenance readers classify library refusals by their original
+  private identity and code. Unusual thrown objects cannot run error-property or
+  prototype inspection during fallback handling; existing fixed gap answers remain.
+
 ## 2.0.0 — 2026-11-17
 
 ### Added
