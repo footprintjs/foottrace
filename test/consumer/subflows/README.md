@@ -12,6 +12,10 @@ snapshots into partial inventories and checks mapped inputs/outputs, saved
 cutoffs before a later overwrite, literal keys, inverse edges, reordered
 fan-out, nested collection ownership, default-off flags and private serving.
 Both installed CJS and ESM reader exports consume the same real records.
+Raw handoff status/limitations are checked before graph admission. Every
+generated input in input-only, all and fanout-only modes must bind the actual
+child seed tuple and writes; redacted views must retain explicit privacy gaps
+and withhold source names in every enabled mode.
 Expected observed links remain conservative; whole-scope collections stay
 nontraversable. No hand-authored handoff DTO replaces the real producer.
 

@@ -103,6 +103,33 @@ function allNodes(graph, scope) {
 }
 const context = () => ({ signal: new AbortController().signal });
 
+/** Check capture claims before graph admission can conservatively discard them. */
+export function assertCaptureState(handoff, { privateView = false, selectorUnavailable = false } = {}) {
+  assert.ok(handoff, 'the actual handoff is required');
+  assert.equal(handoff.version, 1);
+  assert.equal(handoff.attribution, 'observed-read-prefix');
+  assert.equal(handoff.status, privateView || selectorUnavailable ? 'partial' : 'captured');
+  assert.deepEqual(new Set(handoff.limitations), new Set([
+    ...(privateView ? ['privacy-active'] : []),
+    ...(selectorUnavailable ? ['selector-reads-unavailable'] : []),
+  ]));
+  if (privateView || selectorUnavailable)
+    assert.ok(handoff.writes.every((write) => write.reads.length === 0), 'withheld source names must stay absent');
+}
+
+/** A generated dispatch must bind its one real seed, never merely name a child log. */
+export function assertSeedBinding(mount, child) {
+  const handoff = mount.inputHandoff;
+  assert.ok(handoff, 'actual generated seed capture is required');
+  assert.deepEqual(handoff.child.address, mount.child);
+  assert.equal(handoff.child.commitIdx, 0);
+  assert.equal(handoff.child.runtimeStageId, mount.runtimeStageId);
+  assert.equal(handoff.child.runtimeStageId, child.commitLog[0].runtimeStageId);
+  assert.equal(child.commitLog[0].idx, 0);
+  assert.deepEqual(new Set(handoff.writes.map((write) => write.path)),
+    new Set(child.commitLog[0].trace.map((row) => row.path)), 'all real seed writes must bind exactly');
+}
+
 async function checkMapped(scopes, cause, reader, paths, { input, output, privateView = false }) {
   const graph = cause.createRecordGraph(scopes);
   const { root, mount, child } = mappedMount(scopes);
@@ -116,7 +143,8 @@ async function checkMapped(scopes, cause, reader, paths, { input, output, privat
   const late = node(graph, root, laterIdx, literalSource);
   if (input) {
     const handoff = mount.inputHandoff;
-    assert.ok(handoff, 'actual mapped seed capture is required');
+    assertCaptureState(handoff, { privateView });
+    assertSeedBinding(mount, child);
     assert.equal(handoff.parent.beforeCommitIdx <= laterIdx, true);
     const write = handoff.writes.find((entry) => entry.path === 'seed');
     if (privateView) assert.ok(write === undefined || write.reads.length === 0);
@@ -136,7 +164,7 @@ async function checkMapped(scopes, cause, reader, paths, { input, output, privat
   } else assert.equal(own(mount, 'inputHandoff'), false);
   if (output) {
     const handoff = mount.outputHandoff;
-    assert.ok(handoff, 'actual mapping output capture is required');
+    assertCaptureState(handoff, { privateView });
     assert.equal(handoff.child.beforeCommitIdx, child.commitLog.length);
     const target = node(graph, root, handoff.parent.commitIdx, 'answer');
     const writer = node(graph, child, uniqueStage(child, 'Compute'), 'childAnswer');
@@ -248,21 +276,33 @@ export async function verifyNativeSubflows(produce, engine, readers) {
       const generated = generatedInputs(scopes);
       assert.ok(generated.length > 0, 'real dispatched branches are required');
       for (const mount of generated) {
-        if (name === 'input-only') {
-          assert.equal(mount.inputHandoff.status, 'partial');
-          assert.ok(mount.inputHandoff.limitations.includes('selector-reads-unavailable'));
-          assert.ok(mount.inputHandoff.writes.every((write) => write.reads.length === 0));
-        }
         if (name === 'output-only') assert.equal(own(mount, 'inputHandoff'), false);
+        else {
+          assertSeedBinding(mount, scopeAt(scopes, mount.child));
+          assertCaptureState(mount.inputHandoff, { selectorUnavailable: name === 'input-only' });
+          if (name !== 'input-only')
+            assert.ok(mount.inputHandoff.writes.every((write) => write.reads.includes('items')),
+              'selector-enabled dispatch must retain its actual parent-root prefix');
+        }
+      }
+      const privateScopes = nativeScopes(redacted, reader);
+      await checkMapped(privateScopes, cause, reader, paths, {
+        input: name === 'all' || name === 'input-only',
+        output: name === 'all' || name === 'output-only',
+        privateView: true,
+      });
+      for (const mount of generatedInputs(privateScopes)) {
+        if (name === 'output-only') assert.equal(own(mount, 'inputHandoff'), false);
+        else {
+          assertSeedBinding(mount, scopeAt(privateScopes, mount.child));
+          assertCaptureState(mount.inputHandoff, { privateView: true, selectorUnavailable: name === 'input-only' });
+        }
       }
       if (name === 'all' || name === 'fanout-only') {
         await checkCollections(scopes, cause, reader);
-        const privateScopes = nativeScopes(redacted, reader);
         await checkCollections(privateScopes, cause, reader, true);
-        if (name === 'all')
-          await checkMapped(privateScopes, cause, reader, paths, { input: true, output: true, privateView: true });
       } else assert.ok(scopes.every((scope) => scope.subflows.collections.length === 0));
-      completed.push({ name, format, scopes: scopes.length, rawAndRedacted: name === 'all' || name === 'fanout-only' });
+      completed.push({ name, format, scopes: scopes.length, rawAndRedacted: true });
     }
   }
   return { protocol: 'native-subflow-provenance-fixture-v1', completed };
