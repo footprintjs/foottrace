@@ -11,7 +11,9 @@ const own = (object, key) => Object.hasOwn(object, key);
 function nativeExecution(reader, id) {
   if (!reader.isExecutionKey(id)) return false;
   const parsed = reader.parseRuntimeStageId(id);
-  return reader.buildRuntimeStageId(parsed.stageId, parsed.executionIndex, parsed.subflowPath) === id;
+  return parsed.stageId.length > 0 &&
+    Number.isSafeInteger(parsed.executionIndex) && parsed.executionIndex >= 0 &&
+    reader.buildRuntimeStageId(parsed.stageId, parsed.executionIndex, parsed.subflowPath) === id;
 }
 
 /** Adapt actual native records; never infer a complete inventory from a snapshot map. */
@@ -74,24 +76,34 @@ export function nativeScopes(snapshot, reader) {
 function node(graph, scope, commitIdx, key) {
   return graph.nodeId(scope.address, { runtimeStageId: scope.commitLog[commitIdx].runtimeStageId, commitIdx, key });
 }
-function uniqueStage(scope, name) {
-  const matches = scope.commitLog.flatMap((bundle, index) => (bundle.stage === name ? [index] : []));
-  assert.equal(matches.length, 1, `fixture stage ${name} must identify exactly one real commit`);
-  return matches[0];
+export function uniqueStage(scope, fullStageId, reader) {
+  const matches = scope.commitLog.flatMap((bundle, index) =>
+    bundle.stageId === fullStageId ? [index] : []);
+  assert.equal(matches.length, 1, `fixture stage ${fullStageId} must identify exactly one real commit`);
+  const index = matches[0];
+  const bundle = scope.commitLog[index];
+  assert.ok(nativeExecution(reader, bundle.runtimeStageId), 'fixture work must name an actual execution');
+  assert.equal(reader.stageIdOf(bundle.runtimeStageId), fullStageId, 'stage and execution namespaces must agree');
+  assert.equal(bundle.idx, index, 'fixture work must retain its actual commit index');
+  return index;
 }
 function scopeAt(scopes, address) {
   const found = scopes.find((scope) => sameAddress(scope.address, address));
   assert.ok(found, 'actual referenced scope is required');
   return found;
 }
-function mappedMount(scopes) {
+function fixtureMount(owner, fullStageId, reader) {
+  const matches = owner.subflows.mounts.filter((mount) =>
+    reader.stageIdOf(mount.runtimeStageId) === fullStageId);
+  assert.equal(matches.length, 1, `fixture mount ${fullStageId} must identify exactly one actual child`);
+  return matches[0];
+}
+function mappedMount(scopes, reader) {
   const root = scopes.find((scope) => scope.address.drillPath.length === 0);
-  const matches = root.subflows.mounts.filter((mount) => {
-    const nested = scopeAt(scopes, mount.child);
-    return nested.commitLog.some((bundle) => bundle.stage === 'Compute');
-  });
-  assert.equal(matches.length, 1, 'fixture must contain its one actual mapped child');
-  return { root, mount: matches[0], child: scopeAt(scopes, matches[0].child) };
+  const mount = fixtureMount(root, 'mapped', reader);
+  const child = scopeAt(scopes, mount.child);
+  uniqueStage(child, reader.joinPath('mapped', 'compute'), reader);
+  return { root, mount, child };
 }
 function allNodes(graph, scope) {
   return new Set(
@@ -132,9 +144,9 @@ export function assertSeedBinding(mount, child) {
 
 async function checkMapped(scopes, cause, reader, paths, { input, output, privateView = false }) {
   const graph = cause.createRecordGraph(scopes);
-  const { root, mount, child } = mappedMount(scopes);
-  const sourceIdx = uniqueStage(root, 'Source');
-  const laterIdx = uniqueStage(root, 'Later write');
+  const { root, mount, child } = mappedMount(scopes, reader);
+  const sourceIdx = uniqueStage(root, 'source', reader);
+  const laterIdx = uniqueStage(root, 'later', reader);
   const literalSource = paths.normaliseStateKey(['literal.source']);
   assert.equal(reader.commitValueAt(root.commitLog, sourceIdx, literalSource), 7);
   assert.equal(reader.commitValueAt(root.commitLog, laterIdx, literalSource), 999);
@@ -167,7 +179,7 @@ async function checkMapped(scopes, cause, reader, paths, { input, output, privat
     assertCaptureState(handoff, { privateView });
     assert.equal(handoff.child.beforeCommitIdx, child.commitLog.length);
     const target = node(graph, root, handoff.parent.commitIdx, 'answer');
-    const writer = node(graph, child, uniqueStage(child, 'Compute'), 'childAnswer');
+    const writer = node(graph, child, uniqueStage(child, reader.joinPath('mapped', 'compute'), reader), 'childAnswer');
     const parents = await graph.parents(target, context());
     assert.equal(
       parents.edges.some((edge) => edge.nodeId === writer),
@@ -187,17 +199,17 @@ async function checkMapped(scopes, cause, reader, paths, { input, output, privat
 async function checkCollections(scopes, cause, reader, privateView = false) {
   const graph = cause.createRecordGraph(scopes);
   const root = scopes.find((scope) => scope.address.drillPath.length === 0);
-  const nested = scopes.filter((scope) => scope.commitLog.some((bundle) => bundle.stage === 'Nested items'));
-  assert.equal(nested.length, 1);
+  const nested = scopeAt(scopes, fixtureMount(root, 'nested', reader).child);
+  uniqueStage(nested, reader.joinPath('nested', 'nested-items'), reader);
   assert.equal(root.subflows.collections.length, 1, 'root collection belongs once to root');
-  assert.equal(nested[0].subflows.collections.length, 1, 'nested collection belongs once to its own parent');
+  assert.equal(nested.subflows.collections.length, 1, 'nested collection belongs once to its own parent');
   const answers = reader.commitValueAt(root.commitLog, root.commitLog.length - 1, 'answers');
   assert.deepEqual(
     answers.map((answer) => answer.branchAnswer),
     [3, 9],
     'ITEMS order follows the reversed selector',
   );
-  for (const owner of [root, nested[0]])
+  for (const owner of [root, nested])
     for (const collection of owner.subflows.collections) {
       assert.equal(owner.subflows.status, 'partial');
       assert.equal(collection.totalItems, 2);
@@ -242,10 +254,19 @@ function assertDisabled(snapshot) {
     assert.equal(own(result.treeContext, 'fanoutCollections'), false);
   }
 }
-function generatedInputs(scopes) {
-  return scopes
-    .flatMap((scope) => scope.subflows.mounts)
-    .filter((mount) => scopeAt(scopes, mount.child).commitLog.some((bundle) => bundle.stage === 'Branch'));
+function generatedInputs(scopes, reader) {
+  const root = scopes.find((scope) => scope.address.drillPath.length === 0);
+  const nested = scopeAt(scopes, fixtureMount(root, 'nested', reader).child);
+  // These are the fixture's declared/generated static IDs, not display suffixes or invented execution counters.
+  return [
+    [root, ['fan~0', 'fan~1']],
+    [nested, [reader.joinPath('nested', 'nested-fan~0'), reader.joinPath('nested', 'nested-fan~1')]],
+  ].flatMap(([owner, stageIds]) =>
+    stageIds.map((stageId) => {
+      const mount = fixtureMount(owner, stageId, reader);
+      uniqueStage(scopeAt(scopes, mount.child), reader.joinPath(stageId, 'branch'), reader);
+      return mount;
+    }));
 }
 
 /** Fixed reviewed producer and both real installed reader formats; no source self-reference. */
@@ -273,8 +294,8 @@ export async function verifyNativeSubflows(produce, engine, readers) {
         input: name === 'all' || name === 'input-only',
         output: name === 'all' || name === 'output-only',
       });
-      const generated = generatedInputs(scopes);
-      assert.ok(generated.length > 0, 'real dispatched branches are required');
+      const generated = generatedInputs(scopes, reader);
+      assert.equal(generated.length, 4, 'all four known root/nested dispatched branches are required');
       for (const mount of generated) {
         if (name === 'output-only') assert.equal(own(mount, 'inputHandoff'), false);
         else {
@@ -291,7 +312,7 @@ export async function verifyNativeSubflows(produce, engine, readers) {
         output: name === 'all' || name === 'output-only',
         privateView: true,
       });
-      for (const mount of generatedInputs(privateScopes)) {
+      for (const mount of generatedInputs(privateScopes, reader)) {
         if (name === 'output-only') assert.equal(own(mount, 'inputHandoff'), false);
         else {
           assertSeedBinding(mount, scopeAt(privateScopes, mount.child));

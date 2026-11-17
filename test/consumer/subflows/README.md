@@ -12,6 +12,9 @@ snapshots into partial inventories and checks mapped inputs/outputs, saved
 cutoffs before a later overwrite, literal keys, inverse edges, reordered
 fan-out, nested collection ownership, default-off flags and private serving.
 Both installed CJS and ESM reader exports consume the same real records.
+Fixture locations bind exact full native stage IDs and their execution tuples,
+including the mount namespace. Display labels may change when mounted and are
+not record identities; a matching suffix or label never selects a child.
 Raw handoff status/limitations are checked before graph admission. Every
 generated input in input-only, all and fanout-only modes must bind the actual
 child seed tuple and writes; redacted views must retain explicit privacy gaps

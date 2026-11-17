@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { assertCaptureState, assertSeedBinding } from './verify-native.mjs';
+import { assertCaptureState, assertSeedBinding, uniqueStage } from './verify-native.mjs';
+import * as readerIds from '../../../src/lib/ids/runtimeStageId';
+import { nativeExecution as canonicalNativeExecution } from '../../../src/lib/ids/nativeExecution';
 
 // Contract controls for the protocol assertions, not a substitute for the installed native pair.
 function fixture() {
@@ -70,4 +72,49 @@ describe('native protocol capture assertions', () => {
       expect(() => assertSeedBinding(mount, child)).toThrow();
     },
   );
+});
+
+describe('native fixture stage identity', () => {
+  // Projection from the real source-producer diagnostic after the inspected hosted pair failed.
+  // Display names are prefixed on mount; neither display spelling nor a suffix identifies a record.
+  const row = () => ({
+    idx: 1,
+    stage: 'mapped/Compute',
+    stageId: 'mapped/compute',
+    runtimeStageId: 'mapped/compute#2',
+  });
+  it('binds the namespaced work by exact native stage ID', () => {
+    const scope = {
+      commitLog: [{ idx: 0, stage: 'Mapped child', stageId: 'mapped', runtimeStageId: 'mapped#1' }, row()],
+    };
+    expect(uniqueStage(scope, 'mapped/compute', readerIds)).toBe(1);
+  });
+  it('rejects display-label lookalikes in a different namespace', () => {
+    const other = {
+      ...row(),
+      idx: 0,
+      stage: 'mapped/compute',
+      stageId: 'other/compute',
+      runtimeStageId: 'other/compute#2',
+    };
+    expect(() => uniqueStage({ commitLog: [other] }, 'mapped/compute', readerIds)).toThrow();
+  });
+  it.each([
+    'other/compute#2',
+    'mapped/compute',
+    'mapped/compute#NaN',
+    'mapped/compute#-1',
+    'mapped/compute#9007199254740992',
+  ])('rejects an inconsistent execution tuple: %s', (runtimeStageId) => {
+    const other = { ...row(), idx: 0, stage: 'mapped/compute', runtimeStageId };
+    expect(() => uniqueStage({ commitLog: [other] }, 'mapped/compute', readerIds)).toThrow();
+  });
+  it('does not admit an empty local stage that the canonical record owner rejects', () => {
+    expect(canonicalNativeExecution('#2')).toBeUndefined();
+    const other = { ...row(), idx: 0, stageId: '', runtimeStageId: '#2' };
+    expect(() => uniqueStage({ commitLog: [other] }, '', readerIds)).toThrow();
+  });
+  it('still rejects duplicate matching work records', () => {
+    expect(() => uniqueStage({ commitLog: [row(), { ...row(), idx: 2 }] }, 'mapped/compute', readerIds)).toThrow();
+  });
 });

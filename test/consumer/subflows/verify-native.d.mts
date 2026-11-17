@@ -4,3 +4,4 @@ export function assertCaptureState(
   options?: { privateView?: boolean; selectorUnavailable?: boolean },
 ): void;
 export function assertSeedBinding(mount: unknown, child: unknown): void;
+export function uniqueStage(scope: unknown, fullStageId: string, reader: unknown): number;
