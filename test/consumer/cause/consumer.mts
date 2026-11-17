@@ -39,3 +39,23 @@ const answerRow: TraceEntry = { path: 'result', verb: 'set', readAttempts: ['fet
 // @ts-expect-error Answer ceilings are immutable through the public record type.
 answerRow.readAttempts?.push('fetch#0@1.2@1');
 void answerRow;
+
+import type { Adjacency, Gap } from 'foottrace/cause';
+const parentPage: Adjacency = {
+  edges: [],
+  complete: false,
+  gaps: [{ code: 'not-collected', nodeId: 'source', evidence: ['proof:missing-parents'] }],
+};
+const legacyPage: Adjacency = { edges: [], complete: true };
+const directionalGraph: CauseGraph = {
+  parents: () => parentPage,
+  children: () => legacyPage,
+  attention: () => [mark],
+  gaps: () => [],
+};
+void explain(directionalGraph, 'source', { includeBackward: true });
+// @ts-expect-error Page reasons remain immutable at the public door.
+parentPage.gaps?.push({ code: 'redacted', evidence: [] });
+// @ts-expect-error Adjacency reasons use the existing closed gap vocabulary.
+const invalidPageReason: Gap = { code: 'invented', evidence: [] };
+void invalidPageReason;

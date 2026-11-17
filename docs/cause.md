@@ -144,6 +144,54 @@ The backward result is frozen and carries its own confidence and gaps, captured 
 
 This option reuses the existing walk; it dispatches no additional graph/storage calls and adds no separate work allowance or deadline. Omitted or `false` keeps the existing result shape, bytes and graph-call order. Other values and accessor properties are refused before graph dispatch. Storage authorization, exact run/visit binding, ID privacy and application-specific labels remain the host's responsibility.
 
+### Explain coverage for one adjacency page
+
+A host graph may put evidence-bearing reasons on the page returned by `parents()` or
+`children()` using optional `Adjacency.gaps`. Parent-page reasons belong only to backward
+coverage; children-page reasons belong only to impact. `CauseGraph.gaps(id)` remains
+node-wide and contributes to both directions, including for callers using it directly.
+
+```ts
+import { explain, type Adjacency, type CauseGraph } from 'foottrace/cause';
+
+const missingParents: Adjacency = {
+  edges: [], complete: false,
+  gaps: [{ code: 'not-collected', nodeId: 'source', evidence: ['proof:missing-parent-page'] }],
+};
+// A host returning missingParents from parents() withholds a confirmed root.
+
+const graph: CauseGraph = {
+  parents: () => ({ edges: [], complete: true }),
+  children: () => ({
+    edges: [], complete: false,
+    gaps: [{ code: 'not-collected', nodeId: 'source', evidence: ['proof:missing-child-page'] }],
+  }),
+  attention: () => [{ kind: 'error', reason: 'ERROR_RECORDED', evidence: ['proof:source'] }],
+  gaps: () => [],
+};
+const result = await explain(graph, 'source', { includeBackward: true });
+// rootCause: 'source'; backward.confidence: 'complete'.
+// impact and overall confidence: 'incomplete'; retain the child-page proof reference.
+```
+
+`complete` describes edge enumeration. Explicit admitted reasons remain limitations even
+when it is `true`. For `false` with an omitted or empty page list, the existing fixed
+`not-collected` reason at that node remains. A nonempty page list explains that incomplete
+page without a second reference-free fallback. Node-wide reasons do not replace this
+page-specific fallback. Omission preserves the legacy admitted page's object shape.
+
+Each visited node and direction permits at most 32 supplied reasons jointly across the
+node-wide list and its current page, counted before de-duplication. Node-wide admission
+occurs first and is cached; parents and children retain separate cached pages. An overflow
+refuses that whole page with fixed `invalid-data`, retaining admitted node-wide reasons.
+Existing diagnostic refusals do not consume supplied-reason slots. Each reason retains
+the existing closed code vocabulary, 16-reference limit and 512-character reference bound;
+all admitted records and lists are detached and frozen. Other walk limits are unchanged.
+
+This host-port addition does not migrate the native record adapter's direct node-wide
+`gaps()` contract or restore missing record evidence. Hosts still own authorization and
+must supply non-secret identities and evidence references.
+
 ### Leave work capacity for impact
 
 For a query with many ancestors and a small downstream graph, setting only `backward` is usually enough. Impact then uses whatever remains of the total budget:
