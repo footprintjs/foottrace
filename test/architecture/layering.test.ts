@@ -146,3 +146,79 @@ describe('the optional cause reader uses the same closed fence', () => {
     expect(result.problems).toContain('src/lib/cause/recordAdapter.ts: external dependency footprintjs');
   });
 });
+
+describe('the refusal identity fence', () => {
+  const fixtures = {
+    'src/lib/evidence/admission.ts': 'export class EvidenceRefusal extends Error {}',
+    'src/lib/cause/recordValidation.ts':
+      "import { EvidenceRefusal } from '../evidence/admission.js'; export class RecordRefusal extends EvidenceRefusal {}",
+    'src/lib/cause/validation.ts':
+      "import { EvidenceRefusal } from '../evidence/admission.js'; export class AdmissionError extends EvidenceRefusal {}",
+    'src/lib/prov/budget.ts':
+      "import { EvidenceRefusal } from '../evidence/admission.js'; export class ProvDataRefusal extends EvidenceRefusal {}",
+  };
+  const check = (source: string, extra: Record<string, string> = {}) => {
+    const files = { ...fixtures, ...extra, 'src/probe.ts': source };
+    return probe(files, Object.fromEntries(Object.keys(files).map((name) => [name, 0])));
+  };
+
+  it.each([
+    ["import { EvidenceRefusal } from './lib/evidence/admission.js';", 'EvidenceRefusal'],
+    ["import { RecordRefusal } from './lib/cause/recordValidation.js';", 'RecordRefusal'],
+    ["import { AdmissionError } from './lib/cause/validation.js';", 'AdmissionError'],
+    ["import { ProvDataRefusal } from './lib/prov/budget.js';", 'ProvDataRefusal'],
+    ["import { RecordRefusal as Renamed } from './lib/cause/recordValidation.js';", 'Renamed'],
+    ["import * as record from './lib/cause/recordValidation.js';", 'record.RecordRefusal'],
+    ["import { RecordRefusal } from './lib/cause/recordValidation.js'; const Refusal = RecordRefusal;", 'Refusal'],
+    ["import { RecordRefusal } from './lib/cause/recordValidation.js';", '(RecordRefusal as typeof RecordRefusal)'],
+    [
+      "import { RecordRefusal } from './lib/cause/recordValidation.js'; class SpecificRefusal extends RecordRefusal {}",
+      'SpecificRefusal',
+    ],
+  ])('refuses dynamic classification through %s %s', (imports, constructor) => {
+    const result = check(`${imports} export const classify = (value: unknown) => value instanceof ${constructor};`);
+    expect(result.problems).toEqual([
+      'src/probe.ts: dynamic EvidenceRefusal classification; use the family identity reader',
+    ]);
+  });
+
+  it('refuses a re-exported family constructor', () => {
+    const result = check(
+      "import { Refusal } from './bridge.js'; export const classify = (value: unknown) => value instanceof Refusal;",
+      {
+        'src/bridge.ts': "export { RecordRefusal as Refusal } from './lib/cause/recordValidation.js';",
+      },
+    );
+    expect(result.problems).toEqual([
+      'src/probe.ts: dynamic EvidenceRefusal classification; use the family identity reader',
+    ]);
+  });
+
+  it('accepts normal construction, subclasses, comments and string content', () => {
+    expect(
+      check(`
+        import { RecordRefusal } from './lib/cause/recordValidation.js';
+        export class SpecificRefusal extends RecordRefusal {}
+        export const make = () => new SpecificRefusal();
+        export const fail = () => { throw new RecordRefusal(); };
+        // value instanceof RecordRefusal is not executable here.
+        export const text = 'value instanceof RecordRefusal';
+        export const template = \`value instanceof RecordRefusal\`;
+      `).problems,
+    ).toEqual([]);
+  });
+
+  it('accepts unrelated classes, including the same names and ordinary Error checks', () => {
+    expect(
+      check(`
+        class EvidenceRefusal extends Error {}
+        class RecordRefusal extends EvidenceRefusal {}
+        class AdmissionError extends Error {}
+        class ProvDataRefusal extends Error {}
+        export const classify = (value: unknown) =>
+          value instanceof EvidenceRefusal || value instanceof RecordRefusal ||
+          value instanceof AdmissionError || value instanceof ProvDataRefusal || value instanceof Error;
+      `).problems,
+    ).toEqual([]);
+  });
+});

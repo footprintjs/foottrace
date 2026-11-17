@@ -31,3 +31,13 @@ export type { RecordScope, RecordGraphOptions, RecordCauseGraph, RecordNode } fr
 export type { StoredRecordScope, StoredRecordHost } from './lib/cause/storedRecordAdapter.js';
 
 export type { RecordReadSources, ReadSourceExecution } from './lib/cause/recordSources.js';
+export type {
+  RecordFanoutCollection,
+  RecordFanoutLimitation,
+  RecordInputHandoff,
+  RecordInputLimitation,
+  RecordOutputHandoff,
+  RecordOutputLimitation,
+  RecordSubflowMount,
+  RecordSubflows,
+} from './lib/cause/recordSubflows.js';
