@@ -174,6 +174,22 @@ describe('RecordFrame canonical tracked read prefixes', () => {
     expect(log.list()[0].trace[0].readKeys).toEqual([nestedReadTracking ? 'cfg\u001fn' : 'cfg.n']);
   });
 
+  it.each([false, true])(
+    'keeps the selected prefix encoding when the caller mutates its options, starting canonical %s',
+    (nestedReadTracking) => {
+      const { frame, log } = setup({ cfg: { n: 1 } });
+      const encoding = { ...CANONICAL, nestedReadTracking };
+      frame.useEncoding(encoding);
+      frame.readTracked(['cfg'], 'n');
+      encoding.nestedReadTracking = !nestedReadTracking;
+      frame.readTracked(['cfg'], 'n');
+      frame.write(['result'], 1, 'set');
+      commit(frame);
+      expect(log.list()[0].trace[0].readKeys).toEqual([nestedReadTracking ? 'cfg\u001fn' : 'cfg.n']);
+      expect(() => frame.useEncoding(encoding)).toThrow('Read-key encoding cannot change after prefix capture');
+    },
+  );
+
   it('allows mode selection before prefix capture and legacy encoding/dial changes', () => {
     const { frame, log } = setup({ cfg: { n: 1 } });
     frame.read(['cfg'], 'n'); // silent reads do not lock the mode

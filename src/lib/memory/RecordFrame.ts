@@ -57,7 +57,8 @@ import type { CommitValuesMode, WriteProvenanceMode } from './types.js';
 /**
  * The two dials that shape a frame's bytes: the log's value encoding and the per-row read prefix.
  * Held by reference and swapped whole (`useEncoding`), never edited — the engine hands the run's
- * frozen policy itself. Absent: `'full'` values and no read prefix.
+ * frozen policy itself. The nested-read mode is captured by `useEncoding` so a retained alias
+ * cannot change the selected name encoding. Absent: `'full'` values and no read prefix.
  */
 export interface RecordEncoding {
   readonly commitValues: CommitValuesMode;
@@ -98,6 +99,8 @@ export class RecordFrame {
   private _address: readonly string[];
   /** The two dials (law 4, 5); absent → the record's defaults. */
   private encoding?: RecordEncoding;
+  /** Selected name encoding, owned separately from the producer's policy reference. */
+  private nestedReadTracking = false;
   /**
    * The committed generation at the frame's FIRST touch (law 2) — held by REFERENCE, never cloned.
    * See {@link firstTouch} for the algorithm and the immutability invariant that makes a bare
@@ -157,9 +160,11 @@ export class RecordFrame {
    * Clearing a failed attempt's reads does not change that encoding contract.
    */
   useEncoding(encoding: RecordEncoding): void {
-    if (this.readKeysCanonical !== undefined && this.readKeysCanonical !== (encoding.nestedReadTracking === true))
+    const nestedReadTracking = encoding.nestedReadTracking === true;
+    if (this.readKeysCanonical !== undefined && this.readKeysCanonical !== nestedReadTracking)
       throw new TypeError('Read-key encoding cannot change after prefix capture');
     this.encoding = encoding;
+    this.nestedReadTracking = nestedReadTracking;
   }
 
   /** The redacted mirror, if the run keeps one. */
@@ -357,7 +362,7 @@ export class RecordFrame {
    * read has no precise key to retain. Internal/silent reads must use `read`.
    */
   readTracked(path: string[], key?: string): unknown {
-    if (!this.encoding?.nestedReadTracking) {
+    if (!this.nestedReadTracking) {
       const value = this.read(path, key);
       if (key !== undefined) this.noteRead(path, key);
       return value;
@@ -398,8 +403,8 @@ export class RecordFrame {
       try {
         this.firstTouch();
         frame = this.#sourceFrame;
-        value = this.readValue(path, key, capture || this.encoding?.nestedReadTracking ? observation : undefined);
-        if (this.encoding?.nestedReadTracking) this.noteCanonicalRead(path, key, observation);
+        value = this.readValue(path, key, capture || this.nestedReadTracking ? observation : undefined);
+        if (this.nestedReadTracking) this.noteCanonicalRead(path, key, observation);
       } catch (error) {
         capture?.poison();
         throw error;
@@ -471,7 +476,7 @@ export class RecordFrame {
    * an address without repeating the value read or guessing its source.
    */
   noteRead(path: readonly string[], key: string): void {
-    if (this.encoding?.writeProvenance === 'reads-prefix' && !this.encoding.nestedReadTracking) {
+    if (this.encoding?.writeProvenance === 'reads-prefix' && !this.nestedReadTracking) {
       this.readKeysCanonical ??= false;
       (this.readKeys ??= new Set()).add(path.length > 0 ? [...path, key].join('.') : key);
     }
@@ -522,7 +527,7 @@ export class RecordFrame {
    */
   readGlobalTracked(key: string) {
     const value = this.readGlobal(key);
-    if (this.encoding?.nestedReadTracking) this.noteCanonicalRead([], key, { dataOnly: true, selectedAddress: [] });
+    if (this.nestedReadTracking) this.noteCanonicalRead([], key, { dataOnly: true, selectedAddress: [] });
     else this.noteRead([], key);
     return value;
   }
