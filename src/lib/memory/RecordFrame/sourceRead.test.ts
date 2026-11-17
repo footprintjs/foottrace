@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createReadSourceRecord, EventLog, RecordFrame, SharedMemory } from '../../write.js';
+import { createReadSourceRecord, EventLog, RecordFrame, SharedMemory } from '../../../write.js';
 
 const CANONICAL = { commitValues: 'full', writeProvenance: 'reads-prefix', nestedReadTracking: true } as const;
 const owner = { runtimeStageId: 'reader#0' };
@@ -37,18 +37,12 @@ describe('existing read doors retain their native behavior', () => {
     });
 
     it(`${kind} retains the winning local address and actual root fallback in canonical prefixes`, () => {
-      const { frame, log } = fixture(
-        { cfg: { fee: 5 }, runs: { item: { cfg: { amount: 30 } } } },
-        ['runs', 'item'],
-      );
+      const { frame, log } = fixture({ cfg: { fee: 5 }, runs: { item: { cfg: { amount: 30 } } } }, ['runs', 'item']);
       expect(read(kind, frame, ['cfg'], 'amount')).toBe(30);
       expect(read(kind, frame, ['cfg'], 'fee')).toBe(5);
       frame.write(frame.at([], 'total'), 35, 'set');
       commit(frame);
-      expect(log.list()[0].trace[0].readKeys).toEqual([
-        'runs\u001fitem\u001fcfg\u001famount',
-        'cfg\u001ffee',
-      ]);
+      expect(log.list()[0].trace[0].readKeys).toEqual(['runs\u001fitem\u001fcfg\u001famount', 'cfg\u001ffee']);
     });
 
     it(`${kind} preserves a getter's canonical prefix without another value read`, () => {
@@ -96,7 +90,9 @@ describe('existing read doors retain their native behavior', () => {
     it(`${kind} preserves an original getter failure and records no successful read`, () => {
       const { state, frame, log } = fixture();
       const failure = new Error('original read failure');
-      let reads = 0, privacy = 0, caught: unknown;
+      let reads = 0,
+        privacy = 0,
+        caught: unknown;
       Object.defineProperty(state.getState(), 'bad', {
         get() {
           reads++;
@@ -105,7 +101,11 @@ describe('existing read doors retain their native behavior', () => {
       });
       try {
         if (kind === 'tracked') frame.readTracked([], 'bad');
-        else frame.readWithSource([], 'bad', owner, () => { privacy++; return 'visible'; });
+        else
+          frame.readWithSource([], 'bad', owner, () => {
+            privacy++;
+            return 'visible';
+          });
       } catch (error) {
         caught = error;
       }
@@ -145,7 +145,9 @@ describe('existing readWithSource transaction ordering', () => {
     it(`preserves a privacy exception by identity after one read, capture=${captured}`, () => {
       const { state, frame, record } = sourceFixture(captured);
       const failure = new Error('original privacy failure');
-      let reads = 0, privacy = 0, caught: unknown;
+      let reads = 0,
+        privacy = 0,
+        caught: unknown;
       Object.defineProperty(state.getState(), 'n', {
         configurable: true,
         get() {
@@ -188,9 +190,13 @@ describe('existing readWithSource transaction ordering', () => {
 
   it('refuses an owner accessor without running it or skipping the value/privacy call', () => {
     const { frame, record } = sourceFixture(true);
-    let ownerReads = 0, privacy = 0;
+    let ownerReads = 0,
+      privacy = 0;
     const invalidOwner = Object.defineProperty({}, 'runtimeStageId', {
-      get() { ownerReads++; return 'reader#0'; },
+      get() {
+        ownerReads++;
+        return 'reader#0';
+      },
     });
     const result = frame.readWithSource([], 'n', invalidOwner as never, () => {
       privacy++;

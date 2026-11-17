@@ -82,6 +82,7 @@ export { RUN_EVIDENCE_LIMITS } from './lib/run-evidence/kinds.js';
 export type { CommitStamp } from './lib/memory/recordCommit.js';
 export type { RecordEncoding, WriteScrub, WriteVerb } from './lib/memory/RecordFrame.js';
 export { RecordFrame } from './lib/memory/RecordFrame.js';
+export type { LocatedRead } from './lib/memory/readLocation.js';
 export type { WriteProvenanceMode } from './lib/memory/types.js';
 
 export { deepFreeze, freezeRecord } from './lib/capture/freeze.js';

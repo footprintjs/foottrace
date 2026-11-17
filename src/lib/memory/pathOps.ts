@@ -20,6 +20,7 @@
  */
 
 import { putOwn } from '../capture/ownData.js';
+import { completeLocationCandidate, noteLocationSegment } from './readLocation.js';
 
 const DENIED = new Set(['__proto__', 'constructor', 'prototype']);
 
@@ -32,7 +33,9 @@ export interface NativeReadObservation {
 export function observedOwn(object: object, key: string | number, observation?: NativeReadObservation): boolean {
   if (!observation) return Object.prototype.hasOwnProperty.call(object, key);
   const descriptor = Object.getOwnPropertyDescriptor(object, key);
-  if (descriptor && !Object.hasOwn(descriptor, 'value')) observation.dataOnly = false;
+  const dataOnly = descriptor === undefined || Object.hasOwn(descriptor, 'value');
+  if (!dataOnly) observation.dataOnly = false;
+  noteLocationSegment(observation, key, dataOnly);
   return descriptor !== undefined;
 }
 
@@ -67,6 +70,7 @@ export function nativeGet(
     if (!observedOwn(curr, seg, observation)) return defaultValue;
     curr = curr[seg];
   }
+  completeLocationCandidate(observation, curr !== undefined);
   return curr === undefined ? defaultValue : curr;
 }
 
