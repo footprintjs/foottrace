@@ -15,6 +15,7 @@ import {
   names,
   recordOwn,
   RecordRefusal,
+  recordRefusalCode,
   spend,
 } from './recordValidation.js';
 
@@ -104,7 +105,7 @@ export function prepareRecordScope(
     subflows = prepareRecordSubflows(recordOwn(value, 'subflows'), address, log, budget, maximumScopes);
   } catch (error) {
     // A refused optional channel does not erase already admitted local commits.
-    subflows = { gaps: [error instanceof RecordRefusal ? error.code : 'invalid-data'] };
+    subflows = { gaps: [recordRefusalCode(error) ?? 'invalid-data'] };
   }
   const scope: PreparedRecordScope = {
     address,

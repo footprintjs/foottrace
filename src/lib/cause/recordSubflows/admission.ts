@@ -1,7 +1,7 @@
 import type { GapCode } from '../../evidence/codes.js';
 import type { LogAddress } from '../../memory/eventPosition.js';
 import type { CommitBundle } from '../../memory/types.js';
-import { RecordRefusal } from '../recordValidation.js';
+import { RecordRefusal, recordRefusalCode } from '../recordValidation.js';
 import { isNativeChild, nativeParentOf } from './identity.js';
 import {
   address,
@@ -330,6 +330,6 @@ export function prepareRecordSubflows(
       gaps: Object.freeze([...gaps]),
     });
   } catch (error) {
-    return Object.freeze({ gaps: Object.freeze([error instanceof RecordRefusal ? error.code : 'invalid-data']) });
+    return Object.freeze({ gaps: Object.freeze([recordRefusalCode(error) ?? 'invalid-data']) });
   }
 }

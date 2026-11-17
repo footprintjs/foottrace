@@ -19,6 +19,7 @@ import {
   recordOwn,
   projectLoaded,
   RecordRefusal,
+  recordRefusalCode,
   spend,
 } from './recordValidation.js';
 import type { Attention, Gap, GraphContext, MaybePromise } from './types.js';
@@ -176,7 +177,7 @@ export function createStoredRecordGraph(host: StoredRecordHost, options: RecordG
             subflows = recordOwn(loaded, 'subflows') as RecordScope['subflows'];
           } catch (error) {
             // Refusing this optional channel must not discard separately admitted local entries.
-            stored.push(error instanceof RecordRefusal ? error.code : 'invalid-data');
+            stored.push(recordRefusalCode(error) ?? 'invalid-data');
           }
           return {
             scope: {
