@@ -67,6 +67,21 @@ export function boundedList<T>(
     readonly translateArrayErrors?: boolean;
   },
 ): readonly T[] {
+  return boundedSlots(
+    value,
+    maximum,
+    (index) => read(ownData(value, String(index), options.refuse, options.descriptors)),
+    options,
+  );
+}
+
+/** Admit the outer list before a caller's slot policy runs. A slot policy never changes the raw allowance. */
+export function boundedSlots<T>(
+  value: unknown,
+  maximum: number,
+  read: (index: number) => T,
+  options: Parameters<typeof boundedList>[3],
+): readonly T[] {
   const { refuse, overflow, freeze, descriptors } = options;
   let array: boolean;
   if (options.translateArrayErrors) {
@@ -82,7 +97,7 @@ export function boundedList<T>(
   if (options.expectedLength !== undefined && length !== options.expectedLength) throw refuse();
   if (length > maximum) throw refuse(overflow);
   const result: T[] = [];
-  for (let index = 0; index < length; index++) result.push(read(ownData(value, String(index), refuse, descriptors)));
+  for (let index = 0; index < length; index++) result.push(read(index));
   return freeze ? Object.freeze(result) : result;
 }
 

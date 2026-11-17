@@ -8,6 +8,10 @@ root requirement imports do not load the optional cause algorithms.
 - `marks.ts` is the one admission of attention marks (a fixed reason, a named kind,
   evidence references only), shared by the writer's `about`, the run-evidence reader
   and the cause graph.
+  Its sealed `marks/` folder holds the shared schema and ordinary slot reader.
+  Generic cause queries alone can opt into retaining valid neighboring marks;
+  rejected slots remain explicit incomplete coverage. Strict writer, stored,
+  native record and PROV admission keeps the whole-batch contract.
 - `readAttempts.ts` holds the read-attempt window: `READ_ATTEMPT_LIMIT`, which
   `RecordFrame` keeps to, and `readAttemptWindow`, which the prov and cause readers
   use to admit `readAttemptsOmitted`.

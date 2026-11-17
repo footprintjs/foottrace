@@ -12,6 +12,7 @@ type Method = 'parents' | 'children' | 'attention' | 'gaps' | 'roots';
 export class Session {
   readonly limits: Required<WalkLimits>;
   readonly includeBackward: boolean;
+  readonly attentionAdmission: 'atomic' | 'retain-valid';
   readonly context: GraphContext;
   readonly controller = new AbortController();
   private readonly cache = new Map<string, Promise<Read<unknown>>>();
@@ -31,6 +32,9 @@ export class Session {
       const includeBackward = graphOwn(options, 'includeBackward');
       if (includeBackward !== undefined && typeof includeBackward !== 'boolean') throw new TypeError();
       this.includeBackward = includeBackward === true;
+      const admission = graphOwn(options, 'attentionAdmission');
+      if (admission !== undefined && admission !== 'atomic' && admission !== 'retain-valid') throw new TypeError();
+      this.attentionAdmission = admission ?? 'atomic';
       const rank = graphOwn(options, 'rankRoots');
       if (rank !== undefined && typeof rank !== 'function') throw new TypeError();
       const impactRank = graphOwn(options, 'rankImpact');

@@ -1,7 +1,7 @@
 import type { Gap, MarkedNode, NodeId, TraversedEdge } from './types.js';
 import { Session } from './session.js';
 import type { BudgetView } from './queryBudget.js';
-import { adjacency, attention, gap, gaps, uniqueGaps } from './validation.js';
+import { adjacency, attentionProjection, gap, gaps, uniqueGaps } from './validation.js';
 
 export interface Walk {
   readonly nodes: readonly NodeId[];
@@ -39,11 +39,14 @@ export async function walk(
       missing.push(stopped);
       break;
     }
-    const marked = await session.read(budget, 'attention', id, attention);
+    const marked = await session.read(budget, 'attention', id, (raw) =>
+      attentionProjection(raw, session.attentionAdmission),
+    );
     if (marked.gap) missing.push(marked.gap);
-    if (marked.value?.length) {
-      marks.push(Object.freeze({ nodeId: id, attention: marked.value }));
-      if (marked.value.some((item) => item.kind === 'not-collected')) missing.push(gap('not-collected', id));
+    if (marked.value?.rejected) missing.push(gap('invalid-data', id));
+    if (marked.value?.marks.length) {
+      marks.push(Object.freeze({ nodeId: id, attention: marked.value.marks }));
+      if (marked.value.marks.some((item) => item.kind === 'not-collected')) missing.push(gap('not-collected', id));
     }
     const coverage = await session.read(budget, 'gaps', id, gaps);
     if (coverage.gap) missing.push(coverage.gap);

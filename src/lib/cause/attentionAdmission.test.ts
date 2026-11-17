@@ -65,12 +65,15 @@ describe('opt-in generic attention admission', () => {
     expect(codes(list)).toEqual(['invalid-data']);
   });
 
-  it.each([{ raw: [] }, { raw: [bad] }, { raw: [bad, bad] }])('keeps empty and rejected-only lists distinct: %j', async ({ raw }) => {
-    const result = await attentionList(fixture(raw).graph, { ...retain, nodeIds: ['selected'] });
-    expect(result.nodes).toEqual([]);
-    expect(result.confidence).toBe(raw.length ? 'incomplete' : 'complete');
-    expect(codes(result)).toEqual(raw.length ? ['invalid-data'] : []);
-  });
+  it.each([{ raw: [] }, { raw: [bad] }, { raw: [bad, bad] }])(
+    'keeps empty and rejected-only lists distinct: %j',
+    async ({ raw }) => {
+      const result = await attentionList(fixture(raw).graph, { ...retain, nodeIds: ['selected'] });
+      expect(result.nodes).toEqual([]);
+      expect(result.confidence).toBe(raw.length ? 'incomplete' : 'complete');
+      expect(codes(result)).toEqual(raw.length ? ['invalid-data'] : []);
+    },
+  );
 
   for (const kind of ['hole', 'accessor'] as const) {
     it(`rejects a ${kind} slot without executing a getter or dropping valid neighbors`, async () => {
@@ -103,11 +106,14 @@ describe('opt-in generic attention admission', () => {
     expect(result.rootCause).toBe('selected');
   });
 
-  it.each([{ raw: null }, { raw: {} }, { raw: Object.setPrototypeOf([], null) }])('keeps outer shape refusal atomic: %j', async ({ raw }) => {
-    const result = await explain(fixture(raw).graph, 'selected', retain);
-    expect(result.attention).toEqual([]);
-    expect(codes(result)).toContain('invalid-data');
-  });
+  it.each([{ raw: null }, { raw: {} }, { raw: Object.setPrototypeOf([], null) }])(
+    'keeps outer shape refusal atomic: %j',
+    async ({ raw }) => {
+      const result = await explain(fixture(raw).graph, 'selected', retain);
+      expect(result.attention).toEqual([]);
+      expect(codes(result)).toContain('invalid-data');
+    },
+  );
 
   it('rejects only the mark with invalid reference caps or reference accessors', async () => {
     let gets = 0;
@@ -180,27 +186,46 @@ describe('opt-in generic attention admission', () => {
 
   it.each(['unknown', null, true, 1])('refuses an invalid runtime strategy before graph dispatch: %j', async (mode) => {
     const f = fixture([mark('first')]);
-    await expect(explain(f.graph, 'selected', { attentionAdmission: mode } as unknown as ExplainOptions)).rejects.toThrow(
+    await expect(
+      explain(f.graph, 'selected', { attentionAdmission: mode } as unknown as ExplainOptions),
+    ).rejects.toThrow('CAUSE_CONFIGURATION_INVALID');
+    await expect(attentionList(f.graph, { attentionAdmission: mode } as unknown as ExplainOptions)).rejects.toThrow(
       'CAUSE_CONFIGURATION_INVALID',
     );
-    await expect(
-      attentionList(f.graph, { attentionAdmission: mode } as unknown as ExplainOptions),
-    ).rejects.toThrow('CAUSE_CONFIGURATION_INVALID');
     expect(f.calls).toEqual([]);
   });
 
   it('does not inspect a thrown foreign value while retaining other slots', async () => {
     const inspections: string[] = [];
-    const foreign = new Proxy({}, {
-      get: () => (inspections.push('get'), undefined),
-      getPrototypeOf: () => (inspections.push('prototype'), null),
-      getOwnPropertyDescriptor: () => (inspections.push('descriptor'), undefined),
-    });
-    const broken = new Proxy({}, { getPrototypeOf: () => { throw foreign; } });
+    const foreign = new Proxy(
+      {},
+      {
+        get: () => (inspections.push('get'), undefined),
+        getPrototypeOf: () => (inspections.push('prototype'), null),
+        getOwnPropertyDescriptor: () => (inspections.push('descriptor'), undefined),
+      },
+    );
+    const broken = new Proxy(
+      {},
+      {
+        getPrototypeOf: () => {
+          throw foreign;
+        },
+      },
+    );
     const result = await explain(fixture([mark('first'), broken, mark('last')]).graph, 'selected', retain);
     expect(result.attention).toEqual([mark('first'), mark('last')]);
     expect(codes(result)).toContain('invalid-data');
     expect(inspections).toEqual([]);
+  });
+
+  it('refuses an option accessor without invoking it', async () => {
+    let gets = 0;
+    const options = Object.defineProperty({}, 'attentionAdmission', { get: () => (++gets, 'retain-valid') });
+    const f = fixture([mark('first')]);
+    await expect(explain(f.graph, 'selected', options)).rejects.toThrow('CAUSE_CONFIGURATION_INVALID');
+    expect(gets).toBe(0);
+    expect(f.calls).toEqual([]);
   });
 
   it('does not admit a partial result after cancellation during reflection', async () => {
@@ -220,7 +245,7 @@ describe('opt-in generic attention admission', () => {
     let now = 0;
     const clock = vi.spyOn(performance, 'now').mockImplementation(() => now);
     try {
-      const late = new Proxy({}, { getPrototypeOf: () => (now = 10, Object.prototype) });
+      const late = new Proxy({}, { getPrototypeOf: () => ((now = 10), Object.prototype) });
       const result = await explain(fixture([mark('first'), late, bad]).graph, 'selected', {
         ...retain,
         timeoutMs: 5,

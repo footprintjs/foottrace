@@ -112,6 +112,8 @@ export type RootStrategy = (
 /** Reorder all already discovered impact references; never inject or drop evidence. */
 export type ImpactStrategy = (nodes: readonly NodeId[], context: GraphContext) => MaybePromise<readonly NodeId[]>;
 export interface ExplainOptions extends WalkLimits {
+  /** Generic query marks only: retain valid neighbors with invalid-data coverage. Default atomic; stored/native input stays strict. */
+  readonly attentionAdmission?: 'atomic' | 'retain-valid';
   /** Return the existing bounded reverse-walk evidence. Omitted/false keeps the existing result shape. */
   readonly includeBackward?: boolean;
   /** Caps backward traversal and root ranking, without adding to the enclosing query budget. */
@@ -123,6 +125,8 @@ export interface ExplainOptions extends WalkLimits {
   readonly rankImpact?: ImpactStrategy;
 }
 export interface AttentionListOptions extends WalkLimits {
+  /** Generic query marks only: retain valid neighbors with invalid-data coverage. Default atomic; stored/native input stays strict. */
+  readonly attentionAdmission?: 'atomic' | 'retain-valid';
   readonly signal?: AbortSignal;
   readonly nodeIds?: readonly NodeId[];
 }
