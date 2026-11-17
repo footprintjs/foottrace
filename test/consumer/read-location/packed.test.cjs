@@ -133,6 +133,7 @@ test('the actual offline pack supports located reads in both public module forma
       });
       assert.equal(visible.value, 5);
       assert.deepEqual(visible.location, ['cfg', 'fee']);
+      assert.equal(privacy, 1);
       const redacted = frame.readWithLocation(['cfg'], 'fee', { runtimeStageId: 'reader#0' }, () => {
         privacy++; return 'redacted';
       });
