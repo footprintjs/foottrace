@@ -61,8 +61,10 @@ export const refs = (value: unknown): readonly string[] =>
 export function attention(value: unknown): readonly Attention[] {
   return admitMarks(value, { refuse: refuseGraph, descriptors: graphDescriptors });
 }
-export function gaps(value: unknown): readonly Gap[] {
-  return graphList(value, 32, (item) => {
+/** Existing caller-gap ceiling, shared by node-wide and page channels before de-duplication. */
+export const CALLER_GAP_LIMIT = 32;
+export function gaps(value: unknown, maximum = CALLER_GAP_LIMIT): readonly Gap[] {
+  return graphList(value, maximum, (item) => {
     plain(item);
     const code = graphOwn(item, 'code'),
       nodeId = graphOwn(item, 'nodeId');
@@ -74,7 +76,7 @@ export function gaps(value: unknown): readonly Gap[] {
     });
   });
 }
-export function adjacency(value: unknown, maximum: number): Adjacency {
+export function adjacency(value: unknown, maximum: number, maximumGaps = CALLER_GAP_LIMIT): Adjacency {
   plain(value);
   const complete = graphOwn(value, 'complete');
   if (typeof complete !== 'boolean') throw new AdmissionError();
@@ -101,7 +103,12 @@ export function adjacency(value: unknown, maximum: number): Adjacency {
     },
     'edge-limit',
   );
-  return Object.freeze({ edges, complete });
+  const suppliedGaps = graphOwn(value, 'gaps');
+  return Object.freeze({
+    edges,
+    complete,
+    ...(suppliedGaps === undefined ? {} : { gaps: gaps(suppliedGaps, maximumGaps) }),
+  });
 }
 export const nodeIds = (value: unknown, max: number): readonly NodeId[] =>
   graphList(value, max, (item) => graphName(item), 'node-limit');

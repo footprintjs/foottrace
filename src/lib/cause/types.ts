@@ -37,7 +37,14 @@ export interface GraphEdge {
 }
 export interface Adjacency {
   readonly edges: readonly GraphEdge[];
+  /** Complete edge enumeration does not override explicit confidence limitations. */
   readonly complete: boolean;
+  /**
+   * Coverage of this returned page only: parents affect backward, children affect impact.
+   * With node-wide gaps, at most 32 supplied entries are admitted per node/direction.
+   * Missing or empty reasons retain the incomplete-page not-collected fallback.
+   */
+  readonly gaps?: readonly Gap[];
 }
 export interface GraphContext {
   readonly signal: AbortSignal;
@@ -48,6 +55,7 @@ export interface CauseGraph {
   parents(id: NodeId, context: GraphContext): MaybePromise<Adjacency>;
   children(id: NodeId, context: GraphContext): MaybePromise<Adjacency>;
   attention(id: NodeId, context: GraphContext): MaybePromise<readonly Attention[]>;
+  /** Node-wide reasons apply to both directions; page-specific reasons belong to Adjacency.gaps. */
   gaps(id: NodeId, context: GraphContext): MaybePromise<readonly Gap[]>;
   /** Optional, bounded discovery seeds; attentionList can instead receive explicit nodeIds. */
   roots?(context: GraphContext): MaybePromise<readonly NodeId[]>;
