@@ -1,4 +1,4 @@
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { createRecordGraph, explain, type RecordScope } from '../../../cause.js';
 import { gaps as admitGaps } from '../validation.js';
 
@@ -78,20 +78,26 @@ for (const count of [14, 15, 16, 30, 31, 128]) {
 it.each([false, true])(
   'keeps the native 32-row frontier honest when local coverage adds a gap (missing=%s)',
   async (missing) => {
-    // 384 boundary refs +128 conservative refs exactly fill32 admitted rows. Local unknown coverage needs a33rd.
-    const scope = fanout(256, 127);
-    if (missing) Reflect.deleteProperty(scope, 'attention');
-    const { graph, selected } = reader(scope, undefined, true);
-    const raw = await graph.gaps(selected, { signal: new AbortController().signal });
-    expect(raw).toHaveLength(32);
-    expect(admitGaps(raw)).toEqual(raw);
-    expect(raw.some((gap) => gap.code === 'invalid-data')).toBe(false);
-    expect(raw.some((gap) => gap.code === 'truncated')).toBe(missing);
-    if (!missing) expect(raw.flatMap((gap) => gap.evidence)).toHaveLength(512);
-    const result = await explain(graph, selected, { includeBackward: true });
-    expect(result.gaps.some((gap) => gap.code === 'invalid-data')).toBe(false);
-    expect(result.backward!.gaps.some((gap) => gap.code === 'truncated')).toBe(missing);
-    expect(result.backward!.confidence).toBe('incomplete');
-    expect(result.rootCause).toBeUndefined();
+    // Row admission is independent of elapsed CPU time under coverage; deadline behavior has separate tests.
+    vi.useFakeTimers({ toFake: ['performance', 'setTimeout', 'clearTimeout'] });
+    try {
+      // 384 boundary refs +128 conservative refs exactly fill32 admitted rows. Local unknown coverage needs a33rd.
+      const scope = fanout(256, 127);
+      if (missing) Reflect.deleteProperty(scope, 'attention');
+      const { graph, selected } = reader(scope, undefined, true);
+      const raw = await graph.gaps(selected, { signal: new AbortController().signal });
+      expect(raw).toHaveLength(32);
+      expect(admitGaps(raw)).toEqual(raw);
+      expect(raw.some((gap) => gap.code === 'invalid-data')).toBe(false);
+      expect(raw.some((gap) => gap.code === 'truncated')).toBe(missing);
+      if (!missing) expect(raw.flatMap((gap) => gap.evidence)).toHaveLength(512);
+      const result = await explain(graph, selected, { includeBackward: true });
+      expect(result.gaps.some((gap) => gap.code === 'invalid-data')).toBe(false);
+      expect(result.backward!.gaps.some((gap) => gap.code === 'truncated')).toBe(missing);
+      expect(result.backward!.confidence).toBe('incomplete');
+      expect(result.rootCause).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
   },
 );
