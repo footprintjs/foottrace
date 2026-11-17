@@ -1,7 +1,7 @@
 import type { Gap, MarkedNode, NodeId, TraversedEdge } from './types.js';
 import { Session } from './session.js';
 import type { BudgetView } from './queryBudget.js';
-import { adjacency, attention, gap, gaps, uniqueGaps } from './validation.js';
+import { adjacency, attention, CALLER_GAP_LIMIT, gap, gaps, uniqueGaps } from './validation.js';
 
 export interface Walk {
   readonly nodes: readonly NodeId[];
@@ -48,13 +48,19 @@ export async function walk(
     const coverage = await session.read(budget, 'gaps', id, gaps);
     if (coverage.gap) missing.push(coverage.gap);
     if (coverage.value) missing.push(...coverage.value);
-    const page = await session.read(budget, direction, id, (raw) => adjacency(raw, session.limits.maxEdges));
+    // The detached node-wide snapshot is cached before either directional page is admitted.
+    // Charge raw lengths, not unique reasons; diagnostic refusals do not consume caller slots.
+    const remainingGaps = CALLER_GAP_LIMIT - (coverage.value?.length ?? 0);
+    const page = await session.read(budget, direction, id, (raw) =>
+      adjacency(raw, session.limits.maxEdges, remainingGaps),
+    );
     if (page.gap) {
       missing.push(page.gap);
       continue;
     }
     if (!page.value) continue;
-    if (!page.value.complete) missing.push(gap('not-collected', id));
+    if (page.value.gaps?.length) missing.push(...page.value.gaps);
+    else if (!page.value.complete) missing.push(gap('not-collected', id));
     if (depth >= budget.maxDepth) {
       if (page.value.edges.length) missing.push(gap('depth-limit', id));
       continue;

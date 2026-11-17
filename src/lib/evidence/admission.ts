@@ -1,10 +1,20 @@
-import type { GapCode } from './codes.js';
+import { isGapCode, type GapCode } from './codes.js';
+
+const refusalIdentities = new WeakMap<object, { code: GapCode; family: symbol | undefined }>();
 
 /** One refusal representation; subclasses preserve the graph-port and record-loader boundaries. */
 export class EvidenceRefusal extends Error {
-  constructor(readonly code: GapCode, message: string) {
+  constructor(readonly code: GapCode, message: string, family: symbol | undefined = undefined) {
     super(message);
+    if (isGapCode(code)) refusalIdentities.set(this, { code, family });
   }
+}
+
+/** Classify only minted identities: unknown errors must never run a prototype walk or field accessor. */
+export function evidenceRefusalCode(error: unknown, family?: symbol): GapCode | undefined {
+  if (error === null || (typeof error !== 'object' && typeof error !== 'function')) return undefined;
+  const held = refusalIdentities.get(error);
+  return held && (family === undefined || held.family === family) ? held.code : undefined;
 }
 
 export type RefuseEvidence = (code?: GapCode) => Error;

@@ -6,17 +6,26 @@ import { parseAttemptId } from '../ids/attemptId.js';
 import type { LogAddress } from '../memory/eventPosition.js';
 import type { CommitBundle } from '../memory/types.js';
 import type { GapCode } from './types.js';
-import { attention as marksOf, AdmissionError, observePromise } from './validation.js';
-import { boundedList, boundedName, EvidenceRefusal, ownData, spendFields } from '../evidence/admission.js';
+import { attention as marksOf, admissionCode, observePromise } from './validation.js';
+import {
+  boundedList,
+  boundedName,
+  EvidenceRefusal,
+  evidenceRefusalCode,
+  ownData,
+  spendFields,
+} from '../evidence/admission.js';
 
 export { marksOf };
 
+const recordFamily = Symbol();
 /** Loader refusals stay distinct from graph-port refusals so a failed host load keeps its original classification. */
 export class RecordRefusal extends EvidenceRefusal {
   constructor(readonly code: GapCode = 'invalid-data') {
-    super(code, 'cause: record unavailable');
+    super(code, 'cause: record unavailable', recordFamily);
   }
 }
+export const recordRefusalCode = (error: unknown): GapCode | undefined => evidenceRefusalCode(error, recordFamily);
 const refuseRecord = (code?: GapCode): RecordRefusal => new RecordRefusal(code);
 const recordDescriptors = { translateTrapErrors: true, requireOwnValue: true };
 export function recordOwn(value: unknown, key: string): unknown {
@@ -229,7 +238,8 @@ export function projectLoaded<T, R>(work: () => T | Promise<T>, project: (value:
     try {
       if (!observePromise(returned, (value) => accept(value as T), reject)) accept(returned as T);
     } catch (error) {
-      reject(error instanceof AdmissionError ? new RecordRefusal(error.code) : error);
+      const code = admissionCode(error);
+      reject(code === undefined ? error : new RecordRefusal(code));
     }
   });
 }

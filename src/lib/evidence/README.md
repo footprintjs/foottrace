@@ -20,6 +20,12 @@ narrower producer-facing subset, derived from membership in that same registry;
 neither the type nor its reader requires a runtime cause import. The registry
 and admission helpers stay private.
 
+`admission.ts` also owns refusal identity: the original closed code and optional
+private family are retained in a WeakMap at construction. Catch boundaries never
+inspect an unknown error's prototype or fields. Graph, record and PROV families
+stay distinct; ordinary foreign failures retain each reader's fixed fallback.
+Changing a public error field or wrapping an error does not mint new evidence.
+
 ## Structural law
 
 The reader admits plain current-realm objects (including null-prototype records)

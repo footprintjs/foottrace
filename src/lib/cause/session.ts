@@ -1,5 +1,5 @@
 import type { CauseGraph, ExplainOptions, Gap, GraphContext, NodeId, WalkLimits } from './types.js';
-import { AdmissionError, gap, observePromise, graphOwn, plain } from './validation.js';
+import { AdmissionError, admissionCode, gap, observePromise, graphOwn, plain } from './validation.js';
 import { beginQueryMemo, endQueryMemo } from './queryMemo.js';
 import { QueryBudget, type BudgetView } from './queryBudget.js';
 
@@ -139,7 +139,7 @@ export class Session {
             expired = this.stopGap(id);
           finish(expired ? { gap: expired } : { value });
         } catch (error) {
-          finish({ gap: gap(error instanceof AdmissionError ? error.code : 'invalid-data', id) });
+          finish({ gap: gap(admissionCode(error) ?? 'invalid-data', id) });
         }
       };
       this.controller.signal.addEventListener('abort', abort, { once: true });
@@ -152,7 +152,7 @@ export class Session {
         // Observe native Promises by intrinsic, never assimilate a payload's `then` getter.
         if (!observePromise(returned, accept, () => finish({ gap: gap('unavailable', id) }))) accept(returned);
       } catch (error) {
-        finish({ gap: gap(error instanceof AdmissionError ? error.code : 'unavailable', id) });
+        finish({ gap: gap(admissionCode(error) ?? 'unavailable', id) });
       }
     });
     // A local allowance refusal is not evidence and must never poison the other direction's cache.
