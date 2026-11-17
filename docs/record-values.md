@@ -1,4 +1,6 @@
-# Store repeated record values once — unreleased
+# Store repeated record values once — Foottrace 2.0
+
+The `foottrace/values` and `foottrace/canonical-json` entry points belong to the 2.0 release line, including its release candidates. Stable 1.x packages do not provide them.
 
 Use `foottrace/values` when a producer repeatedly records the same JSON content.
 This is opt-in and recording-only: it never changes live state, model requests or

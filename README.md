@@ -84,6 +84,28 @@ Writers record during execution. Readers query what was recorded; they do not re
 
 See the [record contract](docs/guides/record-contract.md), [time-travel contract](src/lib/time-travel/README.md), and [slice contract](src/lib/slice/README.md).
 
+### Canonical nested-read prefixes (Foottrace 2.0)
+
+These APIs belong to the 2.0 release line and first appear in `2.0.0-rc.1`. Stable 1.x packages do not provide them.
+
+Producers can opt into `frame.useEncoding({ commitValues: 'full', writeProvenance: 'reads-prefix', nestedReadTracking: true })`
+and use `frame.readTracked(path, key)` at the point a tracked read occurs. It returns the native value once and records its
+canonical absolute path using the same codec as writes. A namespaced frame records the namespace actually selected by the
+read, including root fallback. `readGlobalTracked(key)` retains a known live root read (for mappers), while `readGlobal`
+stays silent. `readWithSource` retains the same canonical prefix in this mode; its separate bounded
+scalar-source contract is unchanged. Internal `read` calls stay silent, and `noteRead` adds no legacy alias in this mode.
+
+The record layer does not observe JavaScript property access automatically: the producer's proxy must call the tracked
+port during execution. A prefix records reads preceding a write, not proof of semantic derivation. The default remains
+the historical `read` plus `noteRead` behavior, including dotted nested labels. Carry the producer's canonical-mode
+declaration alongside a saved log (FootprintJS uses `nestedReadTracking: true` on its snapshot). Without that declaration,
+a legacy dotted read name cannot distinguish a literal key from nested segments; readers must leave it unresolved rather
+than translate it or match a possibly unrelated literal key. Existing recordings cannot acquire missing leaf reads.
+
+Keep one read-name encoding for an entire saved capture. `useEncoding` refuses to change `nestedReadTracking` on a
+frame after its first captured prefix name, even after `release()` or `discard()`. Other encoding dials retain their
+existing behavior. A producer that changes this mode must start a fresh capture rather than label a mixed log canonical.
+
 ## Evidence requirements — 1.3.0
 
 `RequirementResult` and `readRequirementResults(unknown)` on the root door carry
@@ -270,6 +292,8 @@ Follow the [cause and impact manual](https://github.com/footprintjs/foottrace/bl
 
 `foottrace/write` provides an opt-in, value-free source descriptor for the same native scalar root read. Existing reads and record bytes stay unchanged. Authorized hosts can also supply the optional root source-evidence seam to cause and PROV readers. Exact reads establish source-to-execution usage; per-write and semantic derivation remain separate. See the [setup, bounds and limitations](https://github.com/footprintjs/foottrace/blob/main/docs/read-sources.md).
 
-## Repeated record values — unreleased
+## Repeated record values — Foottrace 2.0
+
+These entry points belong to the 2.0 release line, including its release candidates. Stable 1.x packages do not provide them.
 
 Optional `foottrace/values` stores explicitly served JSON values once by content id, with bounded work and named omissions/refusals. `foottrace/canonical-json` is the strict bounded canonicalizer, separate from replay and PROV. Existing record formats remain unchanged. See [record values](docs/record-values.md) and its runnable sink-note example.
