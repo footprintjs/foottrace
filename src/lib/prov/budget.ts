@@ -1,4 +1,4 @@
-import { boundedList, EvidenceRefusal, ownData } from '../evidence/admission.js';
+import { boundedList, EvidenceRefusal, evidenceRefusalCode, ownData } from '../evidence/admission.js';
 import type { GapCode } from '../evidence/codes.js';
 import { wellFormed } from './options.js';
 import { ProvGaps } from './gaps.js';
@@ -15,9 +15,10 @@ const limitKey = {
   relations: 'maxRelations',
   stringBytes: 'maxStringBytes',
 } as const;
+const provFamily = Symbol();
 export class ProvDataRefusal extends EvidenceRefusal {
   constructor(code: GapCode = 'invalid-data') {
-    super(code, 'prov: unavailable record evidence');
+    super(code, 'prov: unavailable record evidence', provFamily);
   }
 }
 const refuse = (code?: GapCode): ProvDataRefusal => new ProvDataRefusal(code);
@@ -150,5 +151,5 @@ export function dataKeys(value: unknown, budget: ProvBudget, paths = false): str
   return keys.map((key) => (paths ? dataPath(key, budget) : dataString(key, budget)));
 }
 export function refusalCode(error: unknown): GapCode {
-  return error instanceof ProvDataRefusal ? error.code : 'invalid-data';
+  return evidenceRefusalCode(error, provFamily) ?? 'invalid-data';
 }

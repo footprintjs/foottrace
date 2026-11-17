@@ -8,7 +8,7 @@ import type {
   ResolvedRecordNode,
 } from './recordTypes.js';
 import { readKeysForStage } from './recordScope.js';
-import { addressOf, recordName, recordOwn, RecordRefusal } from './recordValidation.js';
+import { addressOf, recordName, recordOwn, RecordRefusal, recordRefusalCode } from './recordValidation.js';
 
 /** Parse only the bounded identity encoding; payload fields never become graph addresses. */
 export function readNodeIdentity(nodeId: string): RecordIdentity {
@@ -86,6 +86,6 @@ export async function resolveRecordNode(
       throw new RecordRefusal();
     return { scope, identity, commitIndex };
   } catch (error) {
-    return { failure: error instanceof RecordRefusal ? error.code : 'invalid-data' };
+    return { failure: recordRefusalCode(error) ?? 'invalid-data' };
   }
 }
