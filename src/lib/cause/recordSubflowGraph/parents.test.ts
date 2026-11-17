@@ -5,6 +5,7 @@ import { recordOptions } from '../recordScope.js';
 import type { RecordScope } from '../recordTypes.js';
 import type { CommitBundle } from '../../memory/types.js';
 import { subflowParents } from './parents.js';
+import { adjacency as admitAdjacency, gaps as admitGaps } from '../validation.js';
 
 function commit(runtimeStageId: string, idx: number, paths: string[]): CommitBundle {
   return {
@@ -28,19 +29,24 @@ async function fixture(
     cutoff?: number;
     missingChild?: boolean;
     sourcePort?: 'absent' | 'refused';
+    writeCount?: number;
   } = {},
 ) {
   const parent = { logRunId: 'output-work', drillPath: [] as string[] };
   const child = { logRunId: 'output-work', drillPath: ['mount#0'] };
   const childLog = [commit('child/work#1', 0, ['key'])];
-  const writes =
-    options.omitted === 'all'
-      ? []
-      : [
-          { path: 'unused', reads: [] },
-          ...(options.omitted === 'selected' ? [] : [{ path: 'final', reads: options.reads ?? ['key'] }]),
-        ];
-  const parentScope = Object.assign(scope(parent, [commit('mount#0', 0, ['unused', 'final'])]), {
+  const paths = options.writeCount
+    ? Array.from({ length: options.writeCount }, (_, index) => 'value' + index)
+    : ['unused', 'final'];
+  const writes = options.writeCount
+    ? paths.map((path) => ({ path, reads: ['key'] }))
+    : options.omitted === 'all'
+    ? []
+    : [
+        { path: 'unused', reads: [] },
+        ...(options.omitted === 'selected' ? [] : [{ path: 'final', reads: options.reads ?? ['key'] }]),
+      ];
+  const parentScope = Object.assign(scope(parent, [commit('mount#0', 0, paths)]), {
     subflows: {
       version: 1 as const,
       status: 'captured' as const,
@@ -79,7 +85,7 @@ async function fixture(
   }, recordOptions({}));
   const context = { signal: new AbortController().signal };
   const selected = await resolveRecordNode(
-    nodeIdFor(parent, { runtimeStageId: 'mount#0', commitIdx: 0, key: 'final' }),
+    nodeIdFor(parent, { runtimeStageId: 'mount#0', commitIdx: 0, ...(options.writeCount ? {} : { key: 'final' }) }),
     context,
     loader,
   );
@@ -163,5 +169,26 @@ describe('subflow boundary source work', () => {
     expect(result.adjacency.edges).toEqual([]);
     expect(result.gaps.map((gap) => gap.code)).toEqual(expect.arrayContaining(['invalid-data', 'scope-boundary']));
     expect(work.left).toBe(0);
+  });
+});
+
+describe('bounded evidence for a repeated native source', () => {
+  it.each([2, 14, 15])('keeps the admitted prefix and explicit overflow for %s writes', async (writeCount) => {
+    const { selected, context, loader, writer } = await fixture({ writeCount });
+    const result = await subflowParents(selected, context, loader, 32);
+    expect(result.adjacency.edges).toHaveLength(1);
+    const edge = result.adjacency.edges[0];
+    expect(edge.nodeId).toBe(writer);
+    const expected = [
+      'subflow:output:0',
+      'commit:0',
+      ...Array.from({ length: writeCount }, (_, index) => 'write:' + index),
+    ];
+    expect(edge.evidence).toEqual(expected.slice(0, 16));
+    expect(edge.evidence.length).toBeLessThanOrEqual(16);
+    expect(result.gaps.some((gap) => gap.code === 'truncated')).toBe(expected.length > 16);
+    expect(result.adjacency.complete).toBe(false);
+    expect(admitAdjacency(result.adjacency, 32)).toEqual(result.adjacency);
+    expect(admitGaps(result.gaps)).toEqual(result.gaps);
   });
 });

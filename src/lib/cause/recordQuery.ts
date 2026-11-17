@@ -2,28 +2,9 @@ import { queryMemo } from './queryMemo.js';
 import { resolveRecordNode } from './recordIdentity.js';
 import { inspectRecordNode } from './recordInspection.js';
 import { subflowParents } from './recordSubflowGraph.js';
+import { recordGapEvidence } from './recordGapEvidence.js';
 import type { RecordLoadFailure, RecordScopeLoader, ResolvedRecordNode } from './recordTypes.js';
-import type { Gap, GraphContext, NodeId } from './types.js';
-
-/** Keep both local and boundary references when they describe the same coverage gap. */
-function mergedGaps(local: readonly Gap[], boundary: readonly Gap[]): Gap[] {
-  const gaps = local.map((gap) => ({ ...gap, evidence: [...gap.evidence] }));
-  let truncated = false;
-  for (const gap of boundary) {
-    const found = gaps.find((other) => other.code === gap.code && other.nodeId === gap.nodeId);
-    if (!found) {
-      gaps.push({ ...gap, evidence: [...gap.evidence] });
-      continue;
-    }
-    for (const reference of gap.evidence) {
-      if (found.evidence.includes(reference)) continue;
-      if (found.evidence.length >= 32) truncated = true;
-      else found.evidence.push(reference);
-    }
-  }
-  if (truncated && !gaps.some((gap) => gap.code === 'truncated')) gaps.push({ code: 'truncated', evidence: [] });
-  return gaps;
-}
+import type { GraphContext, NodeId } from './types.js';
 
 /** Both dependency directions share the same admitted node and canonical inspection within a query. */
 export function createRecordQuery(loader: RecordScopeLoader, maximumEdges: number) {
@@ -46,12 +27,14 @@ export function createRecordQuery(loader: RecordScopeLoader, maximumEdges: numbe
       const inspect = async () => {
         const local = inspectLocal(node, context);
         const cross = await subflowParents(node, context, loader, maximumEdges);
-        const gaps = mergedGaps(local.gaps, cross.gaps);
+        const coverage = recordGapEvidence();
+        for (const gap of local.gaps) coverage.addGap(gap);
+        for (const gap of cross.gaps) coverage.addGap(gap);
         const edges = [...local.adjacency.edges];
         for (const edge of cross.adjacency.edges)
           if (!edges.some((other) => other.nodeId === edge.nodeId && other.kind === edge.kind)) edges.push(edge);
-        if (edges.length > maximumEdges && !gaps.some((gap) => gap.code === 'edge-limit'))
-          gaps.push({ code: 'edge-limit', evidence: [] });
+        if (edges.length > maximumEdges) coverage.addGap({ code: 'edge-limit', evidence: [] });
+        const gaps = coverage.gaps;
         return {
           adjacency: {
             edges: edges.slice(0, maximumEdges),

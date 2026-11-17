@@ -10,42 +10,39 @@ import type {
   RecordScopeLoader,
   ResolvedRecordNode,
 } from '../recordTypes.js';
-import type { Gap, GapCode, GraphContext, GraphEdge } from '../types.js';
+import type { GapCode, GraphContext, GraphEdge } from '../types.js';
+import { recordGapEvidence, recordReferences } from '../recordGapEvidence.js';
 import { spendSubflowWork, subflowSource } from './sources.js';
 
 class BoundaryResult {
   private readonly edges: GraphEdge[] = [];
-  private readonly gaps = new Map<GapCode, { code: GapCode; evidence: string[] }>();
+  private readonly coverage = recordGapEvidence();
 
   constructor(private readonly maximumEdges: number) {}
 
   addGap(code: GapCode, evidence: readonly string[] = []): void {
-    const gap = this.gaps.get(code) ?? { code, evidence: [] };
-    this.gaps.set(code, gap);
-    for (const reference of evidence) {
-      if (gap.evidence.includes(reference)) continue;
-      if (gap.evidence.length >= 32) {
-        if (!this.gaps.has('truncated')) this.gaps.set('truncated', { code: 'truncated', evidence: [] });
-        break;
-      }
-      gap.evidence.push(reference);
-    }
+    this.coverage.addGap({ code, evidence });
   }
 
   append(inspection: RecordInspection, evidence: readonly string[]): void {
     for (const gap of inspection.gaps) this.addGap(gap.code, [...evidence, ...gap.evidence]);
     for (const edge of inspection.adjacency.edges) {
-      if (this.edges.some((other) => other.nodeId === edge.nodeId)) continue;
-      if (this.edges.length >= this.maximumEdges) {
+      const index = this.edges.findIndex((other) => other.nodeId === edge.nodeId);
+      if (index < 0 && this.edges.length >= this.maximumEdges) {
         this.addGap('edge-limit');
         break;
       }
-      this.edges.push({ ...edge, attribution: 'stage', evidence: [...evidence, ...edge.evidence].slice(0, 32) });
+      const existing = this.edges[index];
+      const retained = recordReferences([...(existing?.evidence ?? []), ...evidence, ...edge.evidence]);
+      if (retained.truncated) this.addGap('truncated');
+      const projected = { ...(existing ?? edge), attribution: 'stage' as const, evidence: retained.evidence };
+      if (index < 0) this.edges.push(projected);
+      else this.edges[index] = projected;
     }
   }
 
   finish(): RecordInspection {
-    const gaps: Gap[] = [...this.gaps.values()];
+    const gaps = this.coverage.gaps;
     return { adjacency: { edges: this.edges, complete: gaps.length === 0 }, gaps };
   }
 }
