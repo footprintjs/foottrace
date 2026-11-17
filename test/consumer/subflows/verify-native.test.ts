@@ -56,8 +56,9 @@ describe('native protocol capture assertions', () => {
     expect(() => assertCaptureState(mount.inputHandoff, { privateView: true })).toThrow();
   });
 
-  it.each(['missing', 'address', 'runtime', 'cutoff', 'seed-runtime', 'seed-index', 'writes'])
-    ('rejects a mismatched generated seed: %s', (fault) => {
+  it.each(['missing', 'address', 'runtime', 'cutoff', 'seed-runtime', 'seed-index', 'writes'])(
+    'rejects a mismatched generated seed: %s',
+    (fault) => {
       const { mount, child } = fixture();
       if (fault === 'missing') Reflect.deleteProperty(mount, 'inputHandoff');
       if (fault === 'address') mount.inputHandoff.child.address = { logRunId: 'other', drillPath: [] };
@@ -67,5 +68,6 @@ describe('native protocol capture assertions', () => {
       if (fault === 'seed-index') child.commitLog[0].idx = 1;
       if (fault === 'writes') mount.inputHandoff.writes = [];
       expect(() => assertSeedBinding(mount, child)).toThrow();
-    });
+    },
+  );
 });
