@@ -15,12 +15,23 @@ export function checkLayers(root = ROOT, layers = ranks) {
   const known = new Set(files.map(local));
   const problems = [];
   const config = ts.parseJsonConfigFileContent(ts.readConfigFile(join(root, 'tsconfig.json'), ts.sys.readFile).config, ts.sys, root);
+  const program = ts.createProgram(files, { ...config.options, noEmit: true, types: [] });
+  const checker = program.getTypeChecker();
+  // Follow the actual source-owned refusal family, not lookalike class names or source text.
+  const refusalInstance = (type, seen = new Set()) => {
+    if (seen.has(type)) return false;
+    seen.add(type);
+    if (type.getSymbol()?.declarations?.some(declaration => ts.isClassDeclaration(declaration) &&
+      declaration.name?.text === 'EvidenceRefusal' &&
+      local(declaration.getSourceFile().fileName) === 'src/lib/evidence/admission.ts')) return true;
+    return (type.getBaseTypes?.() ?? []).some(base => refusalInstance(base, seen));
+  };
   const graph = new Map();
   for (const file of files) {
     const name = local(file);
     const rank = layers[name];
     if (rank === undefined) problems.push(`unranked source: ${name}`);
-    const source = ts.createSourceFile(file, readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true);
+    const source = program.getSourceFile(file);
     const edges = [];
     const edge = (spec, typeOnly = false) => {
       if (!spec.startsWith('.')) { problems.push(`${name}: external dependency ${spec}`); return; }
@@ -46,6 +57,10 @@ export function checkLayers(root = ROOT, layers = ranks) {
       } else if (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference)) {
         edge(node.moduleReference.expression.text, node.isTypeOnly);
       }
+      if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.InstanceOfKeyword &&
+        checker.getTypeAtLocation(node.right).getConstructSignatures().some(signature => refusalInstance(signature.getReturnType()))) {
+        problems.push(`${name}: dynamic EvidenceRefusal classification; use the family identity reader`);
+      }
       ts.forEachChild(node, visit);
     };
     visit(source);
@@ -63,7 +78,6 @@ export function checkLayers(root = ROOT, layers = ranks) {
   };
   for (const name of graph.keys()) walk(name);
   // Type checking without Node globals also catches accidental platform API use.
-  const program = ts.createProgram(files, { ...config.options, noEmit: true, types: [] });
   for (const error of ts.getPreEmitDiagnostics(program)) problems.push(ts.flattenDiagnosticMessageText(error.messageText, '\n'));
   return { files: files.length, problems, ok: problems.length === 0 };
 }

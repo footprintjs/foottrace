@@ -1,5 +1,5 @@
 import { prepareReadSources } from '../cause/recordSources.js';
-import { bundleOf, recordOwn, RecordRefusal } from '../cause/recordValidation.js';
+import { bundleOf, recordOwn, RecordRefusal, recordRefusalCode } from '../cause/recordValidation.js';
 import type { Attention } from '../cause/types.js';
 import { placedAt } from '../memory/readWindow.js';
 import { admitBundle, gapBundle } from './admitBundle.js';
@@ -150,7 +150,7 @@ export function admitProvRecord(
           owners: new Set(),
           byOwner: new Map(),
           byCommit: new Map(),
-          gaps: [error instanceof RecordRefusal ? error.code : 'invalid-data'],
+          gaps: [recordRefusalCode(error) ?? 'invalid-data'],
         };
       }
       requireSpend(budget, 'fields', before - Math.max(0, allowance.left));

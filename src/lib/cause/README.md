@@ -5,3 +5,5 @@ This library admits recorded inputs, builds a bounded dependency graph and answe
 It reads the memory and read-source record contracts. Canonical execution admission belongs to `../ids/nativeExecution.ts`, so cause does not depend on the PROV exporter. PROV can adapt these admitted causes into its own output vocabulary.
 
 Existing cause behavior tests remain in `test/cause/`; new utility subjects keep their own tests beside their implementation.
+
+`recordGapEvidence.ts` composes native gap references within the same sixteen-reference and thirty-two-gap admission bounds. It keeps every fitting witness in ordered chunks and reports `truncated` when the bounded output cannot retain more. Boundary edges share its bounded reference rule.

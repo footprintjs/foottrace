@@ -97,9 +97,63 @@ const finding = await explain(graph, selected, { timeoutMs: 750, maxNodes: 50 })
 // Only the requested scope is loaded; a different subflow is opened on demand.
 ```
 
-The stored adapter loads a requested log through the host, reuses `readStoredRecord`, and retains incomplete-record and gap evidence. A file that holds its own [run evidence](../src/lib/run-evidence/README.md) fills `reads`, `controlDeps` and `attention` where the host omits them; a host's map always wins. Only the requested log is read, so a chain that leaves it adds a `scope-boundary` gap. A graph instance caches admitted scope snapshots; create a new instance to refresh a record that is still being written. Bind each host/graph/cache to one authorization domain or authorize before every query: a cache hit does not call `loadLog` again. Never share a global graph whose loader consults a changing request identity. Subflow containment is a navigation relationship, not automatically a causal dependency. Scope, execution, write position and optional key qualify node identities. The host must authorize each storage scope; cross-service and cross-run causal stitching remain outside this candidate. Lazy loading is real only when the host loader fetches a requested scope: expanding a cursor over an already loaded snapshot is an in-memory drill.
+The stored adapter loads a requested log through the host, reuses `readStoredRecord`, and retains incomplete-record and gap evidence. A file that holds its own [run evidence](../src/lib/run-evidence/README.md) fills `reads`, `controlDeps` and `attention` where the host omits them; a host's map always wins. Without admitted subflow observations this remains a local-log graph; a known mounted seed reports its missing input crossing as `scope-boundary`. With the optional port below, only exact referenced scopes are loaded through the same authorized host. A graph instance caches admitted scope snapshots; create a new instance to refresh a record that is still being written. Bind each host/graph/cache to one authorization domain or authorize before every query: a cache hit does not call `loadLog` again. Never share a global graph whose loader consults a changing request identity. Subflow containment is a navigation relationship, not automatically a causal dependency. Scope, execution, write position and optional key qualify node identities. The host must authorize each storage scope; cross-service and cross-run causal stitching remain outside this candidate. Lazy loading is real only when the host loader fetches a requested scope: expanding a cursor over an already loaded snapshot is an in-memory drill.
 
 Direct `graph.openScope(address, { signal })` discovery rejects with a fixed `cause: record unavailable` error and a gap `code` on failure; an unavailable scope is never reported as an empty successful log. Public `explain` and `attentionList` queries turn unavailable reads into bounded incomplete findings.
+
+## Optional native subflow observations
+
+`RecordScope.subflows` (and the stored host's same field) supplies a value-free
+`RecordSubflows` record: `{version: 1, status, mounts, collections}`. Each mount
+names its actual runtime execution ID and complete child `LogAddress`, with
+optional input/output handoffs. Collections belong once to their enclosing
+parent scope. The exported readonly types describe the closed fields and
+limitation codes; unknown versions, fields, aliases and inconsistent identities
+retain a fixed gap alongside safe local evidence.
+
+An output-v1 handoff identifies the actual parent mapping commit/path and the
+closed child snapshot's exclusive cutoff. An input handoff identifies the actual
+child seed commit/path and the parent's saved exclusive cutoff. The reader uses
+that prefix, so a later overwrite cannot replace the recorded source. Literal
+root names such as `a.b` remain literal; they are not split into nested paths.
+
+A native snapshot adapter supplies unique, immediate-child runtime-ID entries,
+not static aliases or the latest convenient visit. Its inventory status must
+always be `partial`: pauses, early exits, capture-only recording, new/resumed
+runs and checkpoints can omit results. Native twins and result counts do not
+certify all invocations. An explicit host-owned `captured` inventory asserts only
+its supplied scope; neither status creates a storage or authenticity receipt.
+
+For an authorized native adapter, copy each actual input/output observation
+without changing its addresses, landed indexes, paths, limitations or status.
+Copy the enclosing snapshot's `fanoutCollections.collections` once into
+`subflows.collections` (or an empty list if absent), keeping inventory `partial`.
+Each participating native scope supplies its explicit port, including a partial
+empty inventory for a source scope with no retained outgoing metadata. A plain
+legacy scope remains local: its drill address alone does not opt it into parent
+discovery or wider impact. An output join into an undeclared source scope keeps
+a boundary gap; no query-order-dependent registry supplies missing opt-in.
+The host remains responsible for authorization and loading every referenced
+child/parent log. Ordinary stored entries do not implicitly contain this
+separate snapshot metadata.
+
+Recorded prefixes describe observed accesses, not proof that an output used a
+value. Their graph links use `stage` attribution and a `conservative` gap,
+including an empty capture. Missing, resumed, private or otherwise unsupported
+seed sources retain boundary gaps. Independent later constants and standalone
+root baselines retain their local meaning. A `complete` result describes its
+admitted evidence scope, never provider-internal or whole-run causal proof.
+
+Whole-scope fan-out observations remain nontraversable. The record preserves
+actual ITEMS-order slot identities and the committed parent array write; it
+does not invent per-key reads or infer `items[index]` derivation. Unknown child
+identities omit the whole slot with partial/missing-child-record coverage. Zero
+branches retain the existing local read evidence.
+
+Field/scope/edge and source-resolution work caps remain enforced. Partial
+inventories, unavailable scopes and forward-only limits make impact incomplete
+without disqualifying independently supported backward evidence. Refresh by
+creating a new graph instance; retain the existing authorization/cache boundary.
 
 ## 3. Explain a selected node within bounds
 
@@ -143,6 +197,54 @@ const finding = await explain(graph, selectedNodeId, {
 The backward result is frozen and carries its own confidence and gaps, captured after backward traversal and root ranking, before impact traversal. A complete backward result can coexist with incomplete impact and top-level confidence. The existing `rootCause` rule is unchanged: one supported candidate and complete backward evidence are required, while a complete unmarked graph can still have no root. Partial evidence retains admitted links and named gaps; it never becomes an invented complete trail. Hosts must preserve those gaps and distinguish alternatives from a confirmed root.
 
 This option reuses the existing walk; it dispatches no additional graph/storage calls and adds no separate work allowance or deadline. Omitted or `false` keeps the existing result shape, bytes and graph-call order. Other values and accessor properties are refused before graph dispatch. Storage authorization, exact run/visit binding, ID privacy and application-specific labels remain the host's responsibility.
+
+### Explain coverage for one adjacency page
+
+A host graph may put evidence-bearing reasons on the page returned by `parents()` or
+`children()` using optional `Adjacency.gaps`. Parent-page reasons belong only to backward
+coverage; children-page reasons belong only to impact. `CauseGraph.gaps(id)` remains
+node-wide and contributes to both directions, including for callers using it directly.
+
+```ts
+import { explain, type Adjacency, type CauseGraph } from 'foottrace/cause';
+
+const missingParents: Adjacency = {
+  edges: [], complete: false,
+  gaps: [{ code: 'not-collected', nodeId: 'source', evidence: ['proof:missing-parent-page'] }],
+};
+// A host returning missingParents from parents() withholds a confirmed root.
+
+const graph: CauseGraph = {
+  parents: () => ({ edges: [], complete: true }),
+  children: () => ({
+    edges: [], complete: false,
+    gaps: [{ code: 'not-collected', nodeId: 'source', evidence: ['proof:missing-child-page'] }],
+  }),
+  attention: () => [{ kind: 'error', reason: 'ERROR_RECORDED', evidence: ['proof:source'] }],
+  gaps: () => [],
+};
+const result = await explain(graph, 'source', { includeBackward: true });
+// rootCause: 'source'; backward.confidence: 'complete'.
+// impact and overall confidence: 'incomplete'; retain the child-page proof reference.
+```
+
+`complete` describes edge enumeration. Explicit admitted reasons remain limitations even
+when it is `true`. For `false` with an omitted or empty page list, the existing fixed
+`not-collected` reason at that node remains. A nonempty page list explains that incomplete
+page without a second reference-free fallback. Node-wide reasons do not replace this
+page-specific fallback. Omission preserves the legacy admitted page's object shape.
+
+Each visited node and direction permits at most 32 supplied reasons jointly across the
+node-wide list and its current page, counted before de-duplication. Node-wide admission
+occurs first and is cached; parents and children retain separate cached pages. An overflow
+refuses that whole page with fixed `invalid-data`, retaining admitted node-wide reasons.
+Existing diagnostic refusals do not consume supplied-reason slots. Each reason retains
+the existing closed code vocabulary, 16-reference limit and 512-character reference bound;
+all admitted records and lists are detached and frozen. Other walk limits are unchanged.
+
+This host-port addition does not migrate the native record adapter's direct node-wide
+`gaps()` contract or restore missing record evidence. Hosts still own authorization and
+must supply non-secret identities and evidence references.
 
 ### Leave work capacity for impact
 

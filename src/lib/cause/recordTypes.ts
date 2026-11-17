@@ -2,6 +2,7 @@ import type { ControlDependency } from '../memory/backtrack.js';
 import type { LogAddress } from '../memory/eventPosition.js';
 import type { CommitBundle } from '../memory/types.js';
 import type { PreparedReadSources, RecordReadSources } from './recordSources.js';
+import type { PreparedRecordSubflows, RecordSubflows } from './recordSubflows.js';
 import type { Adjacency, Attention, CauseGraph, Gap, GraphContext, NodeId } from './types.js';
 
 /** Explicit complete maps record absence too; an omitted map means it was not collected. */
@@ -10,6 +11,8 @@ export interface RecordScope {
   readonly commitLog: readonly unknown[];
   readonly initialState?: Record<string, unknown>;
   readonly readSources?: RecordReadSources;
+  /** Explicit, value-free crossings. Native snapshot inventories remain partial. */
+  readonly subflows?: RecordSubflows;
   readonly reads?: Readonly<Record<string, readonly string[]>>;
   readonly controlDeps?: Readonly<Record<string, { readonly deciderId: string }>>;
   readonly attention?: Readonly<Record<string, readonly Attention[]>>;
@@ -48,6 +51,7 @@ export interface PreparedRecordScope {
   marks?: Map<string, readonly Attention[]>;
   complete: boolean;
   readSources?: PreparedReadSources;
+  subflows?: PreparedRecordSubflows;
   sourceCoveredExecutions?: ReadonlySet<string>;
 }
 export interface RecordLoadFailure {
