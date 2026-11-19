@@ -1,3 +1,4 @@
+import type { CaptureCoverage, CaptureObservation, CaptureQuery, CaptureWitness } from './recordCapture.js';
 import type { ControlDependency } from '../memory/backtrack.js';
 import type { LogAddress } from '../memory/eventPosition.js';
 import type { CommitBundle } from '../memory/types.js';
@@ -17,6 +18,10 @@ export interface RecordScope {
   readonly controlDeps?: Readonly<Record<string, { readonly deciderId: string }>>;
   readonly attention?: Readonly<Record<string, readonly Attention[]>>;
   readonly complete?: boolean;
+  /** Optional producer note. Unknown or malformed versions do not remove record evidence. */
+  readonly capture?: unknown;
+  /** The record's own live identity and interval, obtained independently of capture. */
+  readonly captureWitness?: CaptureWitness;
 }
 export interface RecordNode {
   readonly runtimeStageId: string;
@@ -35,6 +40,10 @@ export interface RecordCauseGraph extends CauseGraph {
   /** Rejects with fixed message/code on discovery failure; never reports an unavailable scope as empty. */
   openScope(address: LogAddress, context: GraphContext): Promise<readonly NodeId[]>;
 }
+export interface CaptureAwareRecordGraph extends RecordCauseGraph {
+  /** Coverage of tracked evidence in one admitted interval. Covered is not a search result. */
+  captureCoverage(address: LogAddress, query: CaptureQuery, context: GraphContext): Promise<CaptureCoverage>;
+}
 export interface RecordLoaderResult {
   readonly scope: RecordScope;
   readonly gaps?: readonly Gap['code'][];
@@ -50,6 +59,7 @@ export interface PreparedRecordScope {
   control?: Map<string, ControlDependency>;
   marks?: Map<string, readonly Attention[]>;
   complete: boolean;
+  capture?: CaptureObservation;
   readSources?: PreparedReadSources;
   subflows?: PreparedRecordSubflows;
   sourceCoveredExecutions?: ReadonlySet<string>;

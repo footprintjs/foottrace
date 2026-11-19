@@ -1,3 +1,4 @@
+import { captureCoverage, type CaptureQuery } from './recordCapture.js';
 import type { LogAddress } from '../memory/eventPosition.js';
 import { childrenForRecordNode } from './recordChildren.js';
 import { attentionForRecordNode, gapForRecordFailure } from './recordCoverage.js';
@@ -7,7 +8,7 @@ import { createRecordQuery, whenResolved } from './recordQuery.js';
 import { subflowChildren } from './recordSubflowGraph.js';
 import { recordOptions } from './recordScope.js';
 import type {
-  RecordCauseGraph,
+  CaptureAwareRecordGraph,
   RecordGraphOptions,
   RecordLoaderResult,
   RecordNode,
@@ -20,6 +21,7 @@ import type { Adjacency, GraphContext, NodeId } from './types.js';
 const unavailableAdjacency = (): Adjacency => ({ edges: [], complete: false });
 
 export type {
+  CaptureAwareRecordGraph,
   RecordCauseGraph,
   RecordGraphOptions,
   RecordLoaderResult,
@@ -32,12 +34,14 @@ export { recordOptions } from './recordScope.js';
 export function createLazyRecordGraph(
   load: (address: LogAddress, context: GraphContext) => RecordLoaderResult | Promise<RecordLoaderResult>,
   options: RecordGraphOptions = {},
-): RecordCauseGraph {
+): CaptureAwareRecordGraph {
   const limits = recordOptions(options),
     loader = createRecordScopeLoader(load, limits);
   const query = createRecordQuery(loader, limits.maxEdges);
   return Object.freeze({
     nodeId: (address: LogAddress, node: RecordNode) => nodeIdFor(address, node),
+    captureCoverage: (address: LogAddress, query: CaptureQuery, context: GraphContext) =>
+      captureCoverage(loader, address, query, context),
     openScope: (address: LogAddress, context: GraphContext) => openRecordScope(address, context, loader),
     async parents(nodeId: NodeId, context: GraphContext) {
       return whenResolved(
@@ -74,7 +78,10 @@ export function createLazyRecordGraph(
 }
 
 /** A finished record already in memory; payload admission is lazy per requested scope. */
-export function createRecordGraph(scopes: readonly RecordScope[], options: RecordGraphOptions = {}): RecordCauseGraph {
+export function createRecordGraph(
+  scopes: readonly RecordScope[],
+  options: RecordGraphOptions = {},
+): CaptureAwareRecordGraph {
   const limits = recordOptions(options);
   return createLazyRecordGraph((address) => {
     for (const raw of recordList(scopes, limits.maxScopes)) {

@@ -27,7 +27,13 @@ export type {
   TraversalLimits,
   WalkLimits,
 } from './lib/cause/types.js';
-export type { RecordScope, RecordGraphOptions, RecordCauseGraph, RecordNode } from './lib/cause/recordAdapter.js';
+export type {
+  CaptureAwareRecordGraph,
+  RecordScope,
+  RecordGraphOptions,
+  RecordCauseGraph,
+  RecordNode,
+} from './lib/cause/recordAdapter.js';
 export type { StoredRecordScope, StoredRecordHost } from './lib/cause/storedRecordAdapter.js';
 
 export type { RecordReadSources, ReadSourceExecution } from './lib/cause/recordSources.js';
@@ -41,3 +47,12 @@ export type {
   RecordSubflowMount,
   RecordSubflows,
 } from './lib/cause/recordSubflows.js';
+export type {
+  CaptureChannel,
+  CaptureCoverage,
+  CaptureFailure,
+  CaptureMode,
+  CaptureQuery,
+  CaptureReason,
+  CaptureWitness,
+} from './lib/cause/recordCapture.js';

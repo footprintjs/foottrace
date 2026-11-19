@@ -6,7 +6,7 @@ import { readStoredRecord, type StoredRecord } from '../time-travel/storedRecord
 import {
   createLazyRecordGraph,
   recordOptions,
-  type RecordCauseGraph,
+  type CaptureAwareRecordGraph,
   type RecordGraphOptions,
   type RecordScope,
 } from './recordAdapter.js';
@@ -86,7 +86,10 @@ function scopeEvidence(
  * A file that holds its own evidence fills `reads`, `controlDeps` and `attention` where the host omits them; a host's map
  * always wins. The commit cap counts commits, not notes: every row spends one field, so the row count stays bounded.
  */
-export function createStoredRecordGraph(host: StoredRecordHost, options: RecordGraphOptions = {}): RecordCauseGraph {
+export function createStoredRecordGraph(
+  host: StoredRecordHost,
+  options: RecordGraphOptions = {},
+): CaptureAwareRecordGraph {
   const limits = recordOptions(options);
   return createLazyRecordGraph(
     (address, context) =>

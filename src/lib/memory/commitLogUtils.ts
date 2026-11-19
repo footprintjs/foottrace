@@ -60,12 +60,19 @@ export function findLastWriter(commitLog: CommitBundle[], key: string, beforeIdx
   return at >= 0 ? commitLog[at] : undefined;
 }
 
+export interface WindowedReadSources extends ReadSources {
+  /** No writer in the supplied log could be seen by this read. */
+  readonly absenceReason?: RegisteredCode<'never-written' | 'redacted'>;
+}
+
 /**
  * What the step whose FIRST bundle is `commitLog[position]` could have read when it read `key`: the
  * public door of the one rule (`readWindow.ts`). Answers ARRAY positions: `before`, the last write
  * before the step began (-1: none, the value is from before the run), and `during`, the writes inside
  * its read window. `during` empty: `before` is the source, for certain. Otherwise each of them is a
  * possible source and the real one is among them; `overlapOf(sources, at)` gives the mark of one.
+ * With no visible writer, `absenceReason` describes the log through the read's last possible look.
+ * It makes no claim about initial state or writes outside the supplied log.
  *
  * WHY NOT `findLastWriter(commitLog, key, position)`: that dates the read at the step's commit. For a
  * step that read `key` when it started and committed after a sibling wrote it, the sibling is then
@@ -76,10 +83,22 @@ export function findLastWriter(commitLog: CommitBundle[], key: string, beforeIdx
  *                  `runtimeStageId` is a continuation and carries no reads of its own).
  * @param key       A DELIM-joined path (`normalisePath`); a top-level key is a one-segment path.
  */
-export function findReadSources(commitLog: readonly CommitBundle[], position: number, key: string): ReadSources {
-  return readSourcesOf(key, windowOf(commitLog, position), (path, before) => {
-    return lastWriterPosition(commitLog, path, before);
-  });
+export function findReadSources(
+  commitLog: readonly CommitBundle[],
+  position: number,
+  key: string,
+): WindowedReadSources {
+  const window = windowOf(commitLog, position);
+  const sources = readSourcesOf(key, window, (path, before) => lastWriterPosition(commitLog, path, before));
+  if (
+    sources.before !== -1 ||
+    sources.during.length ||
+    !Number.isSafeInteger(position) ||
+    position < 0 ||
+    position >= commitLog.length
+  )
+    return sources;
+  return { ...sources, absenceReason: noVisibleWriterReason(commitLog, key, window.end) };
 }
 
 /** {@link findLastWriter}'s answer as an ARRAY position (-1: no commit before `beforeIdx` wrote `key`). */
@@ -317,6 +336,15 @@ function redactionsInRange(
   return { any, hidden: false };
 }
 
+function noVisibleWriterReason(
+  commitLog: readonly CommitBundle[],
+  key: string,
+  before: number,
+): NonNullable<WindowedReadSources['absenceReason']> {
+  const end = Math.min(before, commitLog.length) - 1;
+  return redactionsInRange(commitLog, key, 0, end).hidden ? 'redacted' : 'never-written';
+}
+
 /**
  * Why {@link findLastWriterWithBasis} answered what it did — registered in `HONESTY_CODES`:
  * `'never-written'` (no writer before the bound), `'nested-rows'` (the writer reached the key only
@@ -340,8 +368,7 @@ export interface WriterWithBasis {
 export function findLastWriterWithBasis(commitLog: CommitBundle[], key: string, beforeIdx?: number): WriterWithBasis {
   const writer = findLastWriter(commitLog, key, beforeIdx);
   if (writer === undefined) {
-    const end = Math.min(beforeIdx ?? commitLog.length, commitLog.length) - 1;
-    return { basis: [redactionsInRange(commitLog, key, 0, end).hidden ? 'redacted' : 'never-written'] };
+    return { basis: [noVisibleWriterReason(commitLog, key, beforeIdx ?? commitLog.length)] };
   }
   return { writer, basis: writesOnlyInside(writer, key) ? ['nested-rows'] : [] };
 }

@@ -155,6 +155,48 @@ inventories, unavailable scopes and forward-only limits make impact incomplete
 without disqualifying independently supported backward evidence. Refresh by
 creating a new graph instance; retain the existing authorization/cache boundary.
 
+## Ask what a live log collected
+
+A scope passed to `createRecordGraph` may carry a native `capture` note and a
+separate `captureWitness`. Take the witness from the record itself. Supply the
+served record's full log address (`logRunId` and `drillPath`), producing leg ID,
+native half-open commit interval, actual boundary status and `source: 'live'`.
+The witness address must match the scope and the note. Its interval must agree
+with the admitted commit indices. A resumed leg witnesses only its own segment
+and a parent witnesses only its own log. Copying these fields from the note
+would give it its own authority.
+
+```ts
+const captureWitness = {
+  logAddress: servedAddress,
+  runId: producingLeg,
+  commits: { from: segmentStart, to: segmentEnd },
+  boundary: boundaryStatus,
+  source: 'live',
+} satisfies CaptureWitness;
+const graph = createRecordGraph([{ ...scope, captureWitness }]);
+const answer = await graph.captureCoverage(
+  servedAddress,
+  { channel: 'reads', mode: 'full', from: 0, to: 12 },
+  { signal: controller.signal },
+);
+```
+
+`covered` means a local, completed interval collected the requested channel
+with enough detail. Check the actual observations before saying there was no
+matching read. A disabled channel returns `not-collected`. `partial` and
+`failed` carry fixed reasons. Missing, unbound, malformed and unknown newer
+notes return `collection-unknown`. Pass `crossing: 'worker'` or
+`crossing: 'transport'` to retain that gap. Saved scopes stay unknown in this
+API. An optional note never suppresses an observed writer or creates a link.
+A legacy note with contradictory read or write tracking and channel status is
+malformed, so the entire note is refused.
+
+The root package's `findReadSources` also reports an `absenceReason` when
+there is no visible writer for a valid read. `redacted` means a redaction at or
+above the queried key could hide a writer within the read's bound.
+`never-written` describes writes in the supplied log through that bound.
+
 ## 3. Explain a selected node within bounds
 
 The following standalone query accepts a host-supplied graph. The stored adapter from step 2 is one such graph; the declarations identify the host-owned graph and selected node.
