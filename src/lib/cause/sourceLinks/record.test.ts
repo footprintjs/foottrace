@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { sharedSourceLinksV1 as shared } from '../../../../test/fixtures/source-links/read.js';
 import { describe, expect, it, vi } from 'vitest';
 import {
   bindSourceLinkWrite,
@@ -18,21 +18,6 @@ import type {
 } from '../../../cause.js';
 import type { CommitBundle } from '../../memory/types.js';
 
-type CheckPair = Pick<SourceLinkRow, 'linkBasis' | 'namedBy' | 'check'> & {
-  readonly standing?: 'witnessed';
-  readonly gap?: string;
-};
-const shared = JSON.parse(
-  readFileSync(new URL('../../../../test/fixtures/source-links/v1.json', import.meta.url), 'utf8'),
-) as {
-  readonly address: RecordScope['address'];
-  readonly initialState: NonNullable<RecordScope['initialState']>;
-  readonly servedRow: ServedRow;
-  readonly witnessRow: SourceLinkRow;
-  readonly witness: RecordSourceLink['witness'];
-  readonly boundWrite: Pick<RecordSourceLink['output'], 'runtimeStageId' | 'commitIdx'>;
-  readonly checkPairs: readonly CheckPair[];
-};
 const { address, servedRow, witnessRow: row, witness: location } = shared;
 const context = () => ({ signal: new AbortController().signal });
 const link: RecordSourceLink = {
