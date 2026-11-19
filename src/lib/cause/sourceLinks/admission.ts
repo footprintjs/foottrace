@@ -84,6 +84,7 @@ export function admitSourceLinks(raw: unknown, budget: { left: number }): Source
     if (status === 'partial' && limitations.size === 0) limitations.add('not-collected');
     return { links, gaps: [...limitations] };
   } catch (error) {
-    return { links: [], gaps: [recordRefusalCode(error) ?? 'invalid-data'] };
+    const code = recordRefusalCode(error) ?? 'invalid-data';
+    return { links: [], gaps: [code === 'node-limit' && budget.left < 0 ? 'truncated' : code] };
   }
 }

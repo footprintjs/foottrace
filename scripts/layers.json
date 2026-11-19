@@ -101,6 +101,7 @@
   "src/lib/cause/sourceLinks/replay.ts": 3,
   "src/lib/cause/sourceLinks/bind.ts": 3,
   "src/lib/cause/sourceLinks/input.ts": 3,
+  "src/lib/cause/sourceLinks/inputStability.ts": 3,
   "src/lib/cause/sourceLinks/policy.ts": 3,
   "src/lib/cause/sourceLinks/resolve.ts": 3,
   "src/lib/cause/sourceLinks/page.ts": 0,

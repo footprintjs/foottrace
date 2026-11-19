@@ -6,6 +6,7 @@ import type { RecordSourceLink, ServedRow, SourceLinkRow } from './types.js';
 import { RecordRefusal, recordRefusalCode } from '../recordValidation.js';
 import { sourceLinkReplay } from './replay.js';
 import { resolveLink } from './resolve.js';
+import { admitSourceLinks } from './admission.js';
 
 const address = { logRunId: 'counted-source-links', drillPath: [] };
 const context = () => ({ signal: new AbortController().signal });
@@ -104,6 +105,11 @@ describe('source-link replay work remains bounded', () => {
     expect(result.link?.standing).toBe('witnessed');
     expect(maximum - budget.left).toBeLessThan(350000);
     console.log('Source-link replay units for 4096 commits:', maximum - budget.left);
+  });
+
+  it('uses the same gap for admission budget exhaustion and replay exhaustion', () => {
+    const channel = growing(1, 1).scope.sourceLinks;
+    expect(admitSourceLinks(channel, { left: 1 })).toEqual({ links: [], gaps: ['truncated'] });
   });
 
   it('refuses oversized copy-on-write generations before doing the copy', () => {

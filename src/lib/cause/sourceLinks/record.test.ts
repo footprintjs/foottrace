@@ -110,6 +110,60 @@ describe.each([
     expect(result.confidence).toEqual(control.confidence);
   });
 
+  it.each([
+    ['an explicit tail append', 'append', ['later'], 'witnessed'],
+    ['a full list replacement with the same selected entry', 'set', ['synthetic value', 'changed'], 'stale'],
+    ['a full set with an equal leading part', 'set', ['synthetic value', 'original', 'later'], 'stale'],
+  ] as const)('validates list input stability after %s', async (_, verb, value, expected) => {
+    const source = fixture();
+    const [consumer, door] = source.commitLog as CommitBundle[];
+    const selected = { ...output, commitIdx: 2 };
+    const wire: RecordSourceLink = {
+      ...link,
+      output: { ...link.output, commitIdx: 2 },
+      witness: { ...link.witness, commitIdx: 2 },
+    };
+    const change = bundle('change', 1, { history: [...value] });
+    const scope: RecordScope = {
+      ...source,
+      initialState: { history: ['synthetic value', 'original'] },
+      commitLog: [consumer, { ...change, trace: [{ path: 'history', verb }] }, { ...door, idx: 2 }],
+      sourceLinks: { version: 1, status: 'captured', limitations: [], links: [wire] },
+    };
+    const reader = graph(scope, allow);
+    const page = await reader.parents(reader.nodeId(address, selected), context());
+    if (expected === 'witnessed') expect(page.sourceLinks?.[0].standing).toBe('witnessed');
+    else {
+      expect(page.sourceLinks).toBeUndefined();
+      expect(page.sourceLinkGaps?.[0].code).toBe('stale');
+    }
+  });
+
+  it('invalidates a whole served object when a different field is written', async () => {
+    const input = { key: 'profile', pointer: '/selected' };
+    const wire: RecordSourceLink = {
+      ...link,
+      input,
+      output: { ...link.output, commitIdx: 2 },
+      witness: { ...link.witness, commitIdx: 2 },
+    };
+    const source = fixture([{ ...servedRow, served: [{ key: input.key }] }], wire, { ...row, input });
+    const [consumer, door] = source.commitLog as CommitBundle[];
+    const change: CommitBundle = {
+      ...bundle('change', 1, { profile: { other: 'after' } }),
+      trace: [{ path: 'profile\u001fother', verb: 'set' }],
+    };
+    const scope: RecordScope = {
+      ...source,
+      initialState: { profile: { selected: 'unchanged', other: 'before' } },
+      commitLog: [consumer, change, { ...door, idx: 2 }],
+    };
+    const reader = graph(scope, allow);
+    const page = await reader.parents(reader.nodeId(address, { ...output, commitIdx: 2 }), context());
+    expect(page.sourceLinks).toBeUndefined();
+    expect(page.sourceLinkGaps?.[0].code).toBe('stale');
+  });
+
   it('requires authorization of the whole served write before looking for duplicates', async () => {
     const one = fixture();
     const two = fixture([servedRow, servedRow]);
@@ -274,7 +328,10 @@ describe('served occurrences at the read-window boundary', () => {
   });
 
   it('uses the pinned view and reports an overlapping tracked read as ambiguous', async () => {
-    const sibling = bundle('sibling', 0, { history: ['synthetic value', 'late result'] });
+    const sibling: CommitBundle = {
+      ...bundle('sibling', 0, { history: ['late result'] }),
+      trace: [{ path: 'history', verb: 'append' }],
+    };
     const consumer = bundle('consumer', 1, { served: [servedRow] });
     const witness = bundle('door', 2, { answer: 'a', evidence: [row] });
     const wire = { ...link, output: { ...link.output, commitIdx: 2 }, witness: { ...link.witness, commitIdx: 2 } };
@@ -282,7 +339,7 @@ describe('served occurrences at the read-window boundary', () => {
     expect((await answer(scope)).sourceLinks?.[0].standing).toBe('witnessed');
     const overlapping = withInput(scope, [sibling, { ...consumer, beganAt: 0, sawUntil: 1 }, witness], wire);
     expect((await answer(overlapping)).sourceLinkGaps?.[0].code).toBe('ambiguous');
-    const rewrite = { ...sibling, overwrite: { history: ['changed value'] } };
+    const rewrite = bundle('sibling', 0, { history: ['changed value'] });
     const stale = withInput(scope, [rewrite, { ...consumer, beganAt: 0 }, witness], wire);
     expect((await answer(stale)).sourceLinkGaps?.[0].code).toBe('stale');
   });

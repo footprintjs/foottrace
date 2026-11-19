@@ -1,5 +1,5 @@
 import { deepEqual } from '../../memory/equality.js';
-import { relation, rootOf } from '../../memory/keyPaths.js';
+import { lastBefore, relation, rootOf } from '../../memory/keyPaths.js';
 import { isDeniedSegment, nativeGet } from '../../memory/pathOps.js';
 import type { CommitBundle } from '../../memory/types.js';
 import { windowsOf } from '../../memory/windowPlacement.js';
@@ -7,6 +7,7 @@ import { normalisePath, pathSegments } from '../../record-paths/codec.js';
 import { spend } from '../recordValidation.js';
 import { accountedCount, appendedStart, keyHistory, type KeyHistory } from './history.js';
 import { chargeValue } from './foldBudget.js';
+import { invalidatesServedInput } from './inputStability.js';
 import { historyValue, type HistoryValue } from './historyValue.js';
 import { pointerParts } from './selectors.js';
 import type { SourceLinkOutput, SourceLinkSelection } from './types.js';
@@ -60,6 +61,7 @@ export function sourceLinkReplay(record: ReplayRecord, budget: { left: number })
   const reads = new Map<string, Set<string>>();
   const histories = new Map<string, KeyHistory>();
   const writers = new Map<string, readonly number[]>();
+  const inputEdits = new Map<string, readonly number[]>();
   const scopedRedactions = new Map<string, number>();
   const suffixes = new Map<string, Map<number, number | undefined>>();
   spend(budget, log.length);
@@ -144,15 +146,28 @@ export function sourceLinkReplay(record: ReplayRecord, budget: { left: number })
 
   function writer(place: SourceLinkSelection, before: number): number | undefined {
     if (before > accounted) return undefined;
-    const positions = writePositions(place);
-    let low = 0;
-    let high = positions.length;
-    while (low < high) {
-      const middle = (low + high) >>> 1;
-      if (positions[middle] < before) low = middle + 1;
-      else high = middle;
+    const index = lastBefore(writePositions(place), before);
+    return index < 0 ? undefined : index;
+  }
+
+  function inputEditsOf(selection: SourceLinkSelection): readonly number[] {
+    const identity = JSON.stringify([selection.key, selection.element, selection.pointer]);
+    const cached = inputEdits.get(identity);
+    if (cached) return cached;
+    const tail = selectedParts(selection);
+    const timeline = tail === undefined ? undefined : history(selection.key);
+    const edits: number[] = [];
+    if (tail && timeline) {
+      const path = normalisePath([...pathSegments(selection.key), ...tail]);
+      for (const index of timeline.commits) {
+        const bundle = log[index];
+        spend(budget, bundle.trace.length + 1);
+        if (invalidatesServedInput(bundle, path, selection.key, selection.element, timeline.transition(index)!))
+          edits.push(index);
+      }
     }
-    return positions[low - 1];
+    inputEdits.set(identity, edits);
+    return edits;
   }
 
   function redacted(place: SourceLinkSelection, through: number): boolean {
@@ -189,6 +204,10 @@ export function sourceLinkReplay(record: ReplayRecord, budget: { left: number })
     selectedWrite,
     writtenBetween(place: SourceLinkSelection, start: number, end: number): boolean {
       return (writer(place, end) ?? -1) >= start;
+    },
+    inputChangedBetween(place: SourceLinkSelection, start: number, end: number): boolean {
+      const selection = place.element === undefined ? { key: place.key } : place;
+      return lastBefore(inputEditsOf(selection), end) >= start || (writer(selection, end) ?? -1) >= start;
     },
     spend: (amount: number) => spend(budget, amount),
     writer,
