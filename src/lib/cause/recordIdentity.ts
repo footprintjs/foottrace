@@ -69,7 +69,11 @@ export async function resolveRecordNode(
   try {
     const identity = readNodeIdentity(nodeId),
       scope = await loader.loadScope(identity.address, context);
-    if ('failure' in scope) return scope;
+    // A scope refusal describes the record. An unresolved node only describes the question.
+    if ('failure' in scope) {
+      if (scope.failure === 'node-limit' || scope.failure === 'invalid-data') return { ...scope, recordRefused: true };
+      return scope;
+    }
     const commitIndex =
       identity.commitIdx ?? scope.log.findIndex((bundle) => bundle.runtimeStageId === identity.runtimeStageId);
     if (

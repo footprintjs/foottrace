@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Cause record graphs give a fixed reason on both adjacency pages when a record exceeds the reader’s limits or its data cannot be admitted.
+
 ## 2.2.0 — 2026-11-19
 
 ### Added
