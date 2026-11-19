@@ -811,6 +811,10 @@ for a step. The patterns, with the write-side ones and the JSON encoder,
 are told for teaching in
 [the original performance-pattern guide](https://github.com/footprintjs/footPrint/blob/0ada790ae38c16a58caa72cb9af279efb658035d/docs/guides/performance-patterns.md). These are historical measurements, not a new benchmark claim for this extraction.
 
+A single `stateAt` read freezes and returns its own working copy when the state contains
+only plain objects, arrays and primitive values, and uses native copying for other object types.
+A cursor still returns a separate snapshot because it keeps its working copy for later steps.
+
 ## The contract this reader enforces
 
 What a record must look like, the six laws, the exact gap reasons, and a record built by hand that folds here with no executor: [docs/guides/record-contract.md](../../../docs/guides/record-contract.md). Enforced by `test/lib/time-travel/record-contract.test.ts`.
