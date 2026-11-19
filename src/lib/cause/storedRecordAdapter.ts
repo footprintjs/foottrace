@@ -182,6 +182,13 @@ export function createStoredRecordGraph(
             // Refusing this optional channel must not discard separately admitted local entries.
             stored.push(recordRefusalCode(error) ?? 'invalid-data');
           }
+          let sourceLinks: RecordScope['sourceLinks'];
+          try {
+            sourceLinks = recordOwn(loaded, 'sourceLinks') as RecordScope['sourceLinks'];
+          } catch {
+            // Forward a refusal to the optional channel only.
+            sourceLinks = null as never;
+          }
           return {
             scope: {
               address,
@@ -189,6 +196,7 @@ export function createStoredRecordGraph(
               initialState: log.initialState,
               readSources: recordOwn(loaded, 'readSources') as RecordScope['readSources'],
               subflows,
+              sourceLinks,
               reads: hostReads ?? own?.reads,
               controlDeps: hostControl ?? own?.controlDeps,
               attention: hostMarks ?? own?.attention,

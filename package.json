@@ -55,6 +55,7 @@
       }
     },
     "./package.json": "./package.json",
+    "./fixtures/source-links-v1.json": "./dist/fixtures/source-links-v1.json",
     "./cause": {
       "import": {
         "types": "./dist/esm/cause.d.ts",

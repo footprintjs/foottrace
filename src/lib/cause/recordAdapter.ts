@@ -5,6 +5,8 @@ import { attentionForRecordNode, gapForRecordFailure } from './recordCoverage.js
 import { nodeIdFor } from './recordIdentity.js';
 import { createRecordScopeLoader, openRecordScope } from './recordLoading.js';
 import { createRecordQuery, whenResolved } from './recordQuery.js';
+import { withSourceLinkPage } from './sourceLinks/page.js';
+import { createSourceLinkProjection } from './sourceLinks/project.js';
 import { subflowChildren } from './recordSubflowGraph.js';
 import { recordOptions } from './recordScope.js';
 import type {
@@ -38,6 +40,7 @@ export function createLazyRecordGraph(
   const limits = recordOptions(options),
     loader = createRecordScopeLoader(load, limits);
   const query = createRecordQuery(loader, limits.maxEdges);
+  const linksFor = createSourceLinkProjection(limits.sourceLinkPolicy, limits.maxFields);
   return Object.freeze({
     nodeId: (address: LogAddress, node: RecordNode) => nodeIdFor(address, node),
     captureCoverage: (address: LogAddress, query: CaptureQuery, context: GraphContext) =>
@@ -46,7 +49,10 @@ export function createLazyRecordGraph(
     async parents(nodeId: NodeId, context: GraphContext) {
       return whenResolved(
         await query.resolve(nodeId, context),
-        async (node) => (await query.parents(node, context)).adjacency,
+        async (node) => {
+          const { adjacency } = await query.parents(node, context);
+          return withSourceLinkPage(adjacency, linksFor(node, context, 'parents'));
+        },
         async () => unavailableAdjacency(),
       );
     },
@@ -63,14 +69,16 @@ export function createLazyRecordGraph(
     async children(nodeId: NodeId, context: GraphContext) {
       return whenResolved(
         await query.resolve(nodeId, context),
-        (node) =>
-          subflowChildren(
+        async (node) => {
+          const adjacency = await subflowChildren(
             node,
             context,
             loader,
             limits.maxEdges,
             childrenForRecordNode(node, limits.maxEdges, query.inspect(node, context)),
-          ),
+          );
+          return withSourceLinkPage(adjacency, linksFor(node, context, 'children'));
+        },
         async () => unavailableAdjacency(),
       );
     },

@@ -1,9 +1,11 @@
-import type { Gap, MarkedNode, NodeId, TraversedEdge } from './types.js';
+import type { Gap, MarkedNode, NodeId, SourceLinkPage, TraversedEdge } from './types.js';
 import { Session } from './session.js';
+import { sourceLinkPage } from './sourceLinks/page.js';
+import type { SourceLink, SourceLinkGap } from './sourceLinks/types.js';
 import type { BudgetView } from './queryBudget.js';
 import { adjacency, attention, CALLER_GAP_LIMIT, gap, gaps, uniqueGaps } from './validation.js';
 
-export interface Walk {
+export interface Walk extends SourceLinkPage {
   readonly nodes: readonly NodeId[];
   readonly marked: readonly MarkedNode[];
   readonly edges: readonly TraversedEdge[];
@@ -20,7 +22,9 @@ export async function walk(
     seen = new Set<NodeId>(),
     marks: MarkedNode[] = [],
     edges: TraversedEdge[] = [],
-    missing: Gap[] = [];
+    missing: Gap[] = [],
+    links = new Map<string, SourceLink>(),
+    linkGaps: SourceLinkGap[] = [];
   const enqueue = (id: NodeId, depth: number) => {
     if (seen.has(id)) return;
     const refusal = budget.admit(id);
@@ -61,6 +65,9 @@ export async function walk(
     if (!page.value) continue;
     if (page.value.gaps?.length) missing.push(...page.value.gaps);
     else if (!page.value.complete) missing.push(gap('not-collected', id));
+    // Advisory evidence never enters the queue, edge quota, or completeness calculation.
+    for (const link of page.value.sourceLinks ?? []) links.set(JSON.stringify(link), link);
+    for (const gap of page.value.sourceLinkGaps ?? []) linkGaps.push(gap);
     if (depth >= budget.maxDepth) {
       if (page.value.edges.length) missing.push(gap('depth-limit', id));
       continue;
@@ -95,6 +102,7 @@ export async function walk(
     marked: Object.freeze(marks),
     edges: Object.freeze(edges),
     gaps: uniqueGaps(missing),
+    ...sourceLinkPage([...links.values()], linkGaps),
   });
 }
 /** Iterative three-colour walk; shared nodes remain distinguishable from back edges. */

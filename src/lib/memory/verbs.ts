@@ -464,6 +464,8 @@ export interface KeyFold {
    * it before writing through it. `commitValueAt` on a memoised log starts from a kept generation.
    */
   readonly start?: unknown;
+  /** A recorded own root can be present with the value undefined. */
+  readonly startPresent?: boolean;
   /**
    * Keep GENERATIONS at chosen commits: `at` is asked before a commit's first row (with the fold's state as
    * it stands); for a commit it accepts, `keep` is handed the value at the key before the commit and after
@@ -473,7 +475,7 @@ export interface KeyFold {
    */
   readonly generations?: {
     at(commitIdx: number, state: Readonly<Record<string, unknown>>): boolean;
-    keep(commitIdx: number, before: unknown, after: unknown): void;
+    keep(commitIdx: number, before: unknown, after: unknown, state: Readonly<Record<string, unknown>>): void;
   };
 }
 
@@ -503,7 +505,7 @@ export function foldKey(touches: readonly Touch[], segs: string[], options: KeyF
     }
   }
   const state: Record<string, unknown> = {};
-  if (options.start !== undefined) state[root] = options.start;
+  if (options.start !== undefined || options.startPresent === true) state[root] = options.start;
   let owned = new WeakSet<object>();
   owned.add(state);
   const observe = options.observe;
@@ -521,7 +523,7 @@ export function foldKey(touches: readonly Touch[], segs: string[], options: KeyF
     const touch = touches[i];
     if (at === undefined || touch.commitIdx !== atCommit) {
       if (kept !== -1) {
-        generations!.keep(kept, keptBefore, nativeGet(state, segs));
+        generations!.keep(kept, keptBefore, nativeGet(state, segs), state);
         kept = -1;
         release();
       }
@@ -547,6 +549,6 @@ export function foldKey(touches: readonly Touch[], segs: string[], options: KeyF
     placeVerb(state, rowSegs, next);
     if (watched) observe(touch, before, nativeGet(state, segs));
   }
-  if (kept !== -1) generations!.keep(kept, keptBefore, nativeGet(state, segs));
+  if (kept !== -1) generations!.keep(kept, keptBefore, nativeGet(state, segs), state);
   return nativeGet(state, segs);
 }

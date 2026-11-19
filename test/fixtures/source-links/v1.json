@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "address": { "logRunId": "source-link-fixture", "drillPath": [] },
+  "initialState": { "history": ["synthetic value"] },
+  "servedRow": {
+    "kind": "served",
+    "version": 1,
+    "consumer": "consumer",
+    "served": [{ "key": "history", "elements": [[0, 1]] }]
+  },
+  "witnessRow": {
+    "kind": "source-link",
+    "version": 1,
+    "linkBasis": "reference",
+    "check": "redeemed",
+    "consumer": "consumer",
+    "output": { "key": "answer", "checkedIn": "written" },
+    "input": { "key": "history", "element": 0 }
+  },
+  "witness": { "runtimeStageId": "door", "commitIdx": 1, "key": "evidence", "element": 0 },
+  "boundWrite": { "runtimeStageId": "door", "commitIdx": 1 },
+  "checkPairs": [
+    { "linkBasis": "reference", "check": "redeemed", "standing": "witnessed" },
+    { "linkBasis": "citation", "namedBy": "model", "check": "value-found", "standing": "witnessed" },
+    { "linkBasis": "citation", "namedBy": "provider", "check": "field-matched", "standing": "witnessed" },
+    { "linkBasis": "citation", "namedBy": "person", "check": "no-match", "gap": "no-match" },
+    { "linkBasis": "citation", "namedBy": "model", "check": "not-checked", "gap": "not-checked" },
+    { "linkBasis": "match", "check": "value-found", "standing": "witnessed" },
+    { "linkBasis": "match", "check": "not-checked", "gap": "not-checked" }
+  ]
+}
