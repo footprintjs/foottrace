@@ -21,6 +21,7 @@ import type { Adjacency, GraphContext, NodeId } from './types.js';
 const unavailableAdjacency = (): Adjacency => ({ edges: [], complete: false });
 
 export type {
+  CaptureAwareRecordGraph,
   RecordCauseGraph,
   RecordGraphOptions,
   RecordLoaderResult,

@@ -241,6 +241,10 @@ describe('authorized exact root source evidence', () => {
     const { address: _address, commitLog: _log, complete: _complete, ...evidence } = scope();
     const g = createStoredRecordGraph({ loadLog: () => ({ entries, ...evidence }) });
     expect((await g.parents(ids(g).reader, context())).edges[0]?.nodeId).toBe(ids(g).first);
+    expect(await g.captureCoverage(address, { channel: 'reads', mode: 'full', from: 0, to: 3 }, context())).toEqual({
+      state: 'collection-unknown',
+      reasons: ['unverified'],
+    });
   });
 
   it('adds standard PROV usage only for exact entity joins and preserves original occurrence ordinals', async () => {
