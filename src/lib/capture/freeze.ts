@@ -77,6 +77,16 @@ export function deepFreeze<T>(obj: T, arrays: ArrayWalk = 'every-key'): T {
 }
 
 /**
+ * Take ownership of a disposable replay graph. Its base and every applied operand are already
+ * detached. Plain objects and arrays can therefore be frozen in place. Other kinds must still
+ * pass through native snapshot serialization: it discards, for example, an expando written to a
+ * Date or a nonzero RegExp.lastIndex. Detect them during the existing freeze walk.
+ */
+export function freezeReplayState<T extends object>(state: T): T {
+  return walkAndFreeze(state, false, false, true) ? deepFreeze(structuredClone(state)) : state;
+}
+
+/**
  * Containers of a record that hold — on some path below them — a value freezing cannot seal: `true` once
  * mapped (the container is on an open path), `false` for a record {@link freezeRecord} found open whose
  * paths no serve has mapped yet. A container absent here is sealed whole.
@@ -124,14 +134,17 @@ function isUnsealable(value: object): boolean {
 /**
  * Freeze `root` and every container under it, iteratively; `record` adds the look-through of parts
  * frozen before and the compaction of views over a slice. `true` when something under `root` (or `root`
- * itself) cannot be sealed.
+ * itself) cannot be sealed. A plain-only walk instead stops and returns true at the first non-plain
+ * object so the caller can take a native snapshot.
  */
-function walkAndFreeze(root: object, indices: boolean, record: boolean): boolean {
+function walkAndFreeze(root: object, indices: boolean, record: boolean, plainOnly = false): boolean {
   let open = false;
   let lookedThrough: Set<object> | undefined;
   const stack: object[] = [root];
   while (stack.length > 0) {
     const node = stack.pop()!;
+    // A disposable replay may give up this graph and serialize it; stop before touching a host value.
+    if (plainOnly && !Array.isArray(node) && Object.getPrototypeOf(node) !== Object.prototype) return true;
     if (ArrayBuffer.isView(node)) {
       open = true; // its bytes — and a non-empty one cannot be frozen at all
       continue;

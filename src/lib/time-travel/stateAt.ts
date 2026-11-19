@@ -9,7 +9,7 @@
  * the verbs here.
  */
 
-import { deepFreeze } from '../capture/freeze.js';
+import { deepFreeze, freezeReplayState } from '../capture/freeze.js';
 import type { CommitBundle, MemoryPatch } from '../memory/types.js';
 import { applySmartMergeInto } from '../memory/utils.js';
 import { readLog } from './bundles.js';
@@ -54,7 +54,12 @@ export function readSource(source: FoldSource | undefined): ReadSource {
  * With a single leg this is the 9.17.0 fold, unchanged.
  */
 export function foldLegs(legs: readonly ReadSource[], legIdx: number, through: number): FoldedState {
-  return foldLegsFrom(legs, legIdx, through).folded;
+  const work = foldToStop(legs, legIdx, through);
+  // The seed is cloned, set and append use cloned operands, merge uses cloned updates, and delete
+  // removes a key. No object in this working state belongs to the caller's seed or log.
+  // Before the first bundle, out is already the native clone of the seed, even for a Date or view.
+  const state = legIdx === 0 && work.through === -1 ? deepFreeze(work.out) : freezeReplayState(work.out);
+  return describeFold(work, state);
 }
 
 /**
@@ -94,19 +99,19 @@ function applyLeg(
   return skipped;
 }
 
-/**
- * The fold, resumable. ONE clone per fold: the base is cloned once (or `{}`
- * stands in), every bundle is applied INTO that copy, and the state handed
- * out is one more clone, frozen — so the working copy stays private and a
- * later step can continue from it. Same answer as the 9.17.0 fold, pinned by
- * test/lib/time-travel/fold-memo.test.ts against a fresh fold at every stop.
- */
+/** A cursor retains the mutable work and gives the caller a separate frozen snapshot. */
 export function foldLegsFrom(
   legs: readonly ReadSource[],
   legIdx: number,
   through: number,
   memo?: FoldMemo,
 ): { readonly folded: FoldedState; readonly memo: FoldMemo } {
+  const work = foldToStop(legs, legIdx, through, memo);
+  return { folded: describeFold(work, deepFreeze(structuredClone(work.out))), memo: work };
+}
+
+/** Replay the selected bundles into private working state using the live verb law. */
+function foldToStop(legs: readonly ReadSource[], legIdx: number, through: number, memo?: FoldMemo): FoldMemo {
   const last = legs[legIdx];
   const endOnLeg = last ? Math.min(through, last.log.length - 1) : -1;
   const lastThrough = endOnLeg < -1 ? -1 : endOnLeg;
@@ -131,17 +136,19 @@ export function foldLegsFrom(
     }
   }
 
-  const basis: FoldBasis = based ? 'initial+log' : 'log-only';
-  const folded: FoldedState = {
-    // The one freeze walk (`capture/freeze.ts`): a typed array in state is skipped, not thrown on.
-    state: deepFreeze(structuredClone(out)),
+  return { legIdx, through: lastThrough, out, based, redactedPaths, skipped };
+}
+
+function describeFold(work: FoldMemo, state: Record<string, unknown>): FoldedState {
+  const basis: FoldBasis = work.based ? 'initial+log' : 'log-only';
+  return {
+    state,
     basis,
-    redacted: redactedPaths.size > 0,
-    redactedPaths: Object.freeze([...redactedPaths].sort()),
-    throughCommitIdx: lastThrough,
-    ...(skipped ? { skipped: Object.freeze(skipped) } : {}),
+    redacted: work.redactedPaths.size > 0,
+    redactedPaths: Object.freeze([...work.redactedPaths].sort()),
+    throughCommitIdx: work.through,
+    ...(work.skipped ? { skipped: Object.freeze(work.skipped) } : {}),
   };
-  return { folded, memo: { legIdx, through: lastThrough, out, based, redactedPaths, skipped } };
 }
 
 /**
