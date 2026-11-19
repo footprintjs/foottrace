@@ -1,4 +1,8 @@
-/** Finite public-API byte witnesses captured from unchanged 4899960 source, before A1–A4 restructuring. */
+/**
+ * Finite public-API byte witnesses captured from unchanged 4899960 source, before A1–A4 restructuring.
+ * Foottrace #100 updates only record/preparation-limit: both pages carry the loader's node-limit gap,
+ * so explain can report that reason without also adding the generic not-collected gap.
+ */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import * as cause from '../../src/cause.js';

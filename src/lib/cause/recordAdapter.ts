@@ -22,7 +22,7 @@ import type { Adjacency, GraphContext, NodeId } from './types.js';
 const unavailableAdjacency = (failure: RecordLoadFailure): Adjacency => ({
   edges: [],
   complete: false,
-  ...(failure.recordRefused ? { gaps: gapForRecordFailure(failure.failure) } : {}),
+  ...(failure.scopeLoadFailed ? { gaps: gapForRecordFailure(failure.failure) } : {}),
 });
 
 export type {
@@ -30,7 +30,6 @@ export type {
   RecordCauseGraph,
   RecordGraphOptions,
   RecordLoaderResult,
-  RecordLoadFailure,
   RecordNode,
   RecordScope,
 } from './recordTypes.js';
