@@ -208,15 +208,81 @@ describe.each([
     expect(stale.sourceLinkGaps?.[0].code).toBe('stale');
   });
 
+  const allowSelectedProfile: SourceLinkPolicy = (locator) =>
+    locator.key !== 'profile' || (locator.at === 'view' && locator.pointer === selectedProfile.pointer);
+
   it('returns identical public bytes for different text in an ungranted sibling', async () => {
-    const allowSelected: SourceLinkPolicy = (locator) =>
-      locator.key !== 'profile' || (locator.at === 'view' && locator.pointer === selectedProfile.pointer);
     const read = (other: string) =>
-      laterParents(profileWrite(other, { selected: 'unchanged', other }, 'profile\u001fother'), allowSelected, 20000);
+      laterParents(
+        profileWrite(other, { selected: 'unchanged', other }, 'profile\u001fother'),
+        allowSelectedProfile,
+        20000,
+      );
     const short = await read('');
     const long = await read('synthetic sibling text '.repeat(300));
     expect(short.sourceLinks?.[0].standing).toBe('witnessed');
     expect(JSON.stringify(long)).toBe(JSON.stringify(short));
+  });
+
+  it('treats ungranted base text equally on both sides of the old log text limit', async () => {
+    const wire = { ...link, input: selectedProfile };
+    const source = fixture([{ ...servedRow, served: [{ key: selectedProfile.key }] }], wire, {
+      ...row,
+      input: selectedProfile,
+    });
+    const read = (length: number) => {
+      const initialState = { profile: { selected: 'unchanged', other: 'x'.repeat(length) } };
+      const reader = graph({ ...source, initialState }, allowSelectedProfile);
+      return reader.parents(reader.nodeId(address, output), context());
+    };
+    const atLimit = await read(65_536);
+    const aboveLimit = await read(65_537);
+    expect(atLimit.sourceLinks?.[0].standing).toBe('witnessed');
+    expect(JSON.stringify(aboveLimit)).toBe(JSON.stringify(atLimit));
+  });
+
+  it('still follows the older record-reader text cap for commit payloads', async () => {
+    const read = (length: number) =>
+      laterParents(
+        profileWrite('', { selected: 'unchanged', other: 'x'.repeat(length) }, 'profile\u001fother'),
+        allowSelectedProfile,
+      );
+    expect((await read(65_536)).sourceLinks?.[0].standing).toBe('witnessed');
+    expect(await read(65_537)).toEqual({ edges: [], complete: false });
+  });
+
+  it('keeps an early object citation after 100 appends at default limits', async () => {
+    const entry = () => ({
+      rows: Array.from({ length: 20 }, () => ({ a: 1, b: 2, c: 3, d: 4, e: 5 })),
+    });
+    const input = { key: 'history', element: 1 };
+    const appends = Array.from(
+      { length: 100 },
+      (_, index): CommitBundle => ({
+        ...bundle('append', index + 1, { history: [entry()] }),
+        trace: [{ path: 'history', verb: 'append' }],
+      }),
+    );
+    const commitIdx = appends.length + 1;
+    const wire = {
+      ...link,
+      input,
+      output: { ...link.output, commitIdx },
+      witness: { ...link.witness, commitIdx },
+    };
+    const served = [{ ...servedRow, served: [{ key: input.key, elements: [[0, 2] as const] }] }];
+    const source = fixture(served, wire, { ...row, input });
+    const [consumer, door] = source.commitLog as readonly CommitBundle[];
+    const reader = graph(
+      {
+        ...source,
+        initialState: { history: [entry(), entry()] },
+        commitLog: [consumer, ...appends, { ...door, idx: commitIdx }],
+      },
+      allow,
+    );
+    const result = await reader.parents(reader.nodeId(address, wire.output), context());
+    expect(result.sourceLinks?.[0].standing).toBe('witnessed');
   });
 
   it('requires authorization of the whole served write before looking for duplicates', async () => {
@@ -276,6 +342,12 @@ describe('public source-link row decoding and binding', () => {
     expect(readSourceLinkRow(row)).toEqual(row);
     expect(readServedRow(servedRow)).toEqual(servedRow);
     expect(bindSourceLinkWrite(fixture(), location)).toEqual(shared.boundWrite);
+  });
+
+  it('binds a write when an unrelated base field exceeds the old log text limit', () => {
+    const scope = fixture();
+    const initialState = { ...scope.initialState, other: 'x'.repeat(65_537) };
+    expect(bindSourceLinkWrite({ ...scope, initialState }, location)).toEqual(shared.boundWrite);
   });
 
   it('rejects invalid ranges, unknown versions and accessors without running them', () => {

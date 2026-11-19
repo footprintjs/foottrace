@@ -64,7 +64,7 @@ export function bindSourceLinkWrite(
     });
     const initial = recordOwn(scope, 'initialState');
     if (initial === null || typeof initial !== 'object' || Array.isArray(initial)) return undefined;
-    const base = dataCopy(initial, budget) as Record<string, unknown>;
+    const base = dataCopy(initial, budget, { allowLongText: true }) as Record<string, unknown>;
     const reads = mapOf(recordOwn(scope, 'reads'), log.length, (value) => names(value, 128, true), budget);
     const replay = sourceLinkReplay({ log, base, reads }, budget);
     const row = committedRow(replay, where);

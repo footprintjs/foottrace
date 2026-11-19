@@ -132,7 +132,11 @@ export function createStoredRecordGraph(
                 kind,
                 address: a,
                 at,
-                initialState: dataCopy(recordOwn(entry, 'initialState'), budget),
+                // A source-link host uses the opened entry as the fold base. Keep the
+                // legacy text cap on commit payloads and on callers without that policy.
+                initialState: dataCopy(recordOwn(entry, 'initialState'), budget, {
+                  allowLongText: limits.sourceLinkPolicy !== undefined,
+                }),
                 ...(collects === undefined ? {} : { collects }),
               });
             } else if (kind === 'closed') {

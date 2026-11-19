@@ -131,7 +131,7 @@ export function sourceLinkReplay(record: ReplayRecord, budget: { left: number })
         const change = timeline.transition(index)!;
         const before = selected(change.before, parts);
         const after = selected(change.after, parts);
-        if (before.present && after.present) {
+        if (before.present && after.present && before.value !== after.value) {
           chargeShape(budget, before.value);
           chargeShape(budget, after.value);
         }
