@@ -43,7 +43,7 @@ env:
 jobs:
   plan:
     if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       plan: ${{ steps.control.outputs.plan }}
@@ -66,7 +66,7 @@ jobs:
   prepare:
     needs: plan
     if: needs.plan.outputs.mode == 'prepare'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       artifact: ${{ steps.upload.outputs.artifact-id }}
@@ -97,7 +97,7 @@ jobs:
   proposal:
     needs: [plan, prepare]
     if: needs.plan.outputs.mode == 'prepare' && needs.prepare.result == 'success'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -128,7 +128,7 @@ jobs:
   authority:
     needs: plan
     if: needs.plan.outputs.mode == 'publish' || needs.plan.outputs.mode == 'rc'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       identity: ${{ steps.control.outputs.identity }}
@@ -152,7 +152,7 @@ jobs:
         run: node scripts/release-runner.cjs authority
   verdict:
     needs: [plan, authority]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       tested: ${{ steps.control.outputs.tested }}
@@ -180,7 +180,7 @@ jobs:
       fail-fast: false
       matrix:
         node: [22, 24]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
       contents: read
@@ -202,7 +202,7 @@ jobs:
     if: >-
       always() && !cancelled() && needs.plan.result == 'success' && needs.authority.result == 'success' && needs.verdict.result == 'success' &&
       ((needs.verdict.outputs.tested == 'true' && needs.gates.result == 'skipped') || (needs.verdict.outputs.tested != 'true' && needs.gates.result == 'success'))
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     outputs:
       artifact: ${{ steps.upload.outputs.artifact-id }}
@@ -256,7 +256,7 @@ jobs:
   release:
     needs: [plan, authority, build]
     if: always() && !cancelled() && needs.plan.result == 'success' && needs.authority.result == 'success' && needs.build.result == 'success'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       contents: write
@@ -287,7 +287,7 @@ jobs:
   publish:
     needs: [plan, authority, build, release]
     if: always() && !cancelled() && needs.plan.result == 'success' && needs.authority.result == 'success' && needs.build.result == 'success' && needs.release.result == 'success' && needs.release.outputs.fresh == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       contents: read
@@ -337,7 +337,7 @@ jobs:
     if: >-
       always() && !cancelled() && needs.plan.result == 'success' &&
       (needs.plan.outputs.mode == 'verify' || (needs.release.result == 'success' && (needs.release.outputs.fresh == 'false' || needs.publish.result == 'success' || needs.publish.result == 'failure')))
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
