@@ -1,6 +1,5 @@
 import type { GapCode } from '../types.js';
 import type { SourceLinkReplay } from './replay.js';
-import { resolves } from './replay.js';
 import { readServedRow } from './rows.js';
 import type { RecordSourceLink, ServedRow, SourceLinkSelection } from './types.js';
 
@@ -16,14 +15,15 @@ function requestGap(
   if (!served) return 'not-collected';
   const start = replay.appended(served.key, first);
   if (start === undefined) return 'not-collected';
-  const list = replay.value(served.key, first);
-  if (!Array.isArray(list)) return 'not-collected';
+  const list = replay.list(served.key, first);
+  if (!list) return 'not-collected';
   replay.spend(list.length - start);
   let selected: ServedRow | undefined;
   for (let index = start; index < list.length; index++) {
-    if (!Object.hasOwn(list, index)) continue;
     if (replay.redacted({ key: served.key, element: index }, first)) return 'not-collected';
-    const row = readServedRow(list[index]);
+    const entry = list.element(index);
+    if (!entry.present) continue;
+    const row = readServedRow(entry.value);
     if (!row) continue;
     if (selected) return 'ambiguous';
     selected = row;
@@ -52,8 +52,7 @@ export function resolveInput(
   if (replay.writtenBetween({ key: input.key }, view.start, view.end)) return { gap: 'ambiguous' };
   const viewStop = view.start - 1;
   if (replay.redacted(input, viewStop)) return { gap: 'redacted' };
-  if (!replay.exists(input.key, viewStop) || !resolves(replay.value(input.key, viewStop), input))
-    return { gap: 'stale' };
+  if (!replay.resolves(input, viewStop)) return { gap: 'stale' };
   const missing = requestGap(replay, first, consumer, link.served, input);
   if (missing) return { gap: missing };
   if (replay.writtenBetween(input, view.start, link.witness.commitIdx + 1)) return { gap: 'stale' };

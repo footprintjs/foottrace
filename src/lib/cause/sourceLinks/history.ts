@@ -1,15 +1,12 @@
 import { rowsUnderRoot } from '../../memory/commitLogUtils.js';
 import { nativeGet, nativeHas } from '../../memory/pathOps.js';
 import type { CommitBundle } from '../../memory/types.js';
-import { foldKey } from '../../memory/verbs.js';
+import { foldKey, isTotal, recordsTail } from '../../memory/verbs.js';
 import { pathSegments } from '../../record-paths/codec.js';
-
-interface Transition {
-  readonly before: unknown;
-  readonly after: unknown;
-  readonly beforePresent: boolean;
-  readonly afterPresent: boolean;
-}
+import { spend } from '../recordValidation.js';
+import { chargeRow, chargeValue } from './foldBudget.js';
+import { historyLookup, historyValue, type Transition } from './historyValue.js';
+import { directHistory } from './listHistory.js';
 
 /**
  * Count the contiguous prefix whose state can be replayed from the admitted base.
@@ -22,43 +19,47 @@ export function accountedCount(log: readonly CommitBundle[], base: object | unde
   return count;
 }
 
-/** Observe based commit generations with the ordinary replay verb law, once per key. */
-export function keyHistory(log: readonly CommitBundle[], base: Record<string, unknown>, key: string, stop: number) {
+export function keyHistory(
+  log: readonly CommitBundle[],
+  base: Record<string, unknown>,
+  key: string,
+  stop: number,
+  budget: { left: number },
+) {
   const segments = pathSegments(key);
-  const root = segments.slice(0, 1);
+  const root = segments[0];
+  const start = nativeGet(base, [root]);
+  const initial = historyValue(nativeHas(base, segments), nativeGet(base, segments));
+  const touches = rowsUnderRoot(log, key, stop);
+  spend(budget, touches.length);
+  chargeValue(budget, start);
+  if (touches.every((touch) => touch.path === key && (isTotal(touch.verb) || recordsTail(touch.verb)))) {
+    return directHistory(touches, segments, initial, budget);
+  }
+
   let beforePresent = false;
   const states = new Map<number, Transition>();
   const commits: number[] = [];
-  foldKey(rowsUnderRoot(log, key, stop), segments, {
-    start: nativeGet(base, root),
-    startPresent: nativeHas(base, root),
+  foldKey(touches, segments, {
+    start,
+    startPresent: nativeHas(base, [root]),
+    beforeRow: (touch, state) => chargeRow(budget, touch, state, root),
     generations: {
       at(_, state) {
         beforePresent = nativeHas(state, segments);
         return true;
       },
       keep(index, before, after, state) {
+        spend(budget, 3);
         commits.push(index);
-        states.set(index, { before, after, beforePresent, afterPresent: nativeHas(state, segments) });
+        states.set(index, {
+          before: historyValue(beforePresent, before),
+          after: historyValue(nativeHas(state, segments), after),
+        });
       },
     },
   });
-  return {
-    commits,
-    transition: (index: number) => states.get(index),
-    at(index: number): { value: unknown; present: boolean } {
-      let low = 0;
-      let high = commits.length;
-      while (low < high) {
-        const mid = (low + high) >>> 1;
-        if (commits[mid] <= index) low = mid + 1;
-        else high = mid;
-      }
-      if (low === 0) return { value: nativeGet(base, segments), present: nativeHas(base, segments) };
-      const state = states.get(commits[low - 1])!;
-      return { value: state.after, present: state.afterPresent };
-    },
-  };
+  return historyLookup(commits, states, initial);
 }
 
 export type KeyHistory = ReturnType<typeof keyHistory>;
@@ -69,8 +70,8 @@ export type KeyHistory = ReturnType<typeof keyHistory>;
  * element is part of the row's proof.
  */
 export function appendedStart(bundle: CommitBundle, key: string, change: Transition | undefined): number | undefined {
-  if (!change || !Array.isArray(change.after) || !bundle.trace.some((row) => row.path === key)) return undefined;
-  if (!change.beforePresent) return 0;
-  if (!Array.isArray(change.before) || change.before.length >= change.after.length) return undefined;
-  return change.before.length;
+  if (!change?.after.list || !bundle.trace.some((row) => row.path === key)) return undefined;
+  if (!change.before.present) return 0;
+  if (!change.before.list || change.before.list.length >= change.after.list.length) return undefined;
+  return change.before.list.length;
 }

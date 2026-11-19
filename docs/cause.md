@@ -78,6 +78,16 @@ await graph.gaps(node('fill', 'box'));    // [ untracked-input ]
 
 An authorized host can supply `RecordScope.readSources` and the same scope's `initialState`. Exact committed observations use `recorded-read` source-to-execution edges, and forward impact reaches that consuming execution. Key-qualified output links remain conservative because the source channel does not join each occurrence to a write. Base observations are known pre-run termini. Missing, staged, child/resume and unsupported evidence retains gaps. See the [shared source contract](read-sources.md#consume-an-authorized-root-observation) for authorization, bounds and PROV meaning.
 
+## Optional source links
+
+A producer can attach `sourceLinks` version 1 to an in-memory scope or a stored scope. The channel reports what a recorded check cites for an exact output, with its own `witnessed` or `declared` standing. A witnessed link binds the check to a committed row and the consumer's admitted view. It makes no claim about whether the model used the cited value or whether the value is correct.
+
+The host supplies `sourceLinkPolicy` to either record adapter. It grants the complete output, witness, served write and input-view locators before replay and again before a link is returned. A locator on the served key grants the entire first-commit write. To show an origin, the policy also grants the exact origin write. With no policy the channel reports `not-permitted`. A granted view without a disclosed origin can still produce a link with the fixed `unavailable` reason.
+
+Read `sourceLinks` and `sourceLinkGaps` on the graph page or explanation. They are supplemental evidence with their own budget and do not affect root ranking, traversal or completeness. A truncated channel keeps the recorded graph available. The base and commit log are copied together at scope admission so a cached graph reads one snapshot.
+
+The [synthetic example](../examples/source-links.ts) creates a record, grants specific locators and reads a witnessed link. Producer-side tools can use `readSourceLinkRow`, `readServedRow` and `bindSourceLinkWrite` from `foottrace/cause` to check the same row contract before delivery.
+
 ## 2. Adapt an authorized stored record
 
 A stored host can expose one authorized log at a time:

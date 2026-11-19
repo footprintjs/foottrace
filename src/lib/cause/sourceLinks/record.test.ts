@@ -287,3 +287,25 @@ describe('served occurrences at the read-window boundary', () => {
     expect((await answer(stale)).sourceLinkGaps?.[0].code).toBe('stale');
   });
 });
+
+describe('scope snapshot and accounted history', () => {
+  it('copies the source-link base when the scope log is admitted', async () => {
+    const scope = fixture();
+    const reader = createRecordGraph([scope], { sourceLinkPolicy: allow });
+    await reader.openScope(address, context());
+    (scope.initialState!.history as string[]).length = 0;
+    const page = await reader.parents(reader.nodeId(address, output), context());
+    expect(page.sourceLinks?.[0].standing).toBe('witnessed');
+  });
+
+  it('reports missing history separately from a selector missing in observed state', async () => {
+    const read = (scope: RecordScope) => {
+      const reader = createRecordGraph([scope], { sourceLinkPolicy: allow });
+      return reader.parents(reader.nodeId(address, output), context());
+    };
+    const withoutBase = await read({ ...fixture(), initialState: undefined });
+    expect(withoutBase.sourceLinkGaps?.[0].code).toBe('not-collected');
+    const badSpan = { ...link, output: { ...link.output, span: [0, 100] as const } };
+    expect((await read(fixture([servedRow], badSpan))).sourceLinkGaps?.[0].code).toBe('stale');
+  });
+});

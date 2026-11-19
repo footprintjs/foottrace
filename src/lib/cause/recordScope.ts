@@ -69,6 +69,7 @@ export function prepareRecordScope(
   maximumCommits: number,
   maximumFields: number,
   maximumScopes = 32,
+  sourceLinkPolicyIsSet = false,
 ): PreparedRecordScope {
   if (addressKey(addressOf(recordOwn(value, 'address'))) !== addressKey(address)) throw new RecordRefusal();
   const rawLog = recordList(recordOwn(value, 'commitLog'), maximumCommits),
@@ -128,20 +129,18 @@ export function prepareRecordScope(
   } catch (error) {
     sourceLinks = { links: [], gaps: [recordRefusalCode(error) ?? 'invalid-data'] };
   }
-  // Keep one bounded input for replay. Authorization is checked before a query folds anything.
-  let sourceLinkReplayInput: PreparedRecordScope['sourceLinkReplayInput'];
-  if (sourceLinks?.links.length) {
-    let base: Record<string, unknown> | undefined;
-    let copied = false;
-    sourceLinkReplayInput = () => {
-      if (!copied) {
-        const raw = recordOwn(value, 'initialState');
-        if (raw !== null && typeof raw === 'object' && !Array.isArray(raw))
-          base = dataCopy(raw, budget) as Record<string, unknown>;
-        copied = true;
-      }
-      return base;
-    };
+  // Snapshot the base during admission with the log, under the remaining field budget.
+  // A link's own policy must still grant all locators before replay reads these values.
+  let sourceLinkBase: PreparedRecordScope['sourceLinkBase'];
+  if (sourceLinks?.links.length && sourceLinkPolicyIsSet) {
+    try {
+      const raw = recordOwn(value, 'initialState');
+      if (raw !== null && typeof raw === 'object' && !Array.isArray(raw))
+        sourceLinkBase = dataCopy(raw, budget) as Record<string, unknown>;
+    } catch (error) {
+      const code = recordRefusalCode(error);
+      sourceLinks = { links: [], gaps: [code === 'node-limit' ? 'truncated' : 'invalid-data'] };
+    }
   }
   const scope: PreparedRecordScope = {
     address,
@@ -154,7 +153,7 @@ export function prepareRecordScope(
     ...(readSources ? { readSources } : {}),
     subflows,
     ...(sourceLinks ? { sourceLinks } : {}),
-    ...(sourceLinkReplayInput ? { sourceLinkReplayInput } : {}),
+    ...(sourceLinkBase ? { sourceLinkBase } : {}),
   };
   if (readSources) scope.sourceCoveredExecutions = sourceCoveredExecutions(scope);
   return scope;

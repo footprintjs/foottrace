@@ -56,6 +56,7 @@ function admitLoadedScope(
       limits.maxCommits,
       limits.maxFields,
       limits.maxScopes,
+      limits.sourceLinkPolicy !== undefined,
     );
     const extra = recordList(recordOwn(result, 'gaps') ?? [], 32);
     // Coverage belongs to this admitted object, so cached scopes retain the same gap ordering and ownership.

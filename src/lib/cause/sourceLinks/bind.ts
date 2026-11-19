@@ -2,7 +2,7 @@ import { placedAt } from '../../memory/readWindow.js';
 import type { CommitBundle } from '../../memory/types.js';
 import { bundleOf, dataCopy, mapOf, names, recordList, recordOwn } from '../recordValidation.js';
 import { rowLocation } from './admission.js';
-import { resolves, sourceLinkReplay, type SourceLinkReplay } from './replay.js';
+import { sourceLinkReplay, type SourceLinkReplay } from './replay.js';
 import { readSourceLinkRow } from './rows.js';
 import type { SourceLinkRow, SourceLinkRowLocation, SourceLinkWrite } from './types.js';
 
@@ -12,10 +12,8 @@ export function committedRow(replay: SourceLinkReplay, location: SourceLinkRowLo
     return undefined;
   const start = replay.appended(location.key, location.commitIdx);
   if (start === undefined || location.element < start) return undefined;
-  const list = replay.value(location.key, location.commitIdx);
-  return Array.isArray(list) && Object.hasOwn(list, location.element)
-    ? readSourceLinkRow(list[location.element])
-    : undefined;
+  const entry = replay.list(location.key, location.commitIdx)?.element(location.element);
+  return entry?.present ? readSourceLinkRow(entry.value) : undefined;
 }
 
 export function boundWrite(
@@ -36,12 +34,7 @@ export function boundWrite(
     if (replay.writtenBetween({ key: output.key }, view.start, view.end)) return undefined;
     index = replay.writer(output, view.start);
   }
-  if (
-    index === undefined ||
-    index < first ||
-    replay.redacted(output, index) ||
-    !resolves(replay.value(output.key, index), output)
-  )
+  if (index === undefined || index < first || replay.redacted(output, index) || !replay.resolves(output, index))
     return undefined;
   return { commitIdx: index, runtimeStageId: replay.log[index].runtimeStageId };
 }

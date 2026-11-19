@@ -1,11 +1,13 @@
 import { deepEqual } from '../../memory/equality.js';
-import { relation } from '../../memory/keyPaths.js';
+import { relation, rootOf } from '../../memory/keyPaths.js';
 import { isDeniedSegment, nativeGet } from '../../memory/pathOps.js';
 import type { CommitBundle } from '../../memory/types.js';
 import { windowsOf } from '../../memory/windowPlacement.js';
 import { normalisePath, pathSegments } from '../../record-paths/codec.js';
 import { spend } from '../recordValidation.js';
 import { accountedCount, appendedStart, keyHistory, type KeyHistory } from './history.js';
+import { chargeValue } from './foldBudget.js';
+import { historyValue, type HistoryValue } from './historyValue.js';
 import { pointerParts } from './selectors.js';
 import type { SourceLinkOutput, SourceLinkSelection } from './types.js';
 
@@ -22,30 +24,29 @@ function selectedParts(place: SourceLinkSelection): string[] | undefined {
   return [...parts, ...tail];
 }
 
-interface SelectedValue {
-  readonly found: boolean;
-  readonly value: unknown;
-}
-const absent: SelectedValue = { found: false, value: undefined };
-
 /** RFC 6901 list tokens use canonical indices, independently of own array properties. */
-function selected(value: unknown, path: readonly string[]): SelectedValue {
+function selected(value: HistoryValue, path: readonly string[]): HistoryValue {
   let current = value;
   for (const part of path) {
-    if (typeof current !== 'object' || current === null) return absent;
-    if (Array.isArray(current) && !/^(0|[1-9][0-9]*)$/u.test(part)) return absent;
-    if (!Object.hasOwn(current, part)) return absent;
-    current = nativeGet(current, [part]);
+    if (current.list) {
+      if (!/^(0|[1-9][0-9]*)$/u.test(part)) return historyValue(false, undefined);
+      current = current.list.element(Number(part));
+    } else {
+      const parent = current.value;
+      if (typeof parent !== 'object' || parent === null || !Object.hasOwn(parent, part))
+        return historyValue(false, undefined);
+      current = historyValue(true, nativeGet(parent, [part]));
+    }
   }
-  return { found: true, value: current };
+  return current;
 }
 
-export function resolves(value: unknown, place: SourceLinkSelection & Pick<SourceLinkOutput, 'span'>): boolean {
+function resolves(at: HistoryValue, place: SourceLinkSelection & Pick<SourceLinkOutput, 'span'>): boolean {
   const parts = selectedParts(place);
-  if (!parts || (place.element !== undefined && !Array.isArray(value))) return false;
-  const result = selected(value, parts);
+  if (!parts || (place.element !== undefined && !at.list)) return false;
+  const result = selected(at, parts);
   return (
-    result.found &&
+    result.present &&
     (place.span === undefined || (typeof result.value === 'string' && place.span[1] <= result.value.length))
   );
 }
@@ -62,24 +63,30 @@ export function sourceLinkReplay(record: ReplayRecord, budget: { left: number })
   const scopedRedactions = new Map<string, number>();
   const suffixes = new Map<string, Map<number, number | undefined>>();
   spend(budget, log.length);
-  let foldCost = 1;
+  let indexCost = 1;
+  const rootCosts = new Map<string, number>();
   log.forEach((bundle, index) => {
     if (!firstByOwner.has(bundle.runtimeStageId)) firstByOwner.set(bundle.runtimeStageId, index);
     spend(budget, bundle.trace.length);
     const known = reads.get(bundle.runtimeStageId) ?? new Set(record.reads?.get(bundle.runtimeStageId));
     for (const row of bundle.trace) {
-      foldCost += row.path.length + 1;
+      const cost = row.path.length * 2 + 4;
+      indexCost += cost;
+      const root = rootOf(row.path);
+      rootCosts.set(root, (rootCosts.get(root) ?? 0) + cost);
       for (const key of row.readKeys ?? []) known.add(key);
     }
     reads.set(bundle.runtimeStageId, known);
   });
 
+  spend(budget, indexCost);
+
   function history(key: string): KeyHistory | undefined {
     if (!base) return undefined;
     let value = histories.get(key);
     if (value === undefined) {
-      spend(budget, foldCost);
-      value = keyHistory(log, base, key, accounted - 1);
+      spend(budget, 1 + (rootCosts.get(rootOf(key)) ?? 0));
+      value = keyHistory(log, base, key, accounted - 1, budget);
       histories.set(key, value);
     }
     return value;
@@ -117,15 +124,18 @@ export function sourceLinkReplay(record: ReplayRecord, budget: { left: number })
           const relative = relation(row.path, path);
           return relative === 'exact' || relative === 'inside';
         });
-        const change = timeline.transition(index)!;
-        const before = parts.length
-          ? selected(change.before, parts)
-          : { found: change.beforePresent, value: change.before };
-        const after = parts.length
-          ? selected(change.after, parts)
-          : { found: change.afterPresent, value: change.after };
-        if (direct || before.found !== after.found || !deepEqual(before.value, after.value, 'copies'))
+        if (direct) {
           visits.push(index);
+          continue;
+        }
+        const change = timeline.transition(index)!;
+        const before = selected(change.before, parts);
+        const after = selected(change.after, parts);
+        if (before.present && after.present && before.value !== after.value) {
+          chargeValue(budget, before.value);
+          chargeValue(budget, after.value);
+        }
+        if (before.present !== after.present || !deepEqual(before.value, after.value, 'copies')) visits.push(index);
       }
     }
     writers.set(identity, visits);
@@ -170,8 +180,11 @@ export function sourceLinkReplay(record: ReplayRecord, budget: { left: number })
     window,
     first: (owner: string) => firstByOwner.get(owner),
     read: (owner: string, key: string) => reads.get(owner)?.has(key) === true,
-    value: (key: string, index: number) => history(key)?.at(index).value,
-    exists: (key: string, index: number) => history(key)?.at(index).present === true,
+    resolves(place: SourceLinkSelection & Pick<SourceLinkOutput, 'span'>, index: number): boolean {
+      const at = history(place.key)?.at(index);
+      return at !== undefined && resolves(at, place);
+    },
+    list: (key: string, index: number) => history(key)?.at(index).list,
     appended,
     selectedWrite,
     writtenBetween(place: SourceLinkSelection, start: number, end: number): boolean {

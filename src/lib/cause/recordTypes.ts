@@ -70,7 +70,7 @@ export interface PreparedRecordScope {
   readSources?: PreparedReadSources;
   subflows?: PreparedRecordSubflows;
   sourceLinks?: SourceLinkInventory;
-  sourceLinkReplayInput?: () => Record<string, unknown> | undefined;
+  sourceLinkBase?: Record<string, unknown>;
   sourceCoveredExecutions?: ReadonlySet<string>;
 }
 export interface RecordLoadFailure {

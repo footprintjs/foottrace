@@ -4,7 +4,7 @@ import type { GapCode, GraphContext } from '../types.js';
 import { boundWrite, committedRow } from './bind.js';
 import { resolveInput } from './input.js';
 import { allows, locators, writeLocator } from './policy.js';
-import { resolves, type SourceLinkReplay } from './replay.js';
+import type { SourceLinkReplay } from './replay.js';
 import type {
   RecordSourceLink,
   SourceLink,
@@ -74,11 +74,11 @@ export function resolveLink(
   if (link.leafWithheld) return outputGap('redacted');
   const replay = replayFor();
   if (!replay) return outputGap('not-collected');
-  const { commitIdx, runtimeStageId, key } = link.output;
-  if (commitIdx >= replay.accounted || replay.log[commitIdx]?.runtimeStageId !== runtimeStageId)
-    return outputGap('stale');
+  const { commitIdx, runtimeStageId } = link.output;
+  if (commitIdx >= replay.accounted) return outputGap('not-collected');
+  if (replay.log[commitIdx]?.runtimeStageId !== runtimeStageId) return outputGap('stale');
   if (replay.redacted(link.output, commitIdx)) return outputGap('redacted');
-  if (!replay.exists(key, commitIdx) || !resolves(replay.value(key, commitIdx), link.output)) return outputGap('stale');
+  if (!replay.resolves(link.output, commitIdx)) return outputGap('stale');
   if (link.check === 'no-match' || link.check === 'not-checked') return outputGap(link.check);
   if (!link.input || !lookup.view) return outputGap('not-collected');
   const input = resolveInput(replay, link, link.input);

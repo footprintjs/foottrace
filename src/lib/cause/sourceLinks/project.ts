@@ -41,7 +41,7 @@ export function createSourceLinkProjection(policy: SourceLinkPolicy | undefined,
       (state.replay ??= sourceLinkReplay(
         {
           log: scope.log,
-          base: scope.sourceLinkReplayInput?.(),
+          base: scope.sourceLinkBase,
           reads: scope.reads,
         },
         budget,
