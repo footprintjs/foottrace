@@ -41,3 +41,13 @@ export type {
   RecordSubflowMount,
   RecordSubflows,
 } from './lib/cause/recordSubflows.js';
+export type {
+  CaptureChannel,
+  CaptureCoverage,
+  CaptureFailure,
+  CaptureMode,
+  CaptureQuery,
+  CaptureReason,
+  CaptureWitness,
+} from './lib/cause/recordCapture.js';
+export type { CaptureAwareRecordGraph } from './lib/cause/recordTypes.js';

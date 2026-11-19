@@ -1,3 +1,4 @@
+import { decodeRecordCapture } from './recordCapture.js';
 import { prepareReadSources } from './recordSources.js';
 import { prepareRecordSubflows, type PreparedRecordSubflows } from './recordSubflows.js';
 import type { LogAddress } from '../memory/eventPosition.js';
@@ -107,6 +108,7 @@ export function prepareRecordScope(
     // A refused optional channel does not erase already admitted local commits.
     subflows = { gaps: [recordRefusalCode(error) ?? 'invalid-data'] };
   }
+  const capture = decodeRecordCapture(value, address, log);
   const scope: PreparedRecordScope = {
     address,
     log,
@@ -114,6 +116,7 @@ export function prepareRecordScope(
     control,
     marks,
     complete: recordOwn(value, 'complete') === true,
+    ...(capture ? { capture } : {}),
     ...(readSources ? { readSources } : {}),
     subflows,
   };

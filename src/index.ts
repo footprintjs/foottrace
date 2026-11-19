@@ -16,6 +16,7 @@ export type {
   ValueBasis,
   ValueBasisOptions,
   ValueWithBasis,
+  WindowedReadSources,
   WriterBasis,
   WriterWithBasis,
 } from './lib/memory/commitLogUtils.js';
