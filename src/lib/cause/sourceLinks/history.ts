@@ -4,7 +4,7 @@ import type { CommitBundle } from '../../memory/types.js';
 import { foldKey, isTotal, recordsTail } from '../../memory/verbs.js';
 import { pathSegments } from '../../record-paths/codec.js';
 import { spend } from '../recordValidation.js';
-import { chargeRow, chargeValue } from './foldBudget.js';
+import { chargeRow, chargeShape } from './foldBudget.js';
 import { historyLookup, historyValue, type Transition } from './historyValue.js';
 import { directHistory } from './listHistory.js';
 
@@ -32,7 +32,7 @@ export function keyHistory(
   const initial = historyValue(nativeHas(base, segments), nativeGet(base, segments));
   const touches = rowsUnderRoot(log, key, stop);
   spend(budget, touches.length);
-  chargeValue(budget, start);
+  chargeShape(budget, start);
   if (touches.every((touch) => touch.path === key && (isTotal(touch.verb) || recordsTail(touch.verb)))) {
     return directHistory(touches, segments, initial, budget);
   }

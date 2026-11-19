@@ -6,8 +6,7 @@ import { windowsOf } from '../../memory/windowPlacement.js';
 import { normalisePath, pathSegments } from '../../record-paths/codec.js';
 import { spend } from '../recordValidation.js';
 import { accountedCount, appendedStart, keyHistory, type KeyHistory } from './history.js';
-import { chargeValue } from './foldBudget.js';
-import { invalidatesServedInput } from './inputStability.js';
+import { chargeShape } from './foldBudget.js';
 import { historyValue, type HistoryValue } from './historyValue.js';
 import { pointerParts } from './selectors.js';
 import type { SourceLinkOutput, SourceLinkSelection } from './types.js';
@@ -61,10 +60,10 @@ export function sourceLinkReplay(record: ReplayRecord, budget: { left: number })
   const reads = new Map<string, Set<string>>();
   const histories = new Map<string, KeyHistory>();
   const writers = new Map<string, readonly number[]>();
-  const inputEdits = new Map<string, readonly number[]>();
   const scopedRedactions = new Map<string, number>();
   const suffixes = new Map<string, Map<number, number | undefined>>();
   spend(budget, log.length);
+  const costPerTraceRow = 4;
   let indexCost = 1;
   const rootCosts = new Map<string, number>();
   log.forEach((bundle, index) => {
@@ -72,10 +71,9 @@ export function sourceLinkReplay(record: ReplayRecord, budget: { left: number })
     spend(budget, bundle.trace.length);
     const known = reads.get(bundle.runtimeStageId) ?? new Set(record.reads?.get(bundle.runtimeStageId));
     for (const row of bundle.trace) {
-      const cost = row.path.length * 2 + 4;
-      indexCost += cost;
+      indexCost += costPerTraceRow;
       const root = rootOf(row.path);
-      rootCosts.set(root, (rootCosts.get(root) ?? 0) + cost);
+      rootCosts.set(root, (rootCosts.get(root) ?? 0) + costPerTraceRow);
       for (const key of row.readKeys ?? []) known.add(key);
     }
     reads.set(bundle.runtimeStageId, known);
@@ -133,9 +131,9 @@ export function sourceLinkReplay(record: ReplayRecord, budget: { left: number })
         const change = timeline.transition(index)!;
         const before = selected(change.before, parts);
         const after = selected(change.after, parts);
-        if (before.present && after.present && before.value !== after.value) {
-          chargeValue(budget, before.value);
-          chargeValue(budget, after.value);
+        if (before.present && after.present) {
+          chargeShape(budget, before.value);
+          chargeShape(budget, after.value);
         }
         if (before.present !== after.present || !deepEqual(before.value, after.value, 'copies')) visits.push(index);
       }
@@ -148,26 +146,6 @@ export function sourceLinkReplay(record: ReplayRecord, budget: { left: number })
     if (before > accounted) return undefined;
     const index = lastBefore(writePositions(place), before);
     return index < 0 ? undefined : index;
-  }
-
-  function inputEditsOf(selection: SourceLinkSelection): readonly number[] {
-    const identity = JSON.stringify([selection.key, selection.element, selection.pointer]);
-    const cached = inputEdits.get(identity);
-    if (cached) return cached;
-    const tail = selectedParts(selection);
-    const timeline = tail === undefined ? undefined : history(selection.key);
-    const edits: number[] = [];
-    if (tail && timeline) {
-      const path = normalisePath([...pathSegments(selection.key), ...tail]);
-      for (const index of timeline.commits) {
-        const bundle = log[index];
-        spend(budget, bundle.trace.length + 1);
-        if (invalidatesServedInput(bundle, path, selection.key, selection.element, timeline.transition(index)!))
-          edits.push(index);
-      }
-    }
-    inputEdits.set(identity, edits);
-    return edits;
   }
 
   function redacted(place: SourceLinkSelection, through: number): boolean {
@@ -204,10 +182,6 @@ export function sourceLinkReplay(record: ReplayRecord, budget: { left: number })
     selectedWrite,
     writtenBetween(place: SourceLinkSelection, start: number, end: number): boolean {
       return (writer(place, end) ?? -1) >= start;
-    },
-    inputChangedBetween(place: SourceLinkSelection, start: number, end: number): boolean {
-      const selection = place.element === undefined ? { key: place.key } : place;
-      return lastBefore(inputEditsOf(selection), end) >= start || (writer(selection, end) ?? -1) >= start;
     },
     spend: (amount: number) => spend(budget, amount),
     writer,

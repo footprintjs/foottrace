@@ -3,18 +3,20 @@ import { nativeGet } from '../../memory/pathOps.js';
 import { pathSegments } from '../../record-paths/codec.js';
 import { spend } from '../recordValidation.js';
 
-/** Charge visited data and a conservative reserve for replay and comparison copies. */
-export function chargeValue(budget: { left: number }, value: unknown, copies = 1): void {
+/** Reserve containers and slots before replay. Scalar contents are only kept by reference. */
+export function chargeShape(budget: { left: number }, value: unknown, copies = 1): void {
   const pending = [value];
   while (pending.length) {
     const part = pending.pop();
-    spend(budget, copies * (1 + (typeof part === 'string' ? part.length : 0)));
     if (typeof part !== 'object' || part === null) continue;
-    if (Array.isArray(part)) spend(budget, copies * part.length);
+    const list = Array.isArray(part) ? part : undefined;
+    spend(budget, copies * (1 + (list?.length ?? 0)));
     for (const key in part) {
       if (!Object.hasOwn(part, key)) continue;
-      spend(budget, copies * (key.length + 1));
-      pending.push((part as Record<string, unknown>)[key]);
+      // Indexed slots were reserved above, including holes that a later append can fill.
+      if (!list || !/^(0|[1-9][0-9]*)$/.test(key) || Number(key) >= list.length) spend(budget, copies);
+      const child = (part as Record<string, unknown>)[key];
+      if (typeof child === 'object' && child !== null) pending.push(child);
     }
   }
 }
@@ -27,9 +29,9 @@ export function chargeRow(
   root: string,
 ): void {
   const { bundle } = touch;
-  chargeValue(budget, nativeGet(state, [root]), 3);
-  chargeValue(budget, nativeGet(bundle.overwrite, [root]), 3);
-  chargeValue(budget, nativeGet(bundle.updates, [root]), 3);
+  chargeShape(budget, nativeGet(state, [root]), 3);
+  chargeShape(budget, nativeGet(bundle.overwrite, [root]), 3);
+  chargeShape(budget, nativeGet(bundle.updates, [root]), 3);
   const segments = pathSegments(touch.path);
   // A sparse write can grow an array by its numeric index or an explicit length.
   // Reserve this before any later operation can materialize it.

@@ -82,12 +82,28 @@ async function parents(scope: RecordScope, output: RecordSourceLink['output']) {
 
 describe('source-link replay work remains bounded', () => {
   it('truncates the admitted 300,000-entry shape without changing recorded adjacency', async () => {
-    const { scope, link } = growing(1500, 200);
+    const { scope, log, link } = growing(1500, 200);
     const baseline = await parents({ ...scope, sourceLinks: undefined }, link.output);
     const { sourceLinks, sourceLinkGaps, ...recorded } = await parents(scope, link.output);
     expect(recorded).toEqual(baseline);
     expect(sourceLinks).toBeUndefined();
     expect(sourceLinkGaps).toEqual([{ code: 'truncated' }]);
+
+    // Measure the same fold with diagnostic headroom; the public query still uses maximum.
+    const measurementLimit = 2000000;
+    const budget = { left: measurementLimit };
+    const measured = resolveLink(
+      link,
+      address,
+      context(),
+      () => true,
+      (write) => write.key,
+      () => sourceLinkReplay({ base: {}, log }, budget),
+    );
+    expect(measured.link?.standing).toBe('witnessed');
+    const used = measurementLimit - budget.left;
+    expect(used).toBeGreaterThan(maximum);
+    console.log('Source-link replay units for 300000 entries:', used);
   });
 
   it('fits a 4,096-commit run of small appends and counts the used allowance', async () => {
@@ -114,7 +130,7 @@ describe('source-link replay work remains bounded', () => {
 
   it('refuses oversized copy-on-write generations before doing the copy', () => {
     const budget = { left: 20000 };
-    const base = { history: Array.from({ length: 50 }, () => ({ note: 'x'.repeat(100) })) };
+    const base = { history: Array.from({ length: 3000 }, () => ({ note: 'retained' })) };
     const log = [bundle(0, 'nested', { history: [{ note: 'new' }] })];
     log[0].trace = [{ path: 'history\u001f0\u001fnote', verb: 'set' }];
     const replay = sourceLinkReplay({ log, base }, budget);

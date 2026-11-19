@@ -76,13 +76,13 @@ const allow: SourceLinkPolicy = () => true;
 describe.each([
   {
     name: 'memory',
-    graph: (scope: RecordScope, sourceLinkPolicy?: SourceLinkPolicy) =>
-      createRecordGraph([scope], { sourceLinkPolicy }),
+    graph: (scope: RecordScope, sourceLinkPolicy?: SourceLinkPolicy, maxFields?: number) =>
+      createRecordGraph([scope], { sourceLinkPolicy, maxFields }),
   },
   {
     name: 'storage',
-    graph: (scope: RecordScope, sourceLinkPolicy?: SourceLinkPolicy) =>
-      createStoredRecordGraph({ loadLog: () => stored(scope) }, { sourceLinkPolicy }),
+    graph: (scope: RecordScope, sourceLinkPolicy?: SourceLinkPolicy, maxFields?: number) =>
+      createStoredRecordGraph({ loadLog: () => stored(scope) }, { sourceLinkPolicy, maxFields }),
   },
 ])('$name source links', ({ graph }) => {
   it('keeps one witnessed link and its neutral origin gap separate from traversal', async () => {
@@ -110,58 +110,113 @@ describe.each([
     expect(result.confidence).toEqual(control.confidence);
   });
 
-  it.each([
-    ['an explicit tail append', 'append', ['later'], 'witnessed'],
-    ['a full list replacement with the same selected entry', 'set', ['synthetic value', 'changed'], 'stale'],
-    ['a full set with an equal leading part', 'set', ['synthetic value', 'original', 'later'], 'stale'],
-  ] as const)('validates list input stability after %s', async (_, verb, value, expected) => {
-    const source = fixture();
-    const [consumer, door] = source.commitLog as CommitBundle[];
-    const selected = { ...output, commitIdx: 2 };
-    const wire: RecordSourceLink = {
-      ...link,
-      output: { ...link.output, commitIdx: 2 },
-      witness: { ...link.witness, commitIdx: 2 },
-    };
+  const laterOutput = { ...output, commitIdx: 2 };
+  const laterLink = {
+    ...link,
+    output: { ...link.output, commitIdx: 2 },
+    witness: { ...link.witness, commitIdx: 2 },
+  };
+
+  function withLaterWrite(
+    source: RecordScope,
+    initialState: Record<string, unknown>,
+    change: CommitBundle,
+  ): RecordScope {
+    const [consumer, door] = source.commitLog as readonly CommitBundle[];
+    return { ...source, initialState, commitLog: [consumer, change, { ...door, idx: 2 }] };
+  }
+
+  function listWrite(value: readonly string[], verb: 'set' | 'append') {
+    const source = fixture([servedRow], laterLink);
     const change = bundle('change', 1, { history: [...value] });
-    const scope: RecordScope = {
-      ...source,
-      initialState: { history: ['synthetic value', 'original'] },
-      commitLog: [consumer, { ...change, trace: [{ path: 'history', verb }] }, { ...door, idx: 2 }],
-      sourceLinks: { version: 1, status: 'captured', limitations: [], links: [wire] },
-    };
-    const reader = graph(scope, allow);
-    const page = await reader.parents(reader.nodeId(address, selected), context());
-    if (expected === 'witnessed') expect(page.sourceLinks?.[0].standing).toBe('witnessed');
-    else {
-      expect(page.sourceLinks).toBeUndefined();
-      expect(page.sourceLinkGaps?.[0].code).toBe('stale');
-    }
+    return withLaterWrite(
+      source,
+      { history: ['synthetic value', 'original'] },
+      {
+        ...change,
+        trace: [{ path: 'history', verb }],
+      },
+    );
+  }
+
+  async function laterParents(scope: RecordScope, policy: SourceLinkPolicy = allow, maxFields?: number) {
+    const reader = graph(scope, policy, maxFields);
+    return reader.parents(reader.nodeId(address, laterOutput), context());
+  }
+
+  it('returns the same witnessed link when the same append is recorded as full or delta', async () => {
+    const full = await laterParents(listWrite(['synthetic value', 'original', 'later'], 'set'));
+    const delta = await laterParents(listWrite(['later'], 'append'));
+    expect(full.sourceLinks?.[0].standing).toBe('witnessed');
+    expect(delta.sourceLinks).toEqual(full.sourceLinks);
+    expect(delta.sourceLinkGaps).toEqual(full.sourceLinkGaps);
   });
 
-  it('invalidates a whole served object when a different field is written', async () => {
-    const input = { key: 'profile', pointer: '/selected' };
-    const wire: RecordSourceLink = {
-      ...link,
-      input,
-      output: { ...link.output, commitIdx: 2 },
-      witness: { ...link.witness, commitIdx: 2 },
-    };
-    const source = fixture([{ ...servedRow, served: [{ key: input.key }] }], wire, { ...row, input });
-    const [consumer, door] = source.commitLog as CommitBundle[];
-    const change: CommitBundle = {
-      ...bundle('change', 1, { profile: { other: 'after' } }),
-      trace: [{ path: 'profile\u001fother', verb: 'set' }],
-    };
-    const scope: RecordScope = {
-      ...source,
-      initialState: { profile: { selected: 'unchanged', other: 'before' } },
-      commitLog: [consumer, change, { ...door, idx: 2 }],
-    };
-    const reader = graph(scope, allow);
-    const page = await reader.parents(reader.nodeId(address, { ...output, commitIdx: 2 }), context());
-    expect(page.sourceLinks).toBeUndefined();
-    expect(page.sourceLinkGaps?.[0].code).toBe('stale');
+  it.each([
+    ['full', 'history'],
+    ['delta', 'history\u001f1'],
+  ] as const)('keeps the selected list entry when a different entry changes (%s)', async (_, path) => {
+    const changed = { history: ['synthetic value', 'changed'] };
+    const source = fixture([servedRow], laterLink);
+    const initialState = { history: ['synthetic value', 'original'] };
+    const page = await laterParents(
+      withLaterWrite(source, initialState, {
+        ...bundle('change', 1, changed),
+        trace: [{ path, verb: 'set' }],
+      }),
+    );
+    expect(page.sourceLinks?.[0].standing).toBe('witnessed');
+
+    const stale = await laterParents(
+      withLaterWrite(source, initialState, {
+        ...bundle('change', 1, { history: ['replacement', 'original'] }),
+        trace: [{ path: path === 'history' ? path : 'history\u001f0', verb: 'set' }],
+      }),
+    );
+    expect(stale.sourceLinks).toBeUndefined();
+    expect(stale.sourceLinkGaps?.[0].code).toBe('stale');
+  });
+
+  const selectedProfile = { key: 'profile', pointer: '/selected' };
+
+  function profileWrite(before: string, after: { selected: string; other: string }, path: string) {
+    const wire = { ...laterLink, input: selectedProfile };
+    const source = fixture([{ ...servedRow, served: [{ key: selectedProfile.key }] }], wire, {
+      ...row,
+      input: selectedProfile,
+    });
+    return withLaterWrite(
+      source,
+      { profile: { selected: 'unchanged', other: before } },
+      {
+        ...bundle('change', 1, { profile: after }),
+        trace: [{ path, verb: 'set' }],
+      },
+    );
+  }
+
+  it.each([
+    ['full', 'profile'],
+    ['delta', 'profile\u001fother'],
+  ] as const)('keeps a selected field of a whole served object when a sibling changes (%s)', async (_, path) => {
+    const page = await laterParents(profileWrite('', { selected: 'unchanged', other: 'after' }, path));
+    expect(page.sourceLinks?.[0].standing).toBe('witnessed');
+
+    const selected = path === 'profile' ? path : 'profile\u001fselected';
+    const stale = await laterParents(profileWrite('', { selected: 'replacement', other: '' }, selected));
+    expect(stale.sourceLinks).toBeUndefined();
+    expect(stale.sourceLinkGaps?.[0].code).toBe('stale');
+  });
+
+  it('returns identical public bytes for different text in an ungranted sibling', async () => {
+    const allowSelected: SourceLinkPolicy = (locator) =>
+      locator.key !== 'profile' || (locator.at === 'view' && locator.pointer === selectedProfile.pointer);
+    const read = (other: string) =>
+      laterParents(profileWrite(other, { selected: 'unchanged', other }, 'profile\u001fother'), allowSelected, 20000);
+    const short = await read('');
+    const long = await read('synthetic sibling text '.repeat(300));
+    expect(short.sourceLinks?.[0].standing).toBe('witnessed');
+    expect(JSON.stringify(long)).toBe(JSON.stringify(short));
   });
 
   it('requires authorization of the whole served write before looking for duplicates', async () => {

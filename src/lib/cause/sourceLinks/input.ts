@@ -55,7 +55,7 @@ export function resolveInput(
   if (!replay.resolves(input, viewStop)) return { gap: 'stale' };
   const missing = requestGap(replay, first, consumer, link.served, input);
   if (missing) return { gap: missing };
-  if (replay.inputChangedBetween(input, view.start, link.witness.commitIdx + 1)) return { gap: 'stale' };
+  if (replay.writtenBetween(input, view.start, link.witness.commitIdx + 1)) return { gap: 'stale' };
   const origin = replay.writer(input, view.start);
   return { ...(origin === undefined ? {} : { origin }) };
 }
