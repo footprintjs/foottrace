@@ -55,6 +55,8 @@ export function readSource(source: FoldSource | undefined): ReadSource {
  */
 export function foldLegs(legs: readonly ReadSource[], legIdx: number, through: number): FoldedState {
   const work = foldToStop(legs, legIdx, through);
+  // The seed is cloned, set and append use cloned operands, merge uses cloned updates, and delete
+  // removes a key. No object in this working state belongs to the caller's seed or log.
   // Before the first bundle, out is already the native clone of the seed, even for a Date or view.
   const state = legIdx === 0 && work.through === -1 ? deepFreeze(work.out) : freezeReplayState(work.out);
   return describeFold(work, state);

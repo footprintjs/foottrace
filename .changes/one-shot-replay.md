@@ -3,4 +3,4 @@ type: changed
 bump: patch
 ---
 
-- A standalone state replay freezes its detached plain-object and array state directly, avoiding a second full copy. Cursor snapshots retain their private working copy.
+- Reading a single replay stop with `stateAt` avoids copying plain objects and arrays twice. A replay cursor still returns an independent snapshot at each stop.

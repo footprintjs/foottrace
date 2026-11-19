@@ -1,9 +1,84 @@
+import { serialize } from 'node:v8';
 import { describe, expect, it, vi } from 'vitest';
 
 import { stateAt } from '../../../src/index.js';
 import { foldLegsFrom, readSource } from '../../../src/lib/time-travel/stateAt.js';
 
+/** Follow state and log values, including the stored entries and buffers of native containers. */
+function reachableObjects(root: unknown): Set<object> {
+  const objects = new Set<object>();
+  const pending = [root];
+  while (pending.length) {
+    const value = pending.pop();
+    if (value === null || typeof value !== 'object' || objects.has(value)) continue;
+    objects.add(value);
+    for (const key of Reflect.ownKeys(value)) {
+      const property = Object.getOwnPropertyDescriptor(value, key)!;
+      if ('value' in property) pending.push(property.value);
+    }
+    if (value instanceof Map) {
+      for (const [key, entry] of value) pending.push(key, entry);
+    }
+    if (value instanceof Set) {
+      for (const entry of value) pending.push(entry);
+    }
+    if (ArrayBuffer.isView(value)) pending.push(value.buffer);
+  }
+  return objects;
+}
+
 describe('a one-shot replay owns its result', () => {
+  it('owns every reachable plain object after set, merge, append and delete, leaving the whole record unfrozen', () => {
+    const leaf = { nested: [1] };
+    const initialState = { retained: [leaf], obj: { remove: { n: 2 } }, items: [leaf] };
+    const source = {
+      initialState,
+      commitLog: [
+        {
+          runtimeStageId: 'set',
+          trace: [{ verb: 'set', path: 'obj\u001fadded' }],
+          overwrite: { obj: { added: [leaf] } },
+        },
+        {
+          runtimeStageId: 'merge',
+          trace: [{ verb: 'merge', path: 'obj' }],
+          updates: { obj: { merged: { group: [leaf] } } },
+        },
+        {
+          runtimeStageId: 'append',
+          trace: [{ verb: 'append', path: 'items' }],
+          overwrite: { items: [{ tail: leaf }] },
+        },
+        {
+          runtimeStageId: 'delete',
+          trace: [{ verb: 'delete', path: 'obj\u001fremove' }],
+          overwrite: { obj: { remove: undefined } },
+        },
+      ],
+    };
+    const recordObjects = reachableObjects(source);
+    const before = structuredClone(source);
+    for (let stop = -1; stop < source.commitLog.length; stop++) {
+      const { state } = stateAt(source, stop);
+      for (const object of reachableObjects(state)) {
+        expect(recordObjects.has(object)).toBe(false);
+        expect(Object.isFrozen(object)).toBe(true);
+      }
+      for (const object of recordObjects) expect(Object.isFrozen(object)).toBe(false);
+      expect(source).toEqual(before);
+      expect(state.retained).toEqual([leaf]);
+      expect(state.obj).toStrictEqual({
+        ...(stop < 3 && { remove: { n: 2 } }),
+        ...(stop >= 0 && { added: [leaf] }),
+        ...(stop >= 1 && { merged: { group: [leaf] } }),
+      });
+      expect(state.items).toEqual(stop < 2 ? [leaf] : [leaf, { tail: leaf }]);
+    }
+    const final = stateAt(source, 3).state;
+    leaf.nested.push(2);
+    expect(final.retained).toEqual([{ nested: [1] }]);
+  });
+
   it('copies the seed once and hands out the detached, deeply frozen plain graph', () => {
     const shared = { value: 3 };
     const seed = { left: shared, right: shared, list: [shared] };
@@ -98,8 +173,16 @@ describe('a one-shot replay owns its result', () => {
 
   it('preserves native clone normalization and isolation on mutable non-JSON leaves', () => {
     const bytes = new Uint8Array([3, 7]);
+    const key = { name: 'entry' };
     const source = {
-      initialState: { bytes, buffer: bytes.buffer, clock: new Date(10), rx: /x/g, objects: new Map([['a', { n: 1 }]]) },
+      initialState: {
+        bytes,
+        buffer: bytes.buffer,
+        clock: new Date(10),
+        rx: /x/g,
+        key,
+        objects: new Map([[key, new Set([key])]]),
+      },
       commitLog: [
         {
           runtimeStageId: 'a',
@@ -114,19 +197,24 @@ describe('a one-shot replay owns its result', () => {
     const standalone = stateAt(source, 0);
     const cursor = foldLegsFrom([readSource(source)], 0, 0);
     expect(standalone).toEqual(cursor.folded);
+    expect(serialize(standalone.state)).toEqual(serialize(cursor.folded.state));
+    const recordObjects = reachableObjects(source);
+    for (const object of reachableObjects(standalone.state)) expect(recordObjects.has(object)).toBe(false);
+    for (const object of recordObjects) expect(Object.isFrozen(object)).toBe(false);
     const state = standalone.state as typeof source.initialState;
     expect(Object.hasOwn(state.clock, 'note')).toBe(false);
     expect(state.rx.lastIndex).toBe(0);
     expect(state.bytes.buffer).toBe(state.buffer);
     state.bytes.fill(5);
     state.clock.setTime(14);
-    state.objects.get('a')!.n = 4;
+    expect(state.objects.get(state.key)!.has(state.key)).toBe(true);
+    state.objects.get(state.key)!.clear();
     expect(source.initialState.bytes[0]).toBe(3);
     expect(source.initialState.clock.getTime()).toBe(10);
-    expect(source.initialState.objects.get('a')!.n).toBe(1);
+    expect(source.initialState.objects.get(key)!.has(key)).toBe(true);
     const second = stateAt(source, 0).state as typeof source.initialState;
     expect(second.bytes[0]).toBe(3);
     expect(second.clock.getTime()).toBe(10);
-    expect(second.objects.get('a')!.n).toBe(1);
+    expect(second.objects.get(second.key)!.has(second.key)).toBe(true);
   });
 });
