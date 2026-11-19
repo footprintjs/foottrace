@@ -1,3 +1,5 @@
+import type { LogAddress } from '../../memory/eventPosition.js';
+
 export const CAPTURE_MODES = {
   reads: ['full', 'summary', 'off', 'unknown'],
   writes: ['full', 'summary', 'off', 'unknown'],
@@ -50,6 +52,7 @@ export interface CaptureInterval {
 
 /** Supply these from the admitted record, independently of its optional capture note. */
 export interface CaptureWitness {
+  readonly logAddress: LogAddress;
   readonly runId: string;
   readonly commits: CaptureInterval;
   readonly boundary: (typeof BOUNDARIES)[number];

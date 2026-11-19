@@ -1,4 +1,4 @@
-import { recordOwn } from '../recordValidation.js';
+import { addressOf, recordOwn } from '../recordValidation.js';
 import {
   BOUNDARIES,
   FAILURE_CATEGORIES,
@@ -48,14 +48,21 @@ export function interval(value: unknown): CaptureInterval | undefined {
 }
 
 export function witness(value: unknown): CaptureWitness | undefined {
-  if (!exact(value, ['runId', 'commits', 'boundary', 'source'])) return undefined;
+  if (!exact(value, ['logAddress', 'runId', 'commits', 'boundary', 'source'])) return undefined;
+  const logAddress = recordOwn(value, 'logAddress');
   const runId = recordOwn(value, 'runId');
   const commits = interval(recordOwn(value, 'commits'));
   const boundary = recordOwn(value, 'boundary');
   const source = recordOwn(value, 'source');
-  if (!identifier(runId) || !commits || !member(boundary, BOUNDARIES) || (source !== 'live' && source !== 'saved'))
+  if (
+    !exact(logAddress, ['logRunId', 'drillPath']) ||
+    !identifier(runId) ||
+    !commits ||
+    !member(boundary, BOUNDARIES) ||
+    (source !== 'live' && source !== 'saved')
+  )
     return undefined;
-  return { runId, commits, boundary, source };
+  return { logAddress: addressOf(logAddress), runId, commits, boundary, source };
 }
 
 export function safelyCopyFailure(value: unknown, runId: string, retainCategory: boolean): CaptureFailure | undefined {

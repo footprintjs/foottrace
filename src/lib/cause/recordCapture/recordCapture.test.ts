@@ -24,7 +24,7 @@ const scope = {
   address,
   commitLog: [commit(0), commit(1)],
   complete: true,
-  captureWitness: { runId: 'run', commits: interval, boundary: 'completed', source: 'live' },
+  captureWitness: { logAddress: address, runId: 'run', commits: interval, boundary: 'completed', source: 'live' },
 } satisfies RecordScope;
 function note(reads: { mode: string; status: string; reasons: string[] } = complete) {
   return {
@@ -91,7 +91,11 @@ describe('native capture coverage on the record graph', () => {
 
   it('uses the child’s own witness without borrowing coverage from the parent', async () => {
     const child = { ...address, drillPath: ['parent/mount#1'] };
-    const childScope = { ...scope, address: child, captureWitness: { ...scope.captureWitness, runId: 'child-leg' } };
+    const childScope = {
+      ...scope,
+      address: child,
+      captureWitness: { ...scope.captureWitness, logAddress: child, runId: 'child-leg' },
+    };
     const root = { ...scope, capture: note() };
     const graph = createRecordGraph([root, childScope]);
     expect((await graph.captureCoverage(child, query, context)).state).toBe('collection-unknown');
@@ -99,6 +103,50 @@ describe('native capture coverage on the record graph', () => {
     expect((await createRecordGraph([root, observedChild]).captureCoverage(child, query, context)).state).toBe(
       'covered',
     );
+  });
+
+  it('refuses coverage when the witness belongs to another log with the same leg and interval', async () => {
+    const child = { ...address, drillPath: ['parent/mount#1'] };
+    const childNote = { ...note(), logAddress: child };
+    const rootWitness = scope.captureWitness;
+    const childWitness = { ...rootWitness, logAddress: child };
+    const otherLogWitness = { ...childWitness, logAddress: { ...child, logRunId: 'other-root' } };
+    const check = (captureWitness: RecordScope['captureWitness']) =>
+      createRecordGraph([{ ...scope, address: child, capture: childNote, captureWitness }]).captureCoverage(
+        child,
+        query,
+        context,
+      );
+    expect((await check(rootWitness)).state).toBe('collection-unknown');
+    expect((await check(otherLogWitness)).state).toBe('collection-unknown');
+    expect((await check(childWitness)).state).toBe('covered');
+  });
+
+  it.each([1, 2] as const)('refuses an entire v%i note with conflicting tracking mode and status', async (version) => {
+    const limits = ['tracked-state-only', 'final-attempt-views', 'child-scopes-not-attested', 'storage-not-attested'];
+    const legacy = {
+      ...note(),
+      version,
+      scope: 'root-log',
+      modes: { readTracking: 'full', writeTracking: 'full', commitValues: 'full', writeProvenance: 'off' },
+      channels: {
+        reads: 'captured',
+        writes: 'captured',
+        attention: 'unknown',
+        control: 'unknown',
+        readSources: version === 1 ? 'not-collected' : 'unknown',
+      },
+      limitations: version === 1 ? [...limits, 'read-sources-not-collected'] : limits,
+    };
+    expect((await coverage(legacy)).state).toBe('covered');
+    const offReads = { ...legacy, modes: { ...legacy.modes, readTracking: 'off' } };
+    const disabledReads = { ...legacy, channels: { ...legacy.channels, reads: 'disabled' } };
+    const offWrites = { ...legacy, modes: { ...legacy.modes, writeTracking: 'off' } };
+    const disabledWrites = { ...legacy, channels: { ...legacy.channels, writes: 'disabled' } };
+    for (const capture of [offReads, disabledReads, offWrites, disabledWrites]) {
+      expect.soft((await coverage(capture)).state).toBe('collection-unknown');
+      expect.soft((await coverage(capture, { channel: 'writes' })).state).toBe('collection-unknown');
+    }
   });
 
   it('preserves observed writer edges when the optional note is malformed or missing', async () => {

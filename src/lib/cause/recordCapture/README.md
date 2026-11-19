@@ -14,9 +14,10 @@ crossing always returns a gap. A saved log requires independent storage
 evidence, which this reader does not admit. It therefore reports unknown for
 saved scopes even when the same note would be admitted in a live scope.
 
-The host supplies `captureWitness` from the actual served record. Copying it
-from `capture` gives the note its own authority. The interval is in native
-commit indices, not positions in a filtered application array. A covered
-answer licenses a negative claim only after the caller has searched that
+The host supplies `captureWitness` and its full log address from the actual
+served record. The reader matches that address to the scope before reading the
+note. Copying the witness from `capture` gives the note its own authority. The
+interval is in native commit indices, not positions in a filtered application
+array. A covered answer licenses a negative claim only after the caller has searched that
 channel and found no matching observation. It does not establish that any
 recorded access caused a value or that the window contains no observations.

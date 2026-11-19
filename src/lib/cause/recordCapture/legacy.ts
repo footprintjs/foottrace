@@ -116,6 +116,11 @@ export function legacyChannels(value: unknown, version: 1 | 2): Record<CaptureCh
   if (version === 1 ? sources !== 'not-collected' : !member(sources, OBSERVED)) return undefined;
   for (const key of ['reads', 'writes', 'attention', 'control'] as const)
     if (!member(recordOwn(channels, key), OBSERVED)) return undefined;
+  if (
+    (reads === 'off') !== (recordOwn(channels, 'reads') === 'disabled') ||
+    (writes === 'off') !== (recordOwn(channels, 'writes') === 'disabled')
+  )
+    return undefined;
   const channelModes: Record<CaptureChannel, CaptureMode> = {
     reads,
     writes,

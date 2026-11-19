@@ -65,7 +65,8 @@ export function decodeRecordCapture(
 ): CaptureObservation | undefined {
   try {
     const reference = witness(recordOwn(scope, 'captureWitness'));
-    if (!reference || reference.source !== 'live') return undefined;
+    const scopeKey = addressKey(address);
+    if (!reference || reference.source !== 'live' || addressKey(reference.logAddress) !== scopeKey) return undefined;
     const note = recordOwn(scope, 'capture');
     const version = recordOwn(note, 'version');
     if (version !== 1 && version !== 2 && version !== 3) return undefined;
@@ -79,7 +80,7 @@ export function decodeRecordCapture(
       recordOwn(note, 'runId') !== reference.runId ||
       recordOwn(note, 'persistence') !== 'memory-only' ||
       !exact(nativeAddress, ['logRunId', 'drillPath']) ||
-      addressKey(addressOf(nativeAddress)) !== addressKey(address) ||
+      addressKey(addressOf(nativeAddress)) !== scopeKey ||
       (version !== 3 && address.drillPath.length !== 0) ||
       !commits ||
       commits.from !== reference.commits.from ||
