@@ -33,6 +33,33 @@ jobs:
           path: ${{ runner.temp }}/foottrace-pack/*.tgz
           if-no-files-found: error
           retention-days: 7
+  paired-record-exploration:
+    name: Paired-record exploration (advisory)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: '24.21.0'
+      - run: npm install -g npm@11.19.0
+      - run: npm ci
+      - name: Report a fresh seed and check its paired records
+        continue-on-error: true
+        shell: bash
+        run: |
+          seed="$(node -p 'require("node:crypto").randomInt(1, 2 ** 31)')"
+          echo "Source-link exploration seed $seed" | tee -a "$GITHUB_STEP_SUMMARY"
+          if FOOTTRACE_PAIR_EXPLORATION_SEED="$seed" npm test -- src/lib/cause/sourceLinks/pairedRecord.property.test.ts; then
+            echo 'Paired-record exploration passed.' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'Paired-record exploration found a counterexample. See the test log for its seed and path.' >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
   tested-tree:
     runs-on: ubuntu-24.04
     steps:

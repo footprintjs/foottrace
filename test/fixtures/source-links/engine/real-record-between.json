@@ -1,0 +1,412 @@
+{
+ "full": {
+  "commitValues": "full",
+  "initialState": {},
+  "commitLog": [
+   {
+    "overwrite": {
+     "history": [
+      "tool result A",
+      "tool result B"
+     ],
+     "profile": {
+      "selected": "gold",
+      "other": ""
+     }
+    },
+    "updates": {},
+    "redactedPaths": [],
+    "trace": [
+     {
+      "path": "history",
+      "verb": "set",
+      "readKeys": []
+     },
+     {
+      "path": "profile",
+      "verb": "set",
+      "readKeys": []
+     }
+    ],
+    "stage": "Load",
+    "stageId": "load",
+    "runtimeStageId": "load#0",
+    "idx": 0
+   },
+   {
+    "overwrite": {
+     "served": [
+      {
+       "kind": "served",
+       "version": 1,
+       "consumer": "consumer#1",
+       "served": [
+        {
+         "key": "history",
+         "elements": [
+          [
+           0,
+           2
+          ]
+         ]
+        },
+        {
+         "key": "profile"
+        }
+       ]
+      }
+     ],
+     "draft": "cites B and gold"
+    },
+    "updates": {},
+    "redactedPaths": [],
+    "trace": [
+     {
+      "path": "served",
+      "verb": "set",
+      "readKeys": [
+       "history",
+       "profile",
+       "served"
+      ]
+     },
+     {
+      "path": "draft",
+      "verb": "set",
+      "readKeys": [
+       "history",
+       "profile",
+       "served"
+      ]
+     }
+    ],
+    "stage": "Consumer",
+    "stageId": "consumer",
+    "runtimeStageId": "consumer#1",
+    "idx": 1
+   },
+   {
+    "overwrite": {
+     "history": [
+      "tool result A",
+      "tool result B",
+      "assistant proposal"
+     ]
+    },
+    "updates": {},
+    "redactedPaths": [],
+    "trace": [
+     {
+      "path": "history",
+      "verb": "set",
+      "readKeys": [
+       "history"
+      ]
+     }
+    ],
+    "stage": "Append",
+    "stageId": "append",
+    "runtimeStageId": "append#2",
+    "idx": 2
+   },
+   {
+    "overwrite": {
+     "profile": {
+      "selected": "gold",
+      "other": "changed later"
+     }
+    },
+    "updates": {},
+    "redactedPaths": [],
+    "trace": [
+     {
+      "path": "profile",
+      "verb": "set",
+      "readKeys": [
+       "profile"
+      ]
+     }
+    ],
+    "stage": "Sibling",
+    "stageId": "sibling",
+    "runtimeStageId": "sibling#3",
+    "idx": 3
+   },
+   {
+    "overwrite": {
+     "answer": "the answer cites B",
+     "evidence": [
+      {
+       "kind": "source-link",
+       "version": 1,
+       "linkBasis": "reference",
+       "check": "redeemed",
+       "consumer": "consumer#1",
+       "output": {
+        "key": "answer",
+        "checkedIn": "written"
+       },
+       "input": {
+        "key": "history",
+        "element": 1
+       }
+      },
+      {
+       "kind": "source-link",
+       "version": 1,
+       "linkBasis": "reference",
+       "check": "redeemed",
+       "consumer": "consumer#1",
+       "output": {
+        "key": "answer",
+        "checkedIn": "written"
+       },
+       "input": {
+        "key": "profile",
+        "pointer": "/selected"
+       }
+      },
+      {
+       "kind": "source-link",
+       "version": 1,
+       "linkBasis": "reference",
+       "check": "redeemed",
+       "consumer": "consumer#1",
+       "output": {
+        "key": "answer",
+        "checkedIn": "written"
+       },
+       "input": {
+        "key": "profile"
+       }
+      }
+     ]
+    },
+    "updates": {},
+    "redactedPaths": [],
+    "trace": [
+     {
+      "path": "answer",
+      "verb": "set",
+      "readKeys": []
+     },
+     {
+      "path": "evidence",
+      "verb": "set",
+      "readKeys": [
+       "evidence"
+      ]
+     }
+    ],
+    "stage": "Door",
+    "stageId": "door",
+    "runtimeStageId": "door#4",
+    "idx": 4
+   }
+  ]
+ },
+ "delta": {
+  "commitValues": "delta",
+  "initialState": {},
+  "commitLog": [
+   {
+    "overwrite": {
+     "history": [
+      "tool result A",
+      "tool result B"
+     ],
+     "profile": {
+      "selected": "gold",
+      "other": ""
+     }
+    },
+    "updates": {},
+    "redactedPaths": [],
+    "trace": [
+     {
+      "path": "history",
+      "verb": "set",
+      "readKeys": []
+     },
+     {
+      "path": "profile",
+      "verb": "set",
+      "readKeys": []
+     }
+    ],
+    "stage": "Load",
+    "stageId": "load",
+    "runtimeStageId": "load#0",
+    "idx": 0
+   },
+   {
+    "overwrite": {
+     "served": [
+      {
+       "kind": "served",
+       "version": 1,
+       "consumer": "consumer#1",
+       "served": [
+        {
+         "key": "history",
+         "elements": [
+          [
+           0,
+           2
+          ]
+         ]
+        },
+        {
+         "key": "profile"
+        }
+       ]
+      }
+     ],
+     "draft": "cites B and gold"
+    },
+    "updates": {},
+    "redactedPaths": [],
+    "trace": [
+     {
+      "path": "served",
+      "verb": "set",
+      "readKeys": [
+       "history",
+       "profile",
+       "served"
+      ]
+     },
+     {
+      "path": "draft",
+      "verb": "set",
+      "readKeys": [
+       "history",
+       "profile",
+       "served"
+      ]
+     }
+    ],
+    "stage": "Consumer",
+    "stageId": "consumer",
+    "runtimeStageId": "consumer#1",
+    "idx": 1
+   },
+   {
+    "overwrite": {
+     "history": [
+      "assistant proposal"
+     ]
+    },
+    "updates": {},
+    "redactedPaths": [],
+    "trace": [
+     {
+      "path": "history",
+      "verb": "append",
+      "readKeys": [
+       "history"
+      ]
+     }
+    ],
+    "stage": "Append",
+    "stageId": "append",
+    "runtimeStageId": "append#2",
+    "idx": 2
+   },
+   {
+    "overwrite": {
+     "profile": {
+      "selected": "gold",
+      "other": "changed later"
+     }
+    },
+    "updates": {},
+    "redactedPaths": [],
+    "trace": [
+     {
+      "path": "profile",
+      "verb": "set",
+      "readKeys": [
+       "profile"
+      ]
+     }
+    ],
+    "stage": "Sibling",
+    "stageId": "sibling",
+    "runtimeStageId": "sibling#3",
+    "idx": 3
+   },
+   {
+    "overwrite": {
+     "answer": "the answer cites B",
+     "evidence": [
+      {
+       "kind": "source-link",
+       "version": 1,
+       "linkBasis": "reference",
+       "check": "redeemed",
+       "consumer": "consumer#1",
+       "output": {
+        "key": "answer",
+        "checkedIn": "written"
+       },
+       "input": {
+        "key": "history",
+        "element": 1
+       }
+      },
+      {
+       "kind": "source-link",
+       "version": 1,
+       "linkBasis": "reference",
+       "check": "redeemed",
+       "consumer": "consumer#1",
+       "output": {
+        "key": "answer",
+        "checkedIn": "written"
+       },
+       "input": {
+        "key": "profile",
+        "pointer": "/selected"
+       }
+      },
+      {
+       "kind": "source-link",
+       "version": 1,
+       "linkBasis": "reference",
+       "check": "redeemed",
+       "consumer": "consumer#1",
+       "output": {
+        "key": "answer",
+        "checkedIn": "written"
+       },
+       "input": {
+        "key": "profile"
+       }
+      }
+     ]
+    },
+    "updates": {},
+    "redactedPaths": [],
+    "trace": [
+     {
+      "path": "answer",
+      "verb": "set",
+      "readKeys": []
+     },
+     {
+      "path": "evidence",
+      "verb": "set",
+      "readKeys": [
+       "evidence"
+      ]
+     }
+    ],
+    "stage": "Door",
+    "stageId": "door",
+    "runtimeStageId": "door#4",
+    "idx": 4
+   }
+  ]
+ }
+}
