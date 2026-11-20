@@ -269,7 +269,7 @@ export type CommitValuesMode = 'full' | 'delta';
  * The execution tree as the record's readers read it (C6): the fields a reader touches and
  * nothing else. `commitStops` (and so `tagStops` and every strategy built on it) reads the mount
  * marker (`subflowId`) and the first stage's `id`; `keysReadFromExecutionTree` reads the keys of
- * `stageReads`; both key on `runtimeStageId`.
+ * `stageReads` and the names in `undefinedReadKeys`; both key on `runtimeStageId`.
  *
  * Two forms, both read by every reader. The LIST form (footprintjs 12): a tree is an
  * {@link ExecutionChain}, the stages in the order they ran, and a fork's children are `branches`,
@@ -304,6 +304,8 @@ export interface ExecutionTree {
   readonly subflowId?: string;
   /** What the stage tracked-read, by key. Only the KEYS are read: a `'summary'` marker serves as well as a value. */
   readonly stageReads?: Readonly<Record<string, unknown>>;
+  /** Tracked reads with an undefined value, whose entries JSON drops from `stageReads`. */
+  readonly undefinedReadKeys?: readonly string[];
   /** List form: the chains that ran as this stage's children, one per branch (a fork's branches). */
   readonly branches?: readonly ExecutionChain[];
   /** Linked form only: the stage that ran next. */

@@ -18,13 +18,42 @@ function isReadTreeObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function ownDataValue(holder: object, key: string): unknown {
+  const slot = Object.getOwnPropertyDescriptor(holder, key);
+  return slot && Object.hasOwn(slot, 'value') ? slot.value : undefined;
+}
+
+/** Merge the engine's unset-read names into the existing read map. */
+function trackedReadNames(node: object, stageReads: Record<string, unknown> | undefined): string[] {
+  const keys = stageReads === undefined ? [] : Object.keys(stageReads);
+  try {
+    const unset = ownDataValue(node, 'undefinedReadKeys');
+    if (!Array.isArray(unset)) return keys;
+    const unsetKeys: string[] = [];
+    // Enumerate actual array indices, without scanning holes or consulting a caller's iterator.
+    for (const name of Object.getOwnPropertyNames(unset)) {
+      const index = Number(name);
+      if (!Number.isInteger(index) || index < 0 || index >= 2 ** 32 - 1 || String(index) !== name) continue;
+      const key = ownDataValue(unset, name);
+      if (typeof key === 'string') unsetKeys.push(key);
+    }
+    // Use the engine's lexical order when the side list contributes evidence.
+    return unsetKeys.length === 0 ? keys : [...new Set([...keys, ...unsetKeys])].sort();
+  } catch {
+    // A throwing descriptor lookup or revoked optional list supplies no evidence.
+    return keys;
+  }
+}
+
 /**
  * Post-hoc reads from a finished run's execution tree — ZERO setup.
  *
  * WHY this works: a stage's `stageReads` records the keys it
  * tracked-read whenever the `readTracking` dial ≠ 'off' ('full' is the
  * engine default; 'summary' replaces VALUES with markers but keeps the
- * KEYS — and keys are all a slice needs). Under 'off' this source returns
+ * KEYS — and keys are all a slice needs). The optional `undefinedReadKeys`
+ * list preserves those names when JSON drops their undefined values. Its own
+ * string data entries are merged with the read-map keys. Under 'off' this source returns
  * empty read-sets — detectable via `coverage.stepsWithReads === 0`, which
  * `sliceForKey` copies onto the slice so tools can say "reads were not
  * recorded" instead of the lie "no dependencies".
@@ -95,10 +124,8 @@ export function keysReadFromExecutionTree(tree: unknown): KeysReadSource {
     }
     if (runtimeStageId) {
       steps++;
-      if (stageReads !== undefined) {
-        const keys = Object.keys(stageReads);
-        if (keys.length > 0) byStep.set(runtimeStageId, keys);
-      }
+      const keys = trackedReadNames(node, stageReads);
+      if (keys.length > 0) byStep.set(runtimeStageId, keys);
     }
     if (next !== undefined) stack.push({ node: next, path: `${path}.next` });
     if (children !== undefined) {
