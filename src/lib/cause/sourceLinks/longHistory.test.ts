@@ -81,7 +81,8 @@ it.each(cases)(
     const writes = history(count, shape, encoding);
     const output = { key: 'answer', checkedIn: 'written' as const };
     const door = { runtimeStageId: 'door', commitIdx: count + 1 };
-    const limits = count >= 1000 ? { maxCommits: 4096, maxFields: 1_000_000 } : {};
+    // Coverage can slow admission down enough to reach the default deadline. These rows pin the field limit.
+    const limits = count >= 1000 ? { maxCommits: 4096, maxFields: 1_000_000, loadTimeoutMs: 30_000 } : {};
     for (const element of [1, count - 1]) {
       const row = witness({ key: 'history', element }, output);
       const link = linkFor(row, door, { ...door, key: 'evidence', element: 0 });

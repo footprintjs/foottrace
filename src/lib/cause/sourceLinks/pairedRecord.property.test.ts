@@ -1,5 +1,6 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
+import { bindSourceLinkWrite } from '../../../cause.js';
 import {
   adapters,
   address,
@@ -149,6 +150,19 @@ function materialize(recipe: Recipe, encoding: Encoding, twin: boolean) {
 async function checkPair(recipe: Recipe, encoding: Encoding) {
   const one = materialize(recipe, encoding, false);
   const two = materialize(recipe, encoding, true);
+  if (recipe.scenario === 'output' || recipe.scenario === 'long base text') {
+    const first = bindSourceLinkWrite(one.scope, one.link.witness);
+    const second = bindSourceLinkWrite(two.scope, two.link.witness);
+    expect(second, 'public binding twin').toEqual(first);
+    expect(first).toEqual(
+      recipe.scenario === 'output'
+        ? undefined
+        : {
+            runtimeStageId: one.link.output.runtimeStageId,
+            commitIdx: one.link.output.commitIdx,
+          },
+    );
+  }
   const options = { sourceLinkPolicy: exactPolicy(address, one.link) };
   for (const adapter of adapters) {
     const first = await parents(adapter, one.scope, one.link.output, options);
