@@ -132,7 +132,11 @@ export function createStoredRecordGraph(
                 kind,
                 address: a,
                 at,
-                initialState: dataCopy(recordOwn(entry, 'initialState'), budget),
+                // A source-link host uses the opened entry as the fold base. Keep the
+                // legacy text cap on commit payloads and on callers without that policy.
+                initialState: dataCopy(recordOwn(entry, 'initialState'), budget, {
+                  allowLongText: limits.sourceLinkPolicy !== undefined,
+                }),
                 ...(collects === undefined ? {} : { collects }),
               });
             } else if (kind === 'closed') {
@@ -182,6 +186,13 @@ export function createStoredRecordGraph(
             // Refusing this optional channel must not discard separately admitted local entries.
             stored.push(recordRefusalCode(error) ?? 'invalid-data');
           }
+          let sourceLinks: RecordScope['sourceLinks'];
+          try {
+            sourceLinks = recordOwn(loaded, 'sourceLinks') as RecordScope['sourceLinks'];
+          } catch {
+            // Forward a refusal to the optional channel only.
+            sourceLinks = null as never;
+          }
           return {
             scope: {
               address,
@@ -189,6 +200,7 @@ export function createStoredRecordGraph(
               initialState: log.initialState,
               readSources: recordOwn(loaded, 'readSources') as RecordScope['readSources'],
               subflows,
+              sourceLinks,
               reads: hostReads ?? own?.reads,
               controlDeps: hostControl ?? own?.controlDeps,
               attention: hostMarks ?? own?.attention,

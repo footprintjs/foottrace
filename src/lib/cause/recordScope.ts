@@ -1,13 +1,20 @@
+import { admitSourceLinks, type SourceLinkInventory } from './sourceLinks/admission.js';
 import { decodeRecordCapture } from './recordCapture.js';
 import { prepareReadSources } from './recordSources.js';
 import { prepareRecordSubflows, type PreparedRecordSubflows } from './recordSubflows.js';
 import type { LogAddress } from '../memory/eventPosition.js';
 import { placedAt } from '../memory/readWindow.js';
 import { RUN_EVIDENCE_LIMITS } from '../run-evidence/kinds.js';
-import type { PreparedRecordScope, RecordGraphOptions, RecordScope } from './recordTypes.js';
+import type {
+  PreparedRecordScope,
+  RecordGraphOptions,
+  RecordScope,
+  ResolvedRecordGraphOptions,
+} from './recordTypes.js';
 import {
   addressKey,
   addressOf,
+  dataCopy,
   bundleOf,
   recordList,
   mapOf,
@@ -34,11 +41,16 @@ function boundedOption(value: unknown, defaultValue: number, maximum: number): n
 }
 
 /** Read configuration as data so option accessors cannot execute during adapter construction. */
-export function recordOptions(options: RecordGraphOptions): Required<RecordGraphOptions> {
+export function recordOptions(options: RecordGraphOptions): ResolvedRecordGraphOptions {
   try {
     const prototype = Object.getPrototypeOf(options);
     if (prototype !== Object.prototype && prototype !== null) throw new TypeError();
+    const policy = recordOwn(options, 'sourceLinkPolicy');
+    if (policy !== undefined && typeof policy !== 'function') throw new TypeError();
     return Object.freeze({
+      ...(policy === undefined
+        ? {}
+        : { sourceLinkPolicy: policy as NonNullable<RecordGraphOptions['sourceLinkPolicy']> }),
       maxCommits: boundedOption(recordOwn(options, 'maxCommits'), 256, 4096),
       maxFields: boundedOption(recordOwn(options, 'maxFields'), 20000, 1000000),
       maxEdges: boundedOption(recordOwn(options, 'maxEdges'), 64, 256),
@@ -57,6 +69,7 @@ export function prepareRecordScope(
   maximumCommits: number,
   maximumFields: number,
   maximumScopes = 32,
+  sourceLinkPolicyIsSet = false,
 ): PreparedRecordScope {
   if (addressKey(addressOf(recordOwn(value, 'address'))) !== addressKey(address)) throw new RecordRefusal();
   const rawLog = recordList(recordOwn(value, 'commitLog'), maximumCommits),
@@ -109,6 +122,26 @@ export function prepareRecordScope(
     subflows = { gaps: [recordRefusalCode(error) ?? 'invalid-data'] };
   }
   const capture = decodeRecordCapture(value, address, log);
+  let sourceLinks: SourceLinkInventory | undefined;
+  try {
+    const inventory = recordOwn(value, 'sourceLinks');
+    if (inventory !== undefined) sourceLinks = admitSourceLinks(inventory, budget);
+  } catch (error) {
+    sourceLinks = { links: [], gaps: [recordRefusalCode(error) ?? 'invalid-data'] };
+  }
+  // Snapshot the base during admission with the log, under the remaining field budget.
+  // A link's own policy must still grant all locators before replay reads these values.
+  let sourceLinkBase: PreparedRecordScope['sourceLinkBase'];
+  if (sourceLinks?.links.length && sourceLinkPolicyIsSet) {
+    try {
+      const raw = recordOwn(value, 'initialState');
+      if (raw !== null && typeof raw === 'object' && !Array.isArray(raw))
+        sourceLinkBase = dataCopy(raw, budget, { allowLongText: true }) as Record<string, unknown>;
+    } catch (error) {
+      const code = recordRefusalCode(error);
+      sourceLinks = { links: [], gaps: [code === 'node-limit' ? 'truncated' : 'invalid-data'] };
+    }
+  }
   const scope: PreparedRecordScope = {
     address,
     log,
@@ -119,6 +152,8 @@ export function prepareRecordScope(
     ...(capture ? { capture } : {}),
     ...(readSources ? { readSources } : {}),
     subflows,
+    ...(sourceLinks ? { sourceLinks } : {}),
+    ...(sourceLinkBase ? { sourceLinkBase } : {}),
   };
   if (readSources) scope.sourceCoveredExecutions = sourceCoveredExecutions(scope);
   return scope;

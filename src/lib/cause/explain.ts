@@ -12,6 +12,7 @@ import type {
 import { Session } from './session.js';
 import { frontier, pathTo, walk } from './walk.js';
 import { gap, graphName, nodeIds, graphOwn, uniqueGaps } from './validation.js';
+import { sourceLinkPage } from './sourceLinks/page.js';
 import { admitRanking } from './ranking.js';
 
 /** Read-only deterministic cause localisation and impact. No inference from timestamps or structural ancestry. */
@@ -51,6 +52,7 @@ export async function explain(graph: CauseGraph, nodeId: NodeId, options: Explai
           edges: backward.edges,
           confidence: causeComplete ? 'complete' : 'incomplete',
           gaps: uniqueGaps(missing),
+          ...sourceLinkPage(backward.sourceLinks ?? [], backward.sourceLinkGaps ?? []),
         })
       : undefined;
     const forward = await walk(session, impactBudget, [nodeId], 'children');
@@ -76,6 +78,7 @@ export async function explain(graph: CauseGraph, nodeId: NodeId, options: Explai
       edges: forward.edges,
       confidence: impactGaps.length ? 'incomplete' : 'complete',
       gaps: uniqueGaps(impactGaps),
+      ...sourceLinkPage(forward.sourceLinks ?? [], forward.sourceLinkGaps ?? []),
     });
     const allGaps = uniqueGaps([...missing, ...impactGaps]);
     return Object.freeze({
@@ -88,6 +91,7 @@ export async function explain(graph: CauseGraph, nodeId: NodeId, options: Explai
       impact,
       confidence: allGaps.length ? 'incomplete' : 'complete',
       gaps: allGaps,
+      ...sourceLinkPage(backward.sourceLinks ?? [], backward.sourceLinkGaps ?? []),
     });
   } finally {
     session.dispose();
@@ -131,6 +135,7 @@ export async function attentionList(
       nodes: result.marked,
       confidence: missing.length ? 'incomplete' : 'complete',
       gaps: uniqueGaps(missing),
+      ...sourceLinkPage(result.sourceLinks ?? [], result.sourceLinkGaps ?? []),
     });
   } finally {
     session.dispose();

@@ -6,7 +6,7 @@ import { prepareRecordScope } from './recordScope.js';
 import type {
   LoadedRecordScope,
   PreparedRecordScope,
-  RecordGraphOptions,
+  ResolvedRecordGraphOptions,
   RecordLoaderResult,
   RecordLoadFailure,
   RecordScope,
@@ -41,7 +41,7 @@ interface ScopeLoadRequest {
 function admitLoadedScope(
   result: RecordLoaderResult,
   request: ScopeLoadRequest,
-  limits: Required<RecordGraphOptions>,
+  limits: ResolvedRecordGraphOptions,
   state: ScopeLoadState,
 ): LoadedRecordScope {
   if (request.controller.signal.aborted || performance.now() >= request.deadline) {
@@ -56,6 +56,7 @@ function admitLoadedScope(
       limits.maxCommits,
       limits.maxFields,
       limits.maxScopes,
+      limits.sourceLinkPolicy !== undefined,
     );
     const extra = recordList(recordOwn(result, 'gaps') ?? [], 32);
     // Coverage belongs to this admitted object, so cached scopes retain the same gap ordering and ownership.
@@ -79,7 +80,7 @@ function admitLoadedScope(
 function startScopeWork(
   hostLoad: RecordScopeHost,
   request: ScopeLoadRequest,
-  limits: Required<RecordGraphOptions>,
+  limits: ResolvedRecordGraphOptions,
   state: ScopeLoadState,
 ): Promise<LoadedRecordScope> {
   const work = projectLoaded<RecordLoaderResult, LoadedRecordScope>(
@@ -112,7 +113,7 @@ function startScopeWork(
 /** Bound caller waiting independently of host cooperation without sharing cancellation between requests. */
 export function createRecordScopeLoader(
   hostLoad: RecordScopeHost,
-  limits: Required<RecordGraphOptions>,
+  limits: ResolvedRecordGraphOptions,
 ): RecordScopeLoader {
   const state: ScopeLoadState = { activeLoads: 0, cache: new Map(), extraGaps: new WeakMap() };
   return {

@@ -57,11 +57,15 @@ export function spend(budget: { left: number }, count: number): void {
 }
 export const addressKey = (a: LogAddress): string => JSON.stringify([a.logRunId, ...a.drillPath]);
 /** Iterative bounded copy: data descriptors only, no getters/toJSON/prototypes or opaque class instances. */
-export function dataCopy(value: unknown, budget: { left: number }): unknown {
+export function dataCopy(value: unknown, budget: { left: number }, { allowLongText = false } = {}): unknown {
   const leaf = (v: unknown): boolean => v === null || typeof v !== 'object';
   const check = (v: unknown): void => {
     spend(budget, 1);
-    if (typeof v === 'function' || typeof v === 'symbol' || (typeof v === 'string' && v.length > 65536))
+    if (
+      typeof v === 'function' ||
+      typeof v === 'symbol' ||
+      (!allowLongText && typeof v === 'string' && v.length > 65536)
+    )
       throw new RecordRefusal();
   };
   check(value);
