@@ -3,6 +3,11 @@ function ownDataValue(holder: object, key: string): unknown {
   return slot && Object.hasOwn(slot, 'value') ? slot.value : undefined;
 }
 
+/** Retain insertion order except when the engine's unset list contributes names. */
+export function mergeTrackedReadNames(keys: string[], unset: readonly string[]): string[] {
+  return unset.length === 0 ? keys : [...new Set([...keys, ...unset])].sort();
+}
+
 /** Merge the engine's unset-read names into the existing read map. */
 export function trackedReadNames(
   node: object,
@@ -32,7 +37,7 @@ export function trackedReadNames(
       if (typeof key === 'string') unsetKeys.push(key);
     }
     // Use the engine's lexical order when the side list contributes evidence.
-    return unsetKeys.length === 0 ? keys : [...new Set([...keys, ...unsetKeys])].sort();
+    return mergeTrackedReadNames(keys, unsetKeys);
   } catch {
     // A throwing descriptor lookup or revoked optional list supplies no evidence.
     return keys;
