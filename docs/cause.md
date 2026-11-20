@@ -97,7 +97,7 @@ const { writes, complete } = bindSourceLinkWrites(scope, locators);
 // writes[i] binds locators[i]. Unfilled slots on an incomplete result are unknown.
 ```
 
-The batch admits the scope once and shares its replay across at most 256 locators. It preserves their order. If its allowance runs out, it retains the bindings already resolved and reports `complete: false`. A producer with a recorded channel keeps those bindings and reports the `budget-exhausted` limitation. The original `bindSourceLinkWrite` remains the single-locator form.
+The batch admits the scope once and shares its replay across at most 256 locators. It preserves their order. Admission, replay and every locator share one 1,000,000-unit structural allowance (in a measured 80-link recording with 3,061 commits, the first locator used 9,316 units after scope setup and each subsequent locator used 3,079). If its allowance runs out, it retains the bindings already resolved and reports `complete: false`. A producer with a recorded channel keeps those bindings and reports the `budget-exhausted` limitation. The original `bindSourceLinkWrite` remains the single-locator form.
 
 ## 2. Adapt an authorized stored record
 
