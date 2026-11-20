@@ -6,7 +6,7 @@
  * which is what makes them safe on a result that holds a cycle (see the header of `backtrack.ts`).
  */
 
-import type { CausalEdge, CausalNode } from './backtrackTypes.js';
+import type { CausalEdgeWithUnchangedWrites, CausalNode, CausalNodeWithUnchangedWrites } from './backtrackTypes.js';
 import type { SourceOverlap } from './parentEdges.js';
 import { shownPath } from '../record-paths/codec.js';
 
@@ -69,14 +69,19 @@ const OVERLAP_WORDS: Record<SourceOverlap, string> = {
   'view-not-placed': 'possibly: the array does not show where the view sits',
 };
 
-export function formatCausalChain(root: CausalNode): string {
+export function formatCausalChain(root: CausalNodeWithUnchangedWrites): string;
+export function formatCausalChain(root: CausalNode): string;
+export function formatCausalChain(root: CausalNodeWithUnchangedWrites): string {
   const lines: string[] = [];
   const visited = new Set<string>();
 
-  const weightSuffix = (edge: CausalEdge | undefined): string =>
+  const weightSuffix = (edge: CausalEdgeWithUnchangedWrites | undefined): string =>
     edge !== undefined && edge.weight !== 1 ? ` (${edge.weight})` : '';
   // The keys this parent is only a possible source of, said per mark (`CausalEdge.overlap`).
-  const overlapSuffix = (edges: CausalEdge[] | undefined, shown: CausalEdge): string =>
+  const overlapSuffix = (
+    edges: CausalEdgeWithUnchangedWrites[] | undefined,
+    shown: CausalEdgeWithUnchangedWrites,
+  ): string =>
     (Object.keys(OVERLAP_WORDS) as SourceOverlap[])
       .map((mark) => {
         const keys = [...new Set((edges ?? []).filter((e) => e.overlap === mark && e.key).map((e) => e.key as string))];
@@ -86,7 +91,11 @@ export function formatCausalChain(root: CausalNode): string {
       })
       .join('');
 
-  function walk(node: CausalNode, indent: number, edgesFromChild?: CausalEdge[]): void {
+  function walk(
+    node: CausalNodeWithUnchangedWrites,
+    indent: number,
+    edgesFromChild?: CausalEdgeWithUnchangedWrites[],
+  ): void {
     if (visited.has(node.runtimeStageId)) {
       lines.push(`${'  '.repeat(indent)}↳ ${node.runtimeStageId} (see above)`);
       return;
@@ -113,6 +122,10 @@ export function formatCausalChain(root: CausalNode): string {
     if (controlEdge) {
       linkParts.push(`[control${controlEdge.key ? `: ${controlEdge.key}` : ''}]${weightSuffix(controlEdge)}`);
     }
+    for (const edge of edgesFromChild ?? []) {
+      if (edge.kind === 'unchanged-write' && edge.key !== undefined)
+        linkParts.push(`tracked write of ${shownPath(edge.key)} with no recorded value change`);
+    }
     const link = linkParts.length > 0 ? ` ← ${linkParts.join(' ← ')}` : '';
 
     const writes = node.keysWritten.length > 0 ? ` [wrote: ${node.keysWritten.map(shownPath).join(', ')}]` : '';
@@ -121,6 +134,11 @@ export function formatCausalChain(root: CausalNode): string {
     if (node.incompleteSources && node.incompleteSources.length > 0) {
       lines.push(
         `${'  '.repeat(indent + 1)}⚠ also consumed ${node.incompleteSources.join('/')} — slice may be incomplete here`,
+      );
+    }
+    for (const gap of node.unchangedWriteGaps ?? []) {
+      lines.push(
+        `${'  '.repeat(indent + 1)}⚠ unchanged-write evidence for ${shownPath(gap.key)} is unknown (${gap.reason})`,
       );
     }
 

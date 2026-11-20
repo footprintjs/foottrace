@@ -1,4 +1,4 @@
-import { recordList, recordOwn } from '../recordValidation.js';
+import { recordList, recordOwn } from '../recordData.js';
 import { exact, member } from './shape.js';
 import {
   CAPTURE_CHANNELS,

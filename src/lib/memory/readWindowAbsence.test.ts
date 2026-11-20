@@ -119,6 +119,38 @@ describe('windowed read source initial state', () => {
     expect(get).not.toHaveBeenCalled();
   });
 
+  it('inspects only the requested descriptors in a maximum-length sparse array', () => {
+    const length = 2 ** 32 - 1;
+    const occupied = String(length - 1);
+    const hole = String(length - 2);
+    const sparse = new Array<unknown>(length);
+    sparse[length - 1] = undefined;
+    const descriptors: PropertyKey[] = [];
+    const ownKeys = vi.fn(() => {
+      throw new Error('A path read must never enumerate the array');
+    });
+    const items = new Proxy(sparse, {
+      getOwnPropertyDescriptor(target, name) {
+        if (descriptors.length === 2) throw new Error('A path read inspected extra descriptors');
+        descriptors.push(name);
+        return Reflect.getOwnPropertyDescriptor(target, name);
+      },
+      has(target, name) {
+        if (name !== hole) throw new Error('A path read checked an unrelated slot');
+        return Reflect.has(target, name);
+      },
+      get() {
+        throw new Error('A path read must use an own data descriptor');
+      },
+      ownKeys,
+    });
+    const options = { initialState: { items } };
+    expect(findReadSources(log, 0, 'items\u001f' + occupied, options).initialStatePresence).toBe('present');
+    expect(findReadSources(log, 0, 'items\u001f' + hole, options).initialStatePresence).toBe('absent');
+    expect(descriptors).toEqual([occupied, hole]);
+    expect(ownKeys).not.toHaveBeenCalled();
+  });
+
   it('answers initial state and log attribution for the same array position', () => {
     const path = 'items\u001f1';
     const seed = { ...commit(0), overwrite: { items: ['a', 'b'] }, trace: [{ path: 'items', verb: 'set' as const }] };
@@ -156,5 +188,19 @@ describe('windowed read source initial state', () => {
     expect(
       findReadSources([commit(0, ['config']), commit(1)], 1, key, { initialState: { config: { value: undefined } } }),
     ).toEqual({ before: -1, during: [], absenceReason: 'redacted', initialStatePresence: 'present' });
+  });
+
+  it('preserves serialized writer fields when the read window spans another write', () => {
+    const write = (position: number, value: number): CommitBundle => ({
+      ...commit(position),
+      overwrite: { x: value },
+      trace: [{ path: 'x', verb: 'set' }],
+    });
+    const overlapping = [write(0, 1), write(1, 2), { ...commit(2), beganAt: 1, sawUntil: 2 }];
+    const { initialStatePresence, ...legacy } = findReadSources(overlapping, 2, 'x', {
+      initialState: { x: undefined },
+    });
+    expect(initialStatePresence).toBe('present');
+    expect(JSON.stringify(legacy)).toBe('{"before":0,"during":[1]}');
   });
 });

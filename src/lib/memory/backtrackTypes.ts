@@ -11,6 +11,7 @@
 import type { RegisteredCode } from './honesty.js';
 import type { BuiltOn, SourceOverlap } from './parentEdges.js';
 import type { UntrackedSource } from './types.js';
+import type { UnchangedWriteGap } from './unchangedWriteTypes.js';
 
 /** A single node in the causal DAG. */
 export interface CausalNode {
@@ -177,6 +178,30 @@ export interface CausalEdge {
    * does not depend on the order the walk meets the links in.
    */
   builtOn?: BuiltOn;
+}
+
+/** A node in an opt-in walk that includes retained writes without value changes. */
+export interface CausalNodeWithUnchangedWrites extends Omit<CausalNode, 'parents' | 'parentEdges'> {
+  parents: CausalNodeWithUnchangedWrites[];
+  parentEdges: CausalEdgeWithUnchangedWrites[];
+  /** Unknown retained-write evidence for a read in this walk. */
+  unchangedWriteGaps?: readonly (UnchangedWriteGap & { readonly key: string })[];
+}
+
+/** An edge in an opt-in walk. Value and control edges retain their original fields. */
+export interface CausalEdgeWithUnchangedWrites extends Omit<CausalEdge, 'parent' | 'kind'> {
+  parent: CausalNodeWithUnchangedWrites;
+  kind: CausalEdge['kind'] | 'unchanged-write';
+}
+
+/** Like the default walk, only data and control edges are passed to the weigher. */
+export interface CausalChainWithUnchangedWritesOptions extends Omit<CausalChainOptions, 'weigh'> {
+  weigh?: (
+    child: CausalNodeWithUnchangedWrites,
+    parent: CausalNodeWithUnchangedWrites,
+    key: string | undefined,
+    kind: CausalEdge['kind'],
+  ) => number | undefined;
 }
 
 /**

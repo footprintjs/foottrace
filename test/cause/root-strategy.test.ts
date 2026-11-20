@@ -274,7 +274,7 @@ describe('root strategy result admission', () => {
     expect(result.withheldRoots).toEqual([{ nodeId: 'y', reason: atLimit }]);
   });
 
-  it.each(['select', 'withheld', 'nodeId', 'reason', 'select slot', 'withheld slot'])(
+  it.each(['select', 'withheld', 'nodeId', 'reason', 'select slot', 'withheld slot', 'then'])(
     'refuses an accessor on %s without invoking it',
     async (field) => {
       const get = vi.fn(() => 'unrecorded');
@@ -282,7 +282,7 @@ describe('root strategy result admission', () => {
       if (field === 'select slot') Object.defineProperty(raw.select, '0', { get });
       else if (field === 'withheld slot') Object.defineProperty(raw.withheld, '0', { get });
       else if (field === 'nodeId' || field === 'reason') Object.defineProperty(raw.withheld[0], field, { get });
-      else Object.defineProperty(raw, field, { get });
+      else Object.defineProperty(raw, field, { get, enumerable: true });
       expectRefusal(await explain(fixture().graph, selected, { rankRoots: unsafeReturn(raw) }));
       expect(get).not.toHaveBeenCalled();
     },

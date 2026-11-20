@@ -1,9 +1,9 @@
 # Native capture coverage
 
 This reader admits one producer observation for one live record segment.
-`decode.ts` binds the closed v3 shape to the scope address, independently
+[The shared decoder](../../evidence/recordCapture/decode.ts) binds the closed v3 shape to the scope address, independently
 supplied leg, boundary and segment, and the positions present in the admitted
-log. `legacy.ts` owns the root-only v1/v2 vocabulary and downgrades. Missing,
+log. [The legacy decoder](../../evidence/recordCapture/legacy.ts) owns the root-only v1/v2 vocabulary and downgrades. Missing,
 malformed and newer notes leave ordinary read and writer evidence available.
 The facade answers coverage without changing either the graph's edges or its
 existing gaps.

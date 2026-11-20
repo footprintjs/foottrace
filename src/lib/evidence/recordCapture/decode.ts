@@ -1,6 +1,6 @@
 import type { LogAddress } from '../../memory/eventPosition.js';
 import type { CommitBundle } from '../../memory/types.js';
-import { addressKey, addressOf, recordList, recordOwn } from '../recordValidation.js';
+import { addressKey, addressOf, recordList, recordOwn } from '../recordData.js';
 import { legacyChannels } from './legacy.js';
 import { exact, interval, member, safelyCopyFailure, witness } from './shape.js';
 import {

@@ -1,4 +1,4 @@
-import { addressOf, recordOwn } from '../recordValidation.js';
+import { addressOf, recordOwn } from '../recordData.js';
 import {
   BOUNDARIES,
   FAILURE_CATEGORIES,
