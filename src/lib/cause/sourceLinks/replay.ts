@@ -217,6 +217,19 @@ export function sourceLinkReplay(record: ReplayRecord, budget: { left: number })
     appended,
     unionTouchesPosition,
     selectedWrite,
+    /**
+     * The whole tracked key is uncertain if any recorded write overlaps its read window.
+     * Folding an ancestor row here could let an ungranted sibling decide the answer.
+     */
+    hasWindowWrite(key: string, start: number, end: number): boolean {
+      const stop = Math.min(end, accounted);
+      for (let index = start; index < stop; index++) {
+        const { trace } = log[index];
+        spend(budget, 1 + trace.length);
+        if (trace.some(({ path }) => relation(path, key) !== undefined)) return true;
+      }
+      return false;
+    },
     writtenBetween(place: SourceLinkSelection, start: number, end: number): boolean {
       return (writer(place, end) ?? -1) >= start;
     },
