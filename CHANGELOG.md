@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.3.0 — 2026-11-20
+
+### Added
+
+- Add optional source links to Foottrace record readers. A host policy can show which input a recorded check cited for a specific output. These links supplement the recorded dependency graph and carry their own evidence and omissions.
+
+### Changed
+
+- Reading a single replay stop with `stateAt` avoids copying plain objects and arrays twice. A replay cursor still returns an independent snapshot at each stop.
+
+### Fixed
+
+- Keep tracked reads of unset keys when walking saved execution trees, so causal walks see the same read names before and after a JSON round-trip.
+
 ## Unreleased
 
 ### Added
