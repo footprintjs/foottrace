@@ -3,7 +3,13 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { findCommit, findCommits, findLastWriter } from '../../../src/lib/memory/commitLogUtils';
+import {
+  commitValueAtWithBasis,
+  findCommit,
+  findCommits,
+  findLastWriter,
+} from '../../../src/lib/memory/commitLogUtils';
+import { normalisePath } from '../../../src/lib/record-paths/codec.js';
 import type { CommitBundle } from '../../../src/lib/memory/types';
 
 function bundle(idx: number, stage: string, stageId: string, keys: string[], runtimeStageId?: string): CommitBundle {
@@ -78,4 +84,34 @@ describe('findLastWriter', () => {
     expect(writer?.stageId).toBe('sf-system-prompt');
     expect(writer?.idx).toBe(1);
   });
+});
+
+it('detaches a rich initial value across replay cutoffs', () => {
+  const initialState = {
+    profile: {
+      time: new Date('2026-11-20T00:00:00Z'),
+      lookup: new Map([['a', { n: 2 }]]),
+      tags: new Set(['b']),
+      count: 0,
+    },
+  };
+  const count = normalisePath(['profile', 'count']);
+  const history = [1, 2].map((value, index) => ({
+    ...bundle(index, 'change', 'change', [count]),
+    overwrite: { profile: { count: value } },
+  }));
+  const read = (cutoff: number) =>
+    commitValueAtWithBasis(history, cutoff, 'profile', { initialState }).value as typeof initialState.profile;
+  const first = read(0);
+  expect(first).toEqual({ ...initialState.profile, count: 1 });
+  first.time.setUTCFullYear(1970);
+  first.lookup.get('a')!.n = 42;
+  first.tags.add('edited');
+  expect(read(1)).toEqual({
+    time: new Date('2026-11-20T00:00:00Z'),
+    lookup: new Map([['a', { n: 2 }]]),
+    tags: new Set(['b']),
+    count: 2,
+  });
+  expect(read(0)).toEqual({ ...initialState.profile, count: 1 });
 });

@@ -86,7 +86,18 @@ The host supplies `sourceLinkPolicy` to either record adapter. It grants the com
 
 Read `sourceLinks` and `sourceLinkGaps` on the graph page or explanation. They are supplemental evidence with their own budget and do not affect root ranking, traversal or completeness. A truncated channel keeps the recorded graph available. The base and commit log are copied together at scope admission so a cached graph reads one snapshot.
 
-The [synthetic example](../examples/source-links.ts) creates a record, grants specific locators and reads a witnessed link. Producer-side tools can use `readSourceLinkRow`, `readServedRow` and `bindSourceLinkWrite` from `foottrace/cause` to check the same row contract before delivery.
+The [synthetic example](../examples/source-links.ts) creates a record, grants specific locators and reads a witnessed link. Producer-side tools can use `readSourceLinkRow` and `readServedRow` from `foottrace/cause` to check the same row contract before delivery. Call `bindSourceLinkWrites` once per scope when binding several rows:
+
+```ts
+import { bindSourceLinkWrites, type RecordScope, type SourceLinkRowLocation } from 'foottrace/cause';
+
+declare const scope: RecordScope;
+declare const locators: readonly SourceLinkRowLocation[];
+const { writes, complete } = bindSourceLinkWrites(scope, locators);
+// writes[i] binds locators[i]. Unfilled slots on an incomplete result are unknown.
+```
+
+The batch admits the scope once and shares its replay across at most 256 locators. It preserves their order. Admission, replay and every locator share one 1,000,000-unit structural allowance (in a measured 80-link recording with 3,061 commits, the first locator used 9,316 units after scope setup and each subsequent locator used 3,079). If its allowance runs out, it retains the bindings already resolved and reports `complete: false`. A producer with a recorded channel keeps those bindings and reports the `budget-exhausted` limitation. The original `bindSourceLinkWrite` remains the single-locator form.
 
 ## 2. Adapt an authorized stored record
 

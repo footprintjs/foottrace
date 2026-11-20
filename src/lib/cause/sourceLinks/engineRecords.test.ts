@@ -1,6 +1,6 @@
 import { readEngineSourceLinksFixture as fixture } from '../../../../test/fixtures/source-links/read.js';
 import { describe, expect, it } from 'vitest';
-import { bindSourceLinkWrite, readSourceLinkRow } from '../../../cause.js';
+import { bindSourceLinkWrite, bindSourceLinkWrites, readSourceLinkRow } from '../../../cause.js';
 import type { RecordScope, RecordSourceLink } from '../../../cause.js';
 import type { CommitBundle } from '../../memory/types.js';
 import {
@@ -98,6 +98,11 @@ describe.each(encodings)('real engine source-link records, %s', (encoding) => {
     const written = linkAt(record, 2, 0);
     const read = linkAt(record, 5, 1, 4);
     const scope = recordScope(record, [written, read]);
+    const requested = [written.witness, read.witness];
+    expect(bindSourceLinkWrites(scope, requested)).toEqual({
+      writes: requested.map((locator) => bindSourceLinkWrite(scope, locator)),
+      complete: true,
+    });
     for (const [link, origin] of [
       [written, { runtimeStageId: 'load#0', commitIdx: 0 }],
       [read, { runtimeStageId: 'more#3', commitIdx: 3 }],

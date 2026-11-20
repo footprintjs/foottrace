@@ -62,7 +62,7 @@ export type {
   CaptureWitness,
 } from './lib/cause/recordCapture.js';
 
-export { bindSourceLinkWrite } from './lib/cause/sourceLinks/bind.js';
+export { bindSourceLinkWrite, bindSourceLinkWrites } from './lib/cause/sourceLinks/bind.js';
 export { readSourceLinkRow, readServedRow } from './lib/cause/sourceLinks/rows.js';
 export type {
   RecordSourceLink,
