@@ -59,3 +59,13 @@ parentPage.gaps?.push({ code: 'redacted', evidence: [] });
 // @ts-expect-error Adjacency reasons use the existing closed gap vocabulary.
 const invalidPageReason: Gap = { code: 'invented', evidence: [] };
 void invalidPageReason;
+
+import { bindSourceLinkWrites, type SourceLinkRowLocation, type SourceLinkWrite } from 'foottrace/cause';
+declare const locators: readonly SourceLinkRowLocation[];
+const bindings = bindSourceLinkWrites(sourceScope, locators);
+const firstBinding: SourceLinkWrite | undefined = bindings.writes[0];
+const complete: boolean = bindings.complete;
+void firstBinding;
+void complete;
+// @ts-expect-error The result contains an immutable positional list.
+bindings.writes.push(undefined);
