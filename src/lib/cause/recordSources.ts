@@ -20,6 +20,7 @@ import {
   spend,
 } from './recordValidation.js';
 import type { GapCode } from './types.js';
+import { withRecordValueReads } from './recordValueWork.js';
 
 /** Authorized host bindings, never a model-selected source, storage locator or receipt. */
 export interface ReadSourceExecution {
@@ -169,9 +170,11 @@ export function prepareReadSources(
       let exact = confirmed.get(cacheKey);
       if (exact === undefined) {
         spend(budget, queryCost + path.length + 1);
-        const result = commitValueAtWithBasis(log, index, path, {
-          initialState: base as Record<string, unknown> | undefined,
-        });
+        const result = withRecordValueReads(log, budget.left, () =>
+          commitValueAtWithBasis(log, index, path, {
+            initialState: base as Record<string, unknown> | undefined,
+          }),
+        );
         exact = scalar(result.value) && !result.basis.includes('redacted');
         confirmed.set(cacheKey, exact);
       }

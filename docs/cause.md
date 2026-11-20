@@ -113,6 +113,8 @@ Direct `graph.openScope(address, { signal })` discovery rejects with a fixed `ca
 
 When a scope fails to load, `graph.parents` and `graph.children` each return an incomplete page with one fixed gap. `node-limit` means the record exceeds the reader's limits. `invalid-data` means the data could not be admitted as plain data. An unavailable host or record, a timeout, and cancellation use `unavailable`, `timeout`, and `cancelled` respectively. The gap contains no record content. `explain` reports the specific reason once in each affected direction and omits the generic `not-collected` gap for that failure.
 
+A long tool result or message can be admitted as an immutable string. `maxFields` still limits the number of fields, and the reader continues to require plain data. The same configured number independently caps the UTF-16 units charged for equal-length text comparisons of the selected value. A large unselected string does not use that comparison allowance. When that work runs out, the affected page reports `truncated`. Reading a record can still take at least one pass over its text. On Node's V8 engine, native set union reuses the string hash when one is already present, and may compare independently created equal strings. The union is part of replay and keeps its recorded semantics.
+
 ## Optional native subflow observations
 
 `RecordScope.subflows` (and the stored host's same field) supplies a value-free
@@ -208,6 +210,8 @@ The root package's `findReadSources` also reports an `absenceReason` when
 there is no visible writer for a valid read. `redacted` means a redaction at or
 above the queried key could hide a writer within the read's bound.
 `never-written` describes writes in the supplied log through that bound.
+The result always carries a separate `initialStatePresence` of `present`,
+`absent`, or `unknown` based on the optional plain `initialState` record.
 
 ## 3. Explain a selected node within bounds
 

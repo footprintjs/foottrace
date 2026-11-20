@@ -86,6 +86,7 @@
   "src/lib/cause/storedRecordAdapter.ts": 3,
   "src/cause.ts": 4,
   "src/lib/cause/recordValidation.ts": 3,
+  "src/lib/cause/recordValueWork.ts": 3,
   "src/lib/evidence/admission.ts": 0,
   "src/lib/evidence/codes.ts": 0,
   "src/lib/evidence/recordData.ts": 0,

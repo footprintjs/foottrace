@@ -6,6 +6,7 @@ import { readKeysForStage } from '../recordScope.js';
 import { queryMemo } from '../queryMemo.js';
 import type { PreparedRecordScope, RecordInspection } from '../recordTypes.js';
 import type { GapCode, GraphContext, GraphEdge } from '../types.js';
+import { truncatedRecordRead, withRecordValueFallback, withRecordValueReads } from '../recordValueWork.js';
 
 /** Work belongs to one boundary inspection, including references that produce no edge. */
 export function spendSubflowWork(work: { left: number }): boolean {
@@ -41,11 +42,13 @@ export function subflowSource(
     for (const code of scope.readSources?.gaps ?? []) coverage.addGap(code);
     if (!scope.complete) coverage.addGap('not-collected');
     const key = normaliseStateKey([literalRoot]);
-    const slice = sliceForKey(scope.log, key, (id) => readKeysForStage(scope, id), {
-      before: beforeCommitIdx,
-      maxDepth: 0,
-      maxNodes: 1,
-    });
+    const slice = withRecordValueReads(scope.log, scope.maximumValueWork ?? Infinity, () =>
+      sliceForKey(scope.log, key, (id) => readKeysForStage(scope, id), {
+        before: beforeCommitIdx,
+        maxDepth: 0,
+        maxNodes: 1,
+      }),
+    );
     for (const note of slice.notes ?? []) coverage.addGap(note.code === 'redacted' ? 'redacted' : 'conservative');
     const edges: GraphEdge[] = [];
     if (slice.writer) {
@@ -59,6 +62,7 @@ export function subflowSource(
   };
   // The admitted scope object is the owner: equal addresses in another graph cannot share an answer.
   const key = 'subflow-source:' + JSON.stringify([beforeCommitIdx, literalRoot]);
-  const result = queryMemo(context)?.remember(scope, key, inspect) ?? inspect();
+  const read = () => withRecordValueFallback(inspect, truncatedRecordRead);
+  const result = queryMemo(context)?.remember(scope, key, read) ?? read();
   return context.signal.aborted ? refused('cancelled') : result;
 }
