@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.2.1 — 2026-11-20
+
+### Changed
+
+- Reading a single replay stop with `stateAt` avoids copying plain objects and arrays twice. A replay cursor still returns an independent snapshot at each stop.
+
 ## Unreleased
 
 ### Fixed
