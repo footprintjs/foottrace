@@ -9,7 +9,7 @@ import type { CommitIdx } from '../ids/runtimeStageId.js';
 import type { RegisteredCode } from './honesty.js';
 import { queryWork, relation, rootOf, writesOnlyInside } from './keyPaths.js';
 import { leavesStringAbove, logModel, memoisedModel } from './logModel.js';
-import { nativeGet } from './pathOps.js';
+import { isContainer, nativeGet } from './pathOps.js';
 import { type ReadSources, readSourcesOf } from './readWindow.js';
 import { windowOf } from './windowPlacement.js';
 import { DELIM, pathSegments } from '../record-paths/codec.js';
@@ -63,7 +63,7 @@ export function findLastWriter(commitLog: CommitBundle[], key: string, beforeIdx
 export interface WindowedReadSources extends ReadSources {
   /** No writer in the supplied log could be seen by this read. */
   readonly absenceReason?: RegisteredCode<'never-written' | 'redacted'>;
-  /** Whether the supplied initial state holds this key as an own data property. */
+  /** Whether the supplied plain initial state holds this key as an own data property. */
   readonly initialStatePresence: 'present' | 'absent' | 'unknown';
 }
 
@@ -73,11 +73,13 @@ function initialStatePresence(options: unknown, key: string): WindowedReadSource
     const base = Object.getOwnPropertyDescriptor(options, 'initialState');
     if (!base || !Object.hasOwn(base, 'value')) return 'unknown';
     let current: unknown = base.value;
+    if (!isContainer(current) || Array.isArray(current)) return 'unknown';
+    const prototype = Object.getPrototypeOf(current);
+    if (prototype !== Object.prototype && prototype !== null) return 'unknown';
+
     const segments = pathSegments(key);
     for (const [index, segment] of segments.entries()) {
-      if (typeof current !== 'object' || current === null || Array.isArray(current)) {
-        return index === 0 ? 'unknown' : 'absent';
-      }
+      if (!isContainer(current)) return 'absent';
       const slot = Object.getOwnPropertyDescriptor(current, segment);
       if (!slot) return Reflect.has(current, segment) ? 'unknown' : 'absent';
       if (!Object.hasOwn(slot, 'value')) return 'unknown';

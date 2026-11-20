@@ -75,7 +75,12 @@ describe('windowed read source initial state', () => {
     ['absent parent', {}, key, 'absent'],
     ['scalar parent', { config: 'value' }, key, 'absent'],
     ['undefined parent', { config: undefined }, key, 'absent'],
-    ['array parent', { config: [7] }, 'config\u001f0', 'absent'],
+    ['occupied array position', { items: ['a', 'b', 'c'] }, 'items\u001f1', 'present'],
+    ['object field at an array position', { items: [{ id: 5 }] }, 'items\u001f0\u001fid', 'present'],
+    ['array position past the end', { items: ['a', 'b', 'c'] }, 'items\u001f7', 'absent'],
+    ['hole in an array', { items: ['a', , 'c'] }, 'items\u001f1', 'absent'],
+    ['own undefined array position', { items: [undefined] }, 'items\u001f0', 'present'],
+    ['nested Map entry', { map: new Map([['value', 1]]) }, 'map\u001fvalue', 'absent'],
     ['inherited key', {}, 'toString', 'unknown'],
     ['non-object base', 'config', key, 'unknown'],
     ['array base', ['value'], '0', 'unknown'],
@@ -84,6 +89,44 @@ describe('windowed read source initial state', () => {
     expect(findReadSources(log, 0, path, { initialState: initialState as Readonly<Record<string, unknown>> })).toEqual({
       ...absentFromLog,
       initialStatePresence: presence,
+    });
+  });
+
+  it('accepts a plain null-prototype base and reports unsupported root objects as unknown', () => {
+    const nullPrototype = Object.assign(Object.create(null), { value: 1 });
+    expect(findReadSources(log, 0, 'value', { initialState: nullPrototype }).initialStatePresence).toBe('present');
+
+    class CustomBase {
+      value = 1;
+    }
+    for (const initialState of [new Map([['value', 1]]), new Date(0), new CustomBase()]) {
+      expect(
+        findReadSources(log, 0, 'value', { initialState: initialState as unknown as Record<string, unknown> })
+          .initialStatePresence,
+      ).toBe('unknown');
+    }
+  });
+
+  it('does not treat inherited array positions or array accessors as data', () => {
+    const get = vi.fn(() => 1);
+    const items = new Array(2);
+    const prototype = Object.create(Array.prototype);
+    Object.defineProperty(prototype, '0', { get });
+    Object.defineProperty(items, '1', { get });
+    Object.setPrototypeOf(items, prototype);
+    expect(findReadSources(log, 0, 'items\u001f0', { initialState: { items } }).initialStatePresence).toBe('unknown');
+    expect(findReadSources(log, 0, 'items\u001f1', { initialState: { items } }).initialStatePresence).toBe('unknown');
+    expect(get).not.toHaveBeenCalled();
+  });
+
+  it('answers initial state and log attribution for the same array position', () => {
+    const path = 'items\u001f1';
+    const seed = { ...commit(0), overwrite: { items: ['a', 'b'] }, trace: [{ path: 'items', verb: 'set' as const }] };
+    const writer = { ...commit(1), overwrite: { items: [, 'B'] }, trace: [{ path, verb: 'set' as const }] };
+    expect(findReadSources([seed, writer, commit(2)], 2, path, { initialState: { items: ['a', 'b'] } })).toEqual({
+      before: 1,
+      during: [],
+      initialStatePresence: 'present',
     });
   });
 
