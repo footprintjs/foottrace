@@ -2,8 +2,8 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, it } from 'vitest';
-import { recordScopesFromSnapshot } from '../../../cause.js';
-import type { LogAddress } from '../../memory/eventPosition.js';
+import { recordScopesFromSnapshot } from '../../src/cause.js';
+import type { LogAddress } from '../../src/index.js';
 
 const corpus: Array<{
   name: string;
@@ -12,7 +12,7 @@ const corpus: Array<{
     address: LogAddress;
     fields: Record<string, string>;
   }>;
-}> = JSON.parse(readFileSync(join(__dirname, '../../../../test/fixtures/native-snapshot/native-scopes.json'), 'utf8'));
+}> = JSON.parse(readFileSync(join(__dirname, '../fixtures/native-snapshot/native-scopes.json'), 'utf8'));
 
 function normalize(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(normalize);
