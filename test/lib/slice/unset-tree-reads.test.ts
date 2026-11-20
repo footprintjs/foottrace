@@ -67,13 +67,7 @@ describe('unset reads in live and saved execution trees', () => {
         throw new Error('read-key accessor');
       },
     });
-    const stageReads = {
-      x: 1,
-      get fabricated() {
-        throw new Error('read-value accessor');
-      },
-    };
-    const tree = { runtimeStageId: 'b#1', stageReads, undefinedReadKeys: sidecar };
+    const tree = { runtimeStageId: 'b#1', stageReads: { x: 1 }, undefinedReadKeys: sidecar };
     expect(keysReadFromExecutionTree(tree).lookup('b#1')).toEqual(['missing', 'x']);
     expect(
       keysReadFromExecutionTree({
@@ -103,33 +97,45 @@ describe('unset reads in live and saved execution trees', () => {
       const tree = { runtimeStageId: 'b#1', stageReads: { z: 1, a: 2 }, undefinedReadKeys };
       expect(keysReadFromExecutionTree(tree).lookup('b#1')).toEqual(['z', 'a']);
     }
+    const inaccessibleSidecar = new Proxy(
+      { runtimeStageId: 'b#1', stageReads: { z: 1, a: 2 }, undefinedReadKeys: ['missing'] },
+      {
+        getOwnPropertyDescriptor(target, key) {
+          if (key === 'undefinedReadKeys') throw new Error('sidecar field could not be inspected');
+          return Object.getOwnPropertyDescriptor(target, key);
+        },
+      },
+    );
+    expect(keysReadFromExecutionTree(inaccessibleSidecar).lookup('b#1')).toEqual(['z', 'a']);
   });
 
-  it('does not use inherited or accessor fields and slots to traverse the tree', () => {
-    const child = { runtimeStageId: 'kept#0', stageReads: { input: 1 } };
-    const root = Object.assign(Object.create({ stageReads: { inherited: 1 } }), {
+  it('preserves inherited structural fields and follows structural getters', () => {
+    const child = Object.create({ runtimeStageId: 'child#1', stageReads: { inherited: 1 } });
+    const root = {
       runtimeStageId: 'root#0',
+      get stageReads() {
+        return {
+          get readName() {
+            throw new Error('stored read values must stay opaque');
+          },
+        };
+      },
       get next() {
-        return undefined;
+        return child;
       },
-    });
-    Object.defineProperty(root, 'next', {
-      get() {
-        throw new Error('next accessor');
-      },
-    });
-    const list = [root, child];
+    };
+    const list = [root];
     Object.defineProperty(list, 0, {
       get() {
-        throw new Error('tree slot accessor');
+        return root;
       },
     });
-    for (const tree of [list, { branches: [list] }, { children: list }]) {
+    for (const tree of [root, list, { branches: [list] }, { children: list }]) {
       const read = keysReadFromExecutionTree(tree);
-      expect(read.lookup('kept#0')).toEqual(['input']);
-      expect(read.coverage).toEqual({ steps: 1, stepsWithReads: 1 });
+      expect(read.lookup('root#0')).toEqual(['readName']);
+      expect(read.lookup('child#1')).toEqual(['inherited']);
+      expect(read.coverage).toEqual({ steps: 2, stepsWithReads: 2 });
     }
-    expect(keysReadFromExecutionTree(root).lookup('root#0')).toEqual([]);
   });
 
   it('walks across the same B reads after the recording has been saved', () => {

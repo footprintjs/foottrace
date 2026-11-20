@@ -18,23 +18,18 @@ function isReadTreeObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function isAccessor(slot: PropertyDescriptor | undefined): boolean {
-  return slot !== undefined && !Object.hasOwn(slot, 'value');
-}
-
 function ownDataValue(holder: object, key: string): unknown {
   const slot = Object.getOwnPropertyDescriptor(holder, key);
-  return isAccessor(slot) ? undefined : slot?.value;
+  return slot && Object.hasOwn(slot, 'value') ? slot.value : undefined;
 }
 
-/** Use the engine's distinct, lexical read names when its unset-read list is present. */
-function trackedReadNames(stageReads: Record<string, unknown> | undefined, unset: unknown): string[] {
-  const keys = stageReads
-    ? Object.keys(stageReads).filter((key) => !isAccessor(Object.getOwnPropertyDescriptor(stageReads, key)))
-    : [];
-  const unsetKeys: string[] = [];
+/** Merge the engine's unset-read names into the existing read map. */
+function trackedReadNames(node: object, stageReads: Record<string, unknown> | undefined): string[] {
+  const keys = stageReads === undefined ? [] : Object.keys(stageReads);
   try {
+    const unset = ownDataValue(node, 'undefinedReadKeys');
     if (!Array.isArray(unset)) return keys;
+    const unsetKeys: string[] = [];
     // Enumerate actual array indices, without scanning holes or consulting a caller's iterator.
     for (const name of Object.getOwnPropertyNames(unset)) {
       const index = Number(name);
@@ -42,22 +37,23 @@ function trackedReadNames(stageReads: Record<string, unknown> | undefined, unset
       const key = ownDataValue(unset, name);
       if (typeof key === 'string') unsetKeys.push(key);
     }
+    // Use the engine's lexical order when the side list contributes evidence.
+    return unsetKeys.length === 0 ? keys : [...new Set([...keys, ...unsetKeys])].sort();
   } catch {
-    // A revoked or throwing proxy cannot provide this optional evidence.
+    // A throwing descriptor lookup or revoked optional list supplies no evidence.
     return keys;
   }
-  // Older recordings and unusable side lists keep the read map's existing order.
-  return unsetKeys.length === 0 ? keys : [...new Set([...keys, ...unsetKeys])].sort();
 }
 
 /**
  * Post-hoc reads from a finished run's execution tree — ZERO setup.
  *
- * WHY this works: a stage's `stageReads` records the keys it tracked-read
- * whenever the `readTracking` dial ≠ 'off' ('full' is the
+ * WHY this works: a stage's `stageReads` records the keys it
+ * tracked-read whenever the `readTracking` dial ≠ 'off' ('full' is the
  * engine default; 'summary' replaces VALUES with markers but keeps the
  * KEYS — and keys are all a slice needs). The optional `undefinedReadKeys`
- * list preserves reads of unset keys when JSON drops their values. Under 'off' this source returns
+ * list preserves those names when JSON drops their undefined values. Its own
+ * string data entries are merged with the read-map keys. Under 'off' this source returns
  * empty read-sets — detectable via `coverage.stepsWithReads === 0`, which
  * `sliceForKey` copies onto the slice so tools can say "reads were not
  * recorded" instead of the lie "no dependencies".
@@ -78,14 +74,13 @@ function trackedReadNames(stageReads: Record<string, unknown> | undefined, unset
  * mount — see README.md § Subflow boundaries.
  *
  * A live {@link ExecutionTree} or unknown saved JSON uses this same traversal.
- * Malformed tree fields throw a TypeError naming their source path; no partial
+ * Malformed reader fields throw a TypeError naming their source path; no partial
  * reads strategy is returned. Optional fields may be absent or undefined, but
  * null nodes, sparse arrays and wrongly shaped fields are not missing evidence
- * to silently skip. Only own data fields are read. Read-map values are opaque,
- * and malformed unset-read lists or entries supply no keys.
+ * to silently skip. Only read-map KEYS are inspected, never their stored values.
  * Cycles/shared objects are visited once; existing traversal order is retained.
  * Coverage counts observed nodes and nonempty read sets, not capture completeness.
- * This is an ordinary-data boundary, not a sandbox for hostile proxies.
+ * This is an ordinary-data boundary, not a sandbox for hostile proxies/accessors.
  */
 export function keysReadFromExecutionTree(tree: unknown): KeysReadSource {
   const byStep = new Map<string, string[]>();
@@ -95,15 +90,9 @@ export function keysReadFromExecutionTree(tree: unknown): KeysReadSource {
   // hand-built tree a non-event instead of an infinite loop.
   const visited = new Set<object>();
   const stack: { node: unknown; path: string }[] = [];
-  const pushNodes = (nodes: readonly unknown[], path: string): void => {
-    for (let i = 0; i < nodes.length; i++) {
-      const slot = Object.getOwnPropertyDescriptor(nodes, i);
-      // Holes still reach shape validation. Accessors supply no evidence.
-      if (!isAccessor(slot)) stack.push({ node: slot?.value, path: `${path}[${i}]` });
-    }
-  };
   if (Array.isArray(tree)) {
-    pushNodes(tree, '$');
+    // Indexing retains holes as invalid evidence, unlike flat()/map().
+    for (let i = 0; i < tree.length; i++) stack.push({ node: tree[i], path: `$[${i}]` });
   } else {
     stack.push({ node: tree, path: '$' });
   }
@@ -112,11 +101,7 @@ export function keysReadFromExecutionTree(tree: unknown): KeysReadSource {
     if (!isReadTreeObject(node)) throw new TypeError(`keysReadFromExecutionTree: ${path} must be an object`);
     if (visited.has(node)) continue;
     visited.add(node);
-    const runtimeStageId = ownDataValue(node, 'runtimeStageId');
-    const stageReads = ownDataValue(node, 'stageReads');
-    const next = ownDataValue(node, 'next');
-    const children = ownDataValue(node, 'children');
-    const branches = ownDataValue(node, 'branches');
+    const { runtimeStageId, stageReads, next, children, branches } = node;
     if (runtimeStageId !== undefined && typeof runtimeStageId !== 'string') {
       throw new TypeError(`keysReadFromExecutionTree: ${path}.runtimeStageId must be a string when present`);
     }
@@ -126,26 +111,31 @@ export function keysReadFromExecutionTree(tree: unknown): KeysReadSource {
     if (children !== undefined && !Array.isArray(children)) {
       throw new TypeError(`keysReadFromExecutionTree: ${path}.children must be an array when present`);
     }
-    if (branches !== undefined && !Array.isArray(branches)) {
-      throw new TypeError(`keysReadFromExecutionTree: ${path}.branches must be an array when present`);
+    if (branches !== undefined) {
+      if (!Array.isArray(branches)) {
+        throw new TypeError(`keysReadFromExecutionTree: ${path}.branches must be an array when present`);
+      }
+      // Indexed, not every(): every() skips holes, and a hole is invalid evidence.
+      for (let b = 0; b < branches.length; b++) {
+        if (!Array.isArray(branches[b])) {
+          throw new TypeError(`keysReadFromExecutionTree: ${path}.branches[${b}] must be an array`);
+        }
+      }
     }
     if (runtimeStageId) {
       steps++;
-      const keys = trackedReadNames(stageReads, ownDataValue(node, 'undefinedReadKeys'));
+      const keys = trackedReadNames(node, stageReads);
       if (keys.length > 0) byStep.set(runtimeStageId, keys);
     }
     if (next !== undefined) stack.push({ node: next, path: `${path}.next` });
-    if (children !== undefined) pushNodes(children, `${path}.children`);
+    if (children !== undefined) {
+      for (let i = 0; i < children.length; i++) stack.push({ node: children[i], path: `${path}.children[${i}]` });
+    }
     if (branches !== undefined) {
       // Pushed in the same order as a root list (and `children`), so a duplicated id resolves the same way in both.
       for (let b = 0; b < branches.length; b++) {
-        const slot = Object.getOwnPropertyDescriptor(branches, b);
-        if (isAccessor(slot)) continue;
-        const chain = slot?.value;
-        if (!Array.isArray(chain)) {
-          throw new TypeError(`keysReadFromExecutionTree: ${path}.branches[${b}] must be an array`);
-        }
-        pushNodes(chain, `${path}.branches[${b}]`);
+        const chain = branches[b] as unknown[];
+        for (let i = 0; i < chain.length; i++) stack.push({ node: chain[i], path: `${path}.branches[${b}][${i}]` });
       }
     }
   }
