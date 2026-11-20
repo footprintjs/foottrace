@@ -23,6 +23,7 @@ export type {
   MaybePromise,
   NodeId,
   RootStrategy,
+  SourceLinkPage,
   TraversedEdge,
   TraversalLimits,
   WalkLimits,
@@ -56,3 +57,18 @@ export type {
   CaptureReason,
   CaptureWitness,
 } from './lib/cause/recordCapture.js';
+
+export { bindSourceLinkWrite } from './lib/cause/sourceLinks/bind.js';
+export { readSourceLinkRow, readServedRow } from './lib/cause/sourceLinks/rows.js';
+export type {
+  RecordSourceLink,
+  RecordSourceLinks,
+  ServedRow,
+  SourceLink,
+  SourceLinkGap,
+  SourceLinkLocator,
+  SourceLinkPolicy,
+  SourceLinkRow,
+  SourceLinkRowLocation,
+  SourceLinkWrite,
+} from './lib/cause/sourceLinks/types.js';

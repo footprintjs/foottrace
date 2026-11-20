@@ -3,6 +3,8 @@ import type { ControlDependency } from '../memory/backtrack.js';
 import type { LogAddress } from '../memory/eventPosition.js';
 import type { CommitBundle } from '../memory/types.js';
 import type { PreparedReadSources, RecordReadSources } from './recordSources.js';
+import type { SourceLinkInventory } from './sourceLinks/admission.js';
+import type { RecordSourceLinks, SourceLinkPolicy } from './sourceLinks/types.js';
 import type { PreparedRecordSubflows, RecordSubflows } from './recordSubflows.js';
 import type { Adjacency, Attention, CauseGraph, Gap, GraphContext, NodeId } from './types.js';
 
@@ -14,6 +16,8 @@ export interface RecordScope {
   readonly readSources?: RecordReadSources;
   /** Explicit, value-free crossings. Native snapshot inventories remain partial. */
   readonly subflows?: RecordSubflows;
+  /** Optional value-free checks that cite an input to a recorded output. */
+  readonly sourceLinks?: RecordSourceLinks;
   readonly reads?: Readonly<Record<string, readonly string[]>>;
   readonly controlDeps?: Readonly<Record<string, { readonly deciderId: string }>>;
   readonly attention?: Readonly<Record<string, readonly Attention[]>>;
@@ -29,12 +33,15 @@ export interface RecordNode {
   readonly key?: string;
 }
 export interface RecordGraphOptions {
+  readonly sourceLinkPolicy?: SourceLinkPolicy;
   readonly maxCommits?: number;
   readonly maxFields?: number;
   readonly maxEdges?: number;
   readonly maxScopes?: number;
   readonly loadTimeoutMs?: number;
 }
+export type ResolvedRecordGraphOptions = Required<Omit<RecordGraphOptions, 'sourceLinkPolicy'>> &
+  Pick<RecordGraphOptions, 'sourceLinkPolicy'>;
 export interface RecordCauseGraph extends CauseGraph {
   nodeId(address: LogAddress, node: RecordNode): NodeId;
   /** Rejects with fixed message/code on discovery failure; never reports an unavailable scope as empty. */
@@ -62,6 +69,8 @@ export interface PreparedRecordScope {
   capture?: CaptureObservation;
   readSources?: PreparedReadSources;
   subflows?: PreparedRecordSubflows;
+  sourceLinks?: SourceLinkInventory;
+  sourceLinkBase?: Record<string, unknown>;
   sourceCoveredExecutions?: ReadonlySet<string>;
 }
 export interface RecordLoadFailure {

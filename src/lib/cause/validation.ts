@@ -1,3 +1,4 @@
+import { sourceLinkPageOf } from './sourceLinks/page.js';
 import type { Adjacency, Attention, Gap, GapCode, GraphEdge, NodeId } from './types.js';
 
 import { boundedList, boundedName, EvidenceRefusal, evidenceRefusalCode, ownData } from '../evidence/admission.js';
@@ -108,6 +109,7 @@ export function adjacency(value: unknown, maximum: number, maximumGaps = CALLER_
     edges,
     complete,
     ...(suppliedGaps === undefined ? {} : { gaps: gaps(suppliedGaps, maximumGaps) }),
+    ...sourceLinkPageOf(value as object),
   });
 }
 export const nodeIds = (value: unknown, max: number): readonly NodeId[] =>

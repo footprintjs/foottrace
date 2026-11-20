@@ -464,6 +464,10 @@ export interface KeyFold {
    * it before writing through it. `commitValueAt` on a memoised log starts from a kept generation.
    */
   readonly start?: unknown;
+  /** A recorded own root can be present with the value undefined. */
+  readonly startPresent?: boolean;
+  /** Charge or refuse work before a reader's fold allocates the next generation. */
+  readonly beforeRow?: (touch: Touch, state: Readonly<Record<string, unknown>>) => void;
   /**
    * Keep GENERATIONS at chosen commits: `at` is asked before a commit's first row (with the fold's state as
    * it stands); for a commit it accepts, `keep` is handed the value at the key before the commit and after
@@ -473,7 +477,7 @@ export interface KeyFold {
    */
   readonly generations?: {
     at(commitIdx: number, state: Readonly<Record<string, unknown>>): boolean;
-    keep(commitIdx: number, before: unknown, after: unknown): void;
+    keep(commitIdx: number, before: unknown, after: unknown, state: Readonly<Record<string, unknown>>): void;
   };
 }
 
@@ -503,7 +507,7 @@ export function foldKey(touches: readonly Touch[], segs: string[], options: KeyF
     }
   }
   const state: Record<string, unknown> = {};
-  if (options.start !== undefined) state[root] = options.start;
+  if (options.start !== undefined || options.startPresent === true) state[root] = options.start;
   let owned = new WeakSet<object>();
   owned.add(state);
   const observe = options.observe;
@@ -521,7 +525,7 @@ export function foldKey(touches: readonly Touch[], segs: string[], options: KeyF
     const touch = touches[i];
     if (at === undefined || touch.commitIdx !== atCommit) {
       if (kept !== -1) {
-        generations!.keep(kept, keptBefore, nativeGet(state, segs));
+        generations!.keep(kept, keptBefore, nativeGet(state, segs), state);
         kept = -1;
         release();
       }
@@ -533,6 +537,7 @@ export function foldKey(touches: readonly Touch[], segs: string[], options: KeyF
       at = new RecordedPayload(touch.bundle.updates, touch.bundle.overwrite, true, [root]);
       atCommit = touch.commitIdx;
     }
+    options.beforeRow?.(touch, state);
     const rowSegs = touch.path === root ? [root] : touch.path.split(DELIM);
     const watched = observe !== undefined && (touch.relation !== undefined || options.everyRow === true);
     let before: unknown;
@@ -547,6 +552,6 @@ export function foldKey(touches: readonly Touch[], segs: string[], options: KeyF
     placeVerb(state, rowSegs, next);
     if (watched) observe(touch, before, nativeGet(state, segs));
   }
-  if (kept !== -1) generations!.keep(kept, keptBefore, nativeGet(state, segs));
+  if (kept !== -1) generations!.keep(kept, keptBefore, nativeGet(state, segs), state);
   return nativeGet(state, segs);
 }

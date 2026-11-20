@@ -1,3 +1,4 @@
+import type { SourceLink, SourceLinkGap } from './sourceLinks/types.js';
 import type { AttentionReason, GapCode } from '../evidence/codes.js';
 export type { AttentionReason, GapCode } from '../evidence/codes.js';
 
@@ -35,7 +36,11 @@ export interface GraphEdge {
   readonly attribution: 'per-write' | 'stage' | 'recorded-control' | 'recorded-read' | 'recorded-write';
   readonly evidence: readonly string[];
 }
-export interface Adjacency {
+export interface SourceLinkPage {
+  readonly sourceLinks?: readonly SourceLink[];
+  readonly sourceLinkGaps?: readonly SourceLinkGap[];
+}
+export interface Adjacency extends SourceLinkPage {
   readonly edges: readonly GraphEdge[];
   /** Complete edge enumeration does not override explicit confidence limitations. */
   readonly complete: boolean;
@@ -68,14 +73,14 @@ export interface MarkedNode {
   readonly nodeId: NodeId;
   readonly attention: readonly Attention[];
 }
-export interface ImpactResult {
+export interface ImpactResult extends SourceLinkPage {
   readonly nodes: readonly NodeId[];
   readonly edges: readonly TraversedEdge[];
   readonly confidence: Confidence;
   readonly gaps: readonly Gap[];
 }
 /** Bounded evidence already visited by the reverse walk. Edges point dependent → recorded parent. */
-export interface BackwardResult {
+export interface BackwardResult extends SourceLinkPage {
   /** Includes the selected node and admitted discovered ancestors, even when coverage is incomplete. */
   readonly nodes: readonly NodeId[];
   readonly edges: readonly TraversedEdge[];
@@ -83,7 +88,7 @@ export interface BackwardResult {
   readonly confidence: Confidence;
   readonly gaps: readonly Gap[];
 }
-export interface CauseResult {
+export interface CauseResult extends SourceLinkPage {
   readonly nodeId: NodeId;
   readonly attention: readonly Attention[];
   /** Present only for one supported candidate and complete backward coverage. Not provider-internal proof. */
@@ -97,7 +102,7 @@ export interface CauseResult {
   readonly confidence: Confidence;
   readonly gaps: readonly Gap[];
 }
-export interface AttentionListResult {
+export interface AttentionListResult extends SourceLinkPage {
   readonly nodes: readonly MarkedNode[];
   readonly confidence: Confidence;
   readonly gaps: readonly Gap[];
