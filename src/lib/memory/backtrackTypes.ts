@@ -9,12 +9,13 @@
  */
 
 import type { RegisteredCode } from './honesty.js';
+import type { OutsideInputAdmission } from '../evidence/outsideInputs.js';
 import type { BuiltOn, SourceOverlap } from './parentEdges.js';
 import type { UntrackedSource } from './types.js';
 import type { UnchangedWriteGap } from './unchangedWriteTypes.js';
 
 /** A single node in the causal DAG. */
-export interface CausalNode {
+export interface CausalNode extends OutsideInputAdmission {
   /** Unique execution step identifier. */
   runtimeStageId: string;
   /** Stable stage identifier. */

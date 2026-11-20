@@ -9,6 +9,7 @@
 
 import { EvidenceRefusal, evidenceRefusalCode } from '../evidence/admission.js';
 import type { GapCode } from '../evidence/codes.js';
+import { type OutsideInputs, readOutsideInputs } from '../evidence/outsideInputs.js';
 import { executionIndexOf } from '../ids/runtimeStageId.js';
 import type { LogAddress } from '../memory/eventPosition.js';
 import type { UntrackedSource } from '../memory/types.js';
@@ -72,6 +73,8 @@ export interface LogFold {
   readonly suppliedAbouts: Set<string>;
   readonly abouts: Map<string, { readonly about: CommitAbout; readonly index: number }>;
   readonly untracked: Map<string, Set<UntrackedSource>>;
+  /** First owning bundle per execution in this log. A continuation or child-log seed cannot supply it. */
+  readonly outsideOwners?: Map<string, { readonly bundle: unknown; readonly index: number }>;
   readonly edges: LocalEdge[];
   decisions: { readonly row: StoredDecision; readonly index: number }[];
   readonly stops: StoredStop[];
@@ -107,7 +110,7 @@ function collectsOf(log: StoredLog): { collects?: LogCollects; why?: RunEvidence
   }
 }
 
-export function newFold(log: StoredLog): LogFold {
+export function newFold(log: StoredLog, includeOutsideInputs = false): LogFold {
   const { collects, why } = collectsOf(log);
   return {
     log,
@@ -122,6 +125,7 @@ export function newFold(log: StoredLog): LogFold {
     suppliedAbouts: new Set(),
     abouts: new Map(),
     untracked: new Map(),
+    ...(includeOutsideInputs && collects?.reads === 'keys' && { outsideOwners: new Map() }),
     edges: [],
     decisions: [],
     stops: [],
@@ -154,6 +158,8 @@ function readCommit(fold: LogFold, entry: unknown, index: number, a: Admission):
     }
     if (about !== undefined) fold.suppliedAbouts.add(id);
     const phase = ownField(bundle, 'phase');
+    const owners = fold.outsideOwners;
+    if (owners && !seed && !owners.has(id)) owners.set(id, { bundle, index });
     const untracked = admitUntracked(ownField(bundle, 'untrackedSources'), a);
     if (untracked.length > 0) {
       const held = fold.untracked.get(id) ?? new Set();
@@ -182,6 +188,17 @@ function readCommit(fold: LogFold, entry: unknown, index: number, a: Admission):
   } catch (error) {
     refusedRow(fold, ABOUT_CHANNELS, index, 'commit: about refused', error);
   }
+}
+
+/** Admit outside metadata using its own allowance so it cannot displace ordinary rows. */
+export function outsideInputsOf(fold: LogFold, id: string, a: Admission): OutsideInputs | undefined {
+  const owner = fold.outsideOwners?.get(id);
+  if (owner === undefined) return undefined;
+  const { outsideInputs, outsideInputGap } = readOutsideInputs(owner.bundle, (count) => spend(a, count));
+  if (outsideInputGap !== undefined) {
+    refused(fold, ['reads'], owner.index, 'commit.outsideInputs: refused', outsideInputGap);
+  }
+  return outsideInputs;
 }
 
 function refusedRow(fold: LogFold, channels: readonly Channel[], index: number, label: string, error: unknown): void {

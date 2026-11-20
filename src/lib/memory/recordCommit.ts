@@ -28,6 +28,7 @@ import { captureFor } from '../read-sources/bindings.js';
  */
 
 import type { CommitAbout } from '../run-evidence/kinds.js';
+import { readOutsideInputs, type OutsideInputs } from '../evidence/outsideInputs.js';
 import type { EventLog } from './EventLog.js';
 import { scrubPatch } from './scrub.js';
 import type { SharedMemory } from './SharedMemory.js';
@@ -43,6 +44,7 @@ export interface CommitStamp {
   stageId: string;
   runtimeStageId: string;
   untrackedSources?: ReadonlySet<UntrackedSource>;
+  outsideInputs?: OutsideInputs;
   tags?: readonly string[];
   phase?: CommitPhase;
   /** What this commit says about its execution, for a log that keeps evidence (law 4). */
@@ -56,7 +58,10 @@ export interface CommitTargets {
   log?: EventLog;
 }
 
-type Names = Pick<CommitBundle, 'stage' | 'stageId' | 'runtimeStageId' | 'untrackedSources' | 'tags' | 'phase'>;
+type Names = Pick<
+  CommitBundle,
+  'stage' | 'stageId' | 'runtimeStageId' | 'untrackedSources' | 'outsideInputs' | 'tags' | 'phase'
+>;
 
 /**
  * Record one commit (the module law). `payload` absent = the empty commit. `beganAt` and `sawUntil`
@@ -137,11 +142,12 @@ function bundleOf(
   seen: Seen | undefined,
   viewAt: number | undefined,
 ): CommitBundle {
-  const { stage, stageId, runtimeStageId, untrackedSources, tags, phase } = names;
+  const { stage, stageId, runtimeStageId, untrackedSources, outsideInputs, tags, phase } = names;
   const bundle: CommitBundle = { overwrite, updates, redactedPaths, trace, stage, stageId, runtimeStageId };
   if (untrackedSources) bundle.untrackedSources = untrackedSources;
   if (tags) bundle.tags = tags;
   if (phase) bundle.phase = phase;
+  if (outsideInputs) bundle.outsideInputs = outsideInputs;
   if (seen) {
     bundle.beganAt = seen.beganAt;
     if (seen.sawUntil !== undefined) bundle.sawUntil = seen.sawUntil;
@@ -151,7 +157,8 @@ function bundleOf(
 }
 
 /** The names, read once — before anything moves (law 2). An optional one with nothing to say is `undefined`. */
-function namesOf({ stage, stageId, runtimeStageId, untrackedSources, tags, phase }: CommitStamp): Names {
+function namesOf(stamp: CommitStamp): Names {
+  const { stage, stageId, runtimeStageId, untrackedSources, tags, phase } = stamp;
   return {
     stage,
     stageId,
@@ -159,5 +166,6 @@ function namesOf({ stage, stageId, runtimeStageId, untrackedSources, tags, phase
     untrackedSources: !untrackedSources || untrackedSources.size === 0 ? undefined : [...untrackedSources],
     tags: !tags || tags.length === 0 ? undefined : tags,
     phase: phase || undefined,
+    outsideInputs: readOutsideInputs(stamp).outsideInputs,
   };
 }

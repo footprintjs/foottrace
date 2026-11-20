@@ -1,4 +1,5 @@
 import type { LogAddress } from '../memory/eventPosition.js';
+import { carryOutsideInputs, readOutsideInputs } from '../evidence/outsideInputs.js';
 import { RUN_EVIDENCE_LIMITS } from '../run-evidence/kinds.js';
 import { foldRunEvidence } from '../run-evidence/read.js';
 import type { RunEvidence } from '../run-evidence/rows.js';
@@ -100,7 +101,8 @@ export function createStoredRecordGraph(
             commitCap = max * 4 + 16,
             budget = { left: limits.maxFields };
           const raw = recordList(recordOwn(loaded, 'entries'), limits.maxFields),
-            entries: unknown[] = [];
+            entries: unknown[] = [],
+            originalByBundle = new WeakMap<object, unknown>();
           let commits = 0;
           for (let i = 0; i < raw.length; i++) {
             if (context.signal.aborted) throw new RecordRefusal('cancelled');
@@ -118,12 +120,14 @@ export function createStoredRecordGraph(
                 throw new RecordRefusal('node-limit');
               // `about`, `collects` and `runNotes` go on unread: `run-evidence/admit` is their one admission.
               const about = recordOwn(entry, 'about');
+              // A stored commit sits at its own index (checked above), wherever its entry arrived.
+              const bundle = bundleOf(b, (idx as number) - 1, budget);
+              originalByBundle.set(bundle, b);
               entries.push({
                 kind,
                 address: a,
                 at,
-                // A stored commit sits at its own index (checked above), wherever its entry arrived.
-                bundle: bundleOf(b, (idx as number) - 1, budget),
+                bundle,
                 ...(about === undefined ? {} : { about }),
               });
             } else if (kind === 'opened') {
@@ -163,6 +167,18 @@ export function createStoredRecordGraph(
             log = record.log(address);
           if (!log) throw new RecordRefusal();
           if (log.gaps.length) throw new RecordRefusal('not-collected');
+          // A stored file can arrive out of order; only the retained first commit owns outside evidence.
+          const outsideAllowance = { left: limits.maxFields };
+          const executions = new Set<string>();
+          for (const bundle of log.commitLog) {
+            if (executions.has(bundle.runtimeStageId)) continue;
+            executions.add(bundle.runtimeStageId);
+            if (bundle.phase === undefined)
+              carryOutsideInputs(
+                bundle,
+                readOutsideInputs(originalByBundle.get(bundle), (count) => spend(outsideAllowance, count)),
+              );
+          }
           const hostReads = recordOwn(loaded, 'reads') as RecordScope['reads'],
             hostControl = recordOwn(loaded, 'controlDeps') as RecordScope['controlDeps'],
             hostMarks = recordOwn(loaded, 'attention') as RecordScope['attention'];

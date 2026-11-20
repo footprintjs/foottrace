@@ -48,19 +48,22 @@ function limitsOf(given: RunEvidenceLimits | undefined): typeof RUN_EVIDENCE_LIM
 
 /**
  * The fold behind {@link readRunEvidence}, with the budget its caller shares (`createStoredRecordGraph` spends one budget
- * on a scope).
+ * on a scope). The graph already admits outside inputs on its commit bundles.
  */
 export function foldRunEvidence(
   stored: StoredRecord,
   legs: string | readonly string[],
   limits: typeof RUN_EVIDENCE_LIMITS,
   budget: { left: number },
+  includeOutsideInputs = false,
 ): RunEvidence {
   const names = legsOf(legs);
   const a: Admission = { limits, budget };
   const unreadStore = stored.unread.length > 0;
   const folds: LogFold[] = [];
-  for (const log of stored.logs.values()) if (names.has(log.address.logRunId)) folds.push(newFold(log));
+  for (const log of stored.logs.values()) {
+    if (names.has(log.address.logRunId)) folds.push(newFold(log, includeOutsideInputs));
+  }
   const held = folds.filter((fold) => fold.why === undefined);
   const present = new Set(folds.map((fold) => fold.address.logRunId));
   const absent: readonly GapCode[] = [...names].some((name) => !present.has(name)) ? ['not-collected'] : [];
@@ -126,7 +129,7 @@ export function foldRunEvidence(
   return Object.freeze({
     decisions: channelOf(decisionRows, 'decisions', folds, absent),
     stops: channelOf(stopRows, 'stops', folds, absent),
-    reads: readsChannel(folds, absent),
+    reads: readsChannel(folds, { limits, budget: { left: limits.fields } }, absent),
     attention: attentionChannel(folds, absent),
     stages: channelOf(stageRows, 'stages', folds, absent),
     running: runningChannel(folds, a, absent),
@@ -168,5 +171,5 @@ export function readRunEvidence(
   limits?: RunEvidenceLimits,
 ): RunEvidence {
   const bounds = limitsOf(limits);
-  return foldRunEvidence(stored, legs, bounds, { left: bounds.fields });
+  return foldRunEvidence(stored, legs, bounds, { left: bounds.fields }, true);
 }

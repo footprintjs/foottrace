@@ -9,6 +9,23 @@
 import type { CausalEdgeWithUnchangedWrites, CausalNode, CausalNodeWithUnchangedWrites } from './backtrackTypes.js';
 import type { SourceOverlap } from './parentEdges.js';
 import { shownPath } from '../record-paths/codec.js';
+import type { OutsideInputAdmission } from '../evidence/outsideInputs.js';
+
+/** Render the same outside-input evidence in the backward and forward views. */
+export function outsideInputLines(node: OutsideInputAdmission, pad: string): string[] {
+  const { outsideInputs, outsideInputGap } = node;
+  const lines: string[] = [];
+  if (outsideInputs?.declared?.length)
+    lines.push(`${pad}⚠ outside: ${outsideInputs.declared.join(', ')} — slice may be incomplete here`);
+  if (outsideInputs?.call) {
+    const { targets, incomplete } = outsideInputs.call;
+    const label = targets.length > 0 ? ` (${targets.join(', ')})` : '';
+    lines.push(`${pad}⚠ outside: call${label} — slice may be incomplete here`);
+    if (incomplete) lines.push(`${pad}⚠ outside call target list is incomplete`);
+  }
+  if (outsideInputGap) lines.push(`${pad}⚠ outside-input evidence could not be read (${outsideInputGap})`);
+  return lines;
+}
 
 /**
  * Flatten the causal DAG into a BFS-ordered list of nodes.
@@ -136,6 +153,7 @@ export function formatCausalChain(root: CausalNodeWithUnchangedWrites): string {
         `${'  '.repeat(indent + 1)}⚠ also consumed ${node.incompleteSources.join('/')} — slice may be incomplete here`,
       );
     }
+    if (node.outsideInputs || node.outsideInputGap) lines.push(...outsideInputLines(node, '  '.repeat(indent + 1)));
     for (const gap of node.unchangedWriteGaps ?? []) {
       lines.push(
         `${'  '.repeat(indent + 1)}⚠ unchanged-write evidence for ${shownPath(gap.key)} is unknown (${gap.reason})`,

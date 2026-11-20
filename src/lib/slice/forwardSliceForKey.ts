@@ -96,6 +96,7 @@ import {
 } from './notes.js';
 import { resolveKeysReadSource } from './keysReadSources.js';
 import { normaliseStateKey } from '../record-paths/codec.js';
+import { readOutsideInputs } from '../evidence/outsideInputs.js';
 import type { FedBasis, ForwardNode, ForwardSlice, HonestyNote, KeysReadSource, StateKey } from './types.js';
 
 /** Options for {@link forwardSliceForKey} — anchoring plus walk budgets. */
@@ -166,6 +167,7 @@ function makeNode(
     // causalChain stamps CausalNode.incompleteSources.
     ...(bundle.untrackedSources !== undefined &&
       bundle.untrackedSources.length > 0 && { incompleteSources: bundle.untrackedSources }),
+    ...readOutsideInputs(commitLog[index.firstCommits.get(bundle.runtimeStageId) ?? writeIdx]),
   };
 }
 

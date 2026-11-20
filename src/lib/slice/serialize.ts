@@ -29,6 +29,7 @@
  */
 
 import { flattenCausalDAG, formatCausalChain } from '../memory/backtrack.js';
+import { outsideInputLines } from '../memory/backtrackViews.js';
 import type { SourceOverlap } from '../memory/parentEdges.js';
 import type {
   FedBasis,
@@ -73,6 +74,8 @@ export function sliceToJSON(slice: VariableSlice): SliceJSON {
       keysWritten: node.keysWritten,
       depth: node.depth,
       ...(node.incompleteSources !== undefined && { incompleteSources: node.incompleteSources }),
+      ...(node.outsideInputs !== undefined && { outsideInputs: node.outsideInputs }),
+      ...(node.outsideInputGap !== undefined && { outsideInputGap: node.outsideInputGap }),
       ...(node.preRunReads !== undefined && { preRunReads: node.preRunReads }),
       ...(node.preRunBase !== undefined && { preRunBase: node.preRunBase }),
       ...(node.preRunView !== undefined && { preRunView: node.preRunView }),
@@ -220,6 +223,8 @@ export function forwardSliceToJSON(slice: ForwardSlice): ForwardSliceJSON {
     depth: node.depth,
     reads: node.reads,
     ...(node.incompleteSources !== undefined && { incompleteSources: node.incompleteSources }),
+    ...(node.outsideInputs !== undefined && { outsideInputs: node.outsideInputs }),
+    ...(node.outsideInputGap !== undefined && { outsideInputGap: node.outsideInputGap }),
   }));
   out.edges = flat.flatMap((node) =>
     node.fedEdges.map((edge) => ({ from: ids.get(node)!, to: ids.get(edge.child)!, basis: edge.basis })),
@@ -298,6 +303,7 @@ export function formatForwardSlice(slice: ForwardSlice): string {
     if (node.incompleteSources && node.incompleteSources.length > 0) {
       lines.push(`${pad}  ⚠ its writer also consumed ${node.incompleteSources.join('/')} — untracked`);
     }
+    if (node.outsideInputs || node.outsideInputGap) lines.push(...outsideInputLines(node, `${pad}  `));
     if (node.reads.length === 0) {
       lines.push(`${pad}  (no recorded read of this value)`);
     }

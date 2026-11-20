@@ -1,6 +1,7 @@
 import { prepareReadSources } from '../cause/recordSources.js';
-import { bundleOf, recordOwn, RecordRefusal, recordRefusalCode } from '../cause/recordValidation.js';
+import { bundleOf, recordOwn, RecordRefusal, recordRefusalCode, spend } from '../cause/recordValidation.js';
 import type { Attention } from '../cause/types.js';
+import { carryOutsideInputs, readOutsideInputs } from '../evidence/outsideInputs.js';
 import { placedAt } from '../memory/readWindow.js';
 import { admitBundle, gapBundle } from './admitBundle.js';
 import { admitAddress, admitMaps } from './admitMaps.js';
@@ -72,15 +73,28 @@ export function admitProvRecord(
     inspected = inspectPrivacy(prefix.log, prefix.truncated, budget);
   const commits: AdmittedCommit[] = [],
     log = prefix.log.map(() => gapBundle());
+  // Optional evidence has its own cap so it cannot displace committed rows.
+  const outsideAllowance = { left: Math.min(limits.maxFields, limits.maxWork) };
+  const executions = new Set<string>();
   // The lowest index the copy before the current row can have: each copy's own rises past it. A row that
   // could not be read keeps its place in the order and says no index (`memory/readWindow.ts · admitStamps`).
   let after = -1;
   for (let commitIdx = 0; commitIdx < prefix.log.length; commitIdx++) {
     const redactions = inspected.redactions.get(commitIdx) ?? [];
-    const commit = admitBundle(prefix.log[commitIdx], commitIdx, redactions, budget, after);
+    const raw = prefix.log[commitIdx];
+    const commit = admitBundle(raw, commitIdx, redactions, budget, after);
     if (commit) {
+      const { bundle } = commit;
+      if (!executions.has(bundle.runtimeStageId)) {
+        executions.add(bundle.runtimeStageId);
+        if (bundle.phase === undefined)
+          carryOutsideInputs(
+            bundle,
+            readOutsideInputs(raw, (count) => spend(outsideAllowance, count)),
+          );
+      }
       commits.push(commit);
-      log[commitIdx] = commit.bundle;
+      log[commitIdx] = bundle;
     }
     after = placedAt(log[commitIdx], after);
     if (budget.exhausted('work') || budget.exhausted('fields')) break;

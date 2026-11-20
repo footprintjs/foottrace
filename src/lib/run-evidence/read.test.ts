@@ -267,6 +267,73 @@ describe('reads', () => {
     expect(evidenceOf(s.entries()).reads.rows[0]).toMatchObject({ untracked: ['silent'] });
   });
 
+  it('outside inputs keep distinct public names beside the recorded reads', () => {
+    const s = evidenceStore();
+    s.commit(
+      ROOT,
+      'seed#0',
+      { reads: ['price'] },
+      {
+        outsideInputs: {
+          declared: ['clock', 'public.feed'],
+          call: { targets: ['prices.quote', 'prices.quote', 'rates.read'], incomplete: true },
+        },
+      },
+    );
+    s.close(ROOT);
+    expect(evidenceOf(s.entries()).reads).toEqual({
+      status: 'partial',
+      gaps: ['untracked-input', 'truncated'],
+      rows: [
+        {
+          id: 'seed#0',
+          address: { logRunId: 'r', drillPath: [] },
+          keys: ['price'],
+          outsideInputs: {
+            declared: ['clock', 'public.feed'],
+            call: { targets: ['prices.quote', 'rates.read'], incomplete: true },
+          },
+        },
+      ],
+    });
+  });
+
+  it('outside inputs come from the owning bundle in the same log', () => {
+    const s = evidenceStore();
+    const childLog = [...ROOT, 'mount#1'];
+    s.commit(ROOT, 'seed#0', {});
+    s.commit(
+      ROOT,
+      'mount#1',
+      { parent: 'seed#0', reads: ['items'] },
+      {
+        outsideInputs: { declared: ['clock'] },
+      },
+    );
+    s.commit(childLog, 'mount#1', undefined, { outsideInputs: { declared: ['seed-decoy'] } });
+    s.commit(childLog, 'mount/read#2', { parent: 'mount#1', reads: ['item'] });
+    s.close(childLog);
+    s.commit(ROOT, 'mount#1', undefined, {
+      phase: 'exit',
+      outsideInputs: { declared: ['exit-decoy'] },
+      untrackedSources: ['silent'],
+    });
+    s.close(ROOT);
+    const { reads, unread } = evidenceOf(s.entries());
+    expect(reads.rows).toEqual([
+      { id: 'seed#0', address: { logRunId: 'r', drillPath: [] }, keys: [] },
+      {
+        id: 'mount#1',
+        address: { logRunId: 'r', drillPath: [] },
+        keys: ['items'],
+        untracked: ['silent'],
+        outsideInputs: { declared: ['clock'] },
+      },
+      { id: 'mount/read#2', address: { logRunId: 'r', drillPath: ['mount#1'] }, keys: ['item'] },
+    ]);
+    expect(unread).toEqual([]);
+  });
+
   it('readsOmitted reads partial (truncated)', () => {
     const s = evidenceStore();
     s.commit(ROOT, 'seed#0', { reads: ['a'], readsOmitted: 3 });

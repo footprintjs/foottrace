@@ -2,6 +2,7 @@ import { admitSourceLinks, type SourceLinkInventory } from './sourceLinks/admiss
 import { decodeRecordCapture } from './recordCapture.js';
 import { prepareReadSources } from './recordSources.js';
 import { prepareRecordSubflows, type PreparedRecordSubflows } from './recordSubflows.js';
+import { carryOutsideInputs, readOutsideInputs, type OutsideInputAdmission } from '../evidence/outsideInputs.js';
 import type { LogAddress } from '../memory/eventPosition.js';
 import { placedAt } from '../memory/readWindow.js';
 import { RUN_EVIDENCE_LIMITS } from '../run-evidence/kinds.js';
@@ -73,11 +74,24 @@ export function prepareRecordScope(
 ): PreparedRecordScope {
   if (addressKey(addressOf(recordOwn(value, 'address'))) !== addressKey(address)) throw new RecordRefusal();
   const rawLog = recordList(recordOwn(value, 'commitLog'), maximumCommits),
-    budget = { left: maximumFields };
+    budget = { left: maximumFields },
+    outsideAllowance = { left: maximumFields };
+  const firstExecutions = new Set<string>();
+  const outsideByExecution = new Map<string, OutsideInputAdmission>();
   let after = -1;
   const log = rawLog.map((_, commitIndex) => {
-    const bundle = bundleOf(recordOwn(rawLog, String(commitIndex)), after, budget);
+    const raw = recordOwn(rawLog, String(commitIndex));
+    const bundle = bundleOf(raw, after, budget);
     after = placedAt(bundle, after);
+    if (!firstExecutions.has(bundle.runtimeStageId)) {
+      firstExecutions.add(bundle.runtimeStageId);
+      if (bundle.phase === undefined) {
+        const outside = readOutsideInputs(raw, (count) => spend(outsideAllowance, count));
+        carryOutsideInputs(bundle, outside);
+        if (outside.outsideInputs !== undefined || outside.outsideInputGap !== undefined)
+          outsideByExecution.set(bundle.runtimeStageId, outside);
+      }
+    }
     return bundle;
   });
   const reads = mapOf(
@@ -155,6 +169,7 @@ export function prepareRecordScope(
     subflows,
     ...(sourceLinks ? { sourceLinks } : {}),
     ...(sourceLinkBase ? { sourceLinkBase } : {}),
+    ...(outsideByExecution.size ? { outsideByExecution } : {}),
   };
   if (readSources) scope.sourceCoveredExecutions = sourceCoveredExecutions(scope);
   return scope;

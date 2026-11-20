@@ -80,6 +80,39 @@ describe('cause record adapter', () => {
     const exact = graph({ reads: undefined });
     expect(await exact.gaps(id(exact, 'a', 0, 'a'), ctx())).toEqual([]);
   });
+  it('inherits outside coverage from the owning commit without losing a continuation’s recorded parent', async () => {
+    const first = {
+      ...commit('split', 2, { x: ['a'] }),
+      outsideInputs: { declared: ['clock'], call: { targets: ['rates'], incomplete: true } },
+    };
+    const ignored = vi.fn(() => ['forged']);
+    const exit = Object.defineProperty(
+      { ...commit('split', 3, { y: ['a'] }), runtimeStageId: 'split#2', phase: 'exit' },
+      'outsideInputs',
+      { get: ignored },
+    );
+    const g = graph({ commitLog: [log[0], log[1], first, exit], reads: { 'a#0': [], 'b#1': [], 'split#2': ['a'] } });
+    const node = g.nodeId(address, { runtimeStageId: 'split#2', commitIdx: 3, key: 'y' });
+    const parents = await g.parents(node, ctx());
+    expect(parents.edges.map((edge) => edge.nodeId)).toEqual([id(g, 'a', 0, 'a')]);
+    expect(parents.complete).toBe(false);
+    expect((await g.gaps(node, ctx())).map((gap) => gap.code)).toEqual(['untracked-input', 'truncated']);
+    expect(ignored).not.toHaveBeenCalled();
+  });
+  it('keeps the log and its dependencies when outside evidence is malformed or beyond its own budget', async () => {
+    const get = vi.fn(() => ({ declared: ['secret'] }));
+    const malformed = Object.defineProperty({ ...log[0] }, 'outsideInputs', { get });
+    const oversized = { ...log[1], outsideInputs: { call: { targets: Array(101).fill('rates') } } };
+    const g = createRecordGraph(
+      [{ address, commitLog: [malformed, oversized, log[2]], reads, attention: {}, controlDeps: {}, complete: true }],
+      { maxFields: 100 },
+    );
+    expect((await g.gaps(id(g, 'a', 0, 'a'), ctx())).map((gap) => gap.code)).toEqual(['invalid-data']);
+    expect((await g.gaps(id(g, 'b', 1, 'b'), ctx())).map((gap) => gap.code)).toEqual(['node-limit']);
+    const parents = await g.parents(id(g, 'split', 2, 'y'), ctx());
+    expect(parents.edges.map((edge) => edge.nodeId)).toEqual([id(g, 'a', 0, 'a'), id(g, 'b', 1, 'b')]);
+    expect(get).not.toHaveBeenCalled();
+  });
   it('includes recorded control edges without inventing containment causation', async () => {
     const g = graph({ controlDeps: { 'end#3': { deciderId: 'b#1' } } });
     const edges = (await g.parents(id(g, 'end', 3, 'z'), ctx())).edges;
@@ -120,6 +153,23 @@ describe('cause record adapter', () => {
   });
 });
 describe('cause stored adapter', () => {
+  it('preserves outside admission through stored snapshotting, in commit order', async () => {
+    const bad = vi.fn(() => ({ declared: ['secret'] }));
+    const outside = { ...log[0], outsideInputs: { declared: ['clock'] } };
+    const malformed = Object.defineProperty({ ...log[1] }, 'outsideInputs', { get: bad });
+    const entries = [
+      { kind: 'opened', address, at: 0, initialState: {} },
+      { kind: 'commit', address, at: 0, bundle: malformed },
+      { kind: 'commit', address, at: 0, bundle: outside },
+      { kind: 'closed', address, at: 0, outcome: 'ok', commits: 2 },
+    ];
+    const g = createStoredRecordGraph({ loadLog: async () => ({ entries, reads, attention: {}, controlDeps: {} }) });
+    const a = g.nodeId(address, { runtimeStageId: 'a#0', commitIdx: 0, key: 'a' });
+    const b = g.nodeId(address, { runtimeStageId: 'b#1', commitIdx: 1, key: 'b' });
+    expect((await g.gaps(a, ctx())).map((gap) => gap.code)).toEqual(['untracked-input']);
+    expect((await g.gaps(b, ctx())).map((gap) => gap.code)).toEqual(['invalid-data']);
+    expect(bad).not.toHaveBeenCalled();
+  });
   it('loads exactly the requested mounted scope lazily and validates its stored close', async () => {
     const child = { logRunId: 'run', drillPath: ['mount#7'] };
     const loadLog = vi.fn(async (a: typeof address) => ({
