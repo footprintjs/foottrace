@@ -148,6 +148,41 @@ describe('authorized exact root source evidence', () => {
   });
 
   it.each([
+    { kind: 'base', base: 1 },
+    { kind: 'committed', commitIdx: 0 },
+  ] as const)('preserves a long scalar with $kind read-source evidence in both adapters', async (source) => {
+    const page = async (length: number) => {
+      const text = 'long value '.repeat(length).slice(0, length);
+      const initialState = { n: text };
+      const commitLog = [commit('first#0', 0, 'n', text), ...log.slice(1)];
+      const native = { ...scope(sourceEvidence(book(source))), initialState, commitLog };
+      const entries = [
+        { kind: 'opened', address, at: 0, initialState },
+        ...commitLog.map((bundle) => ({ kind: 'commit', address, at: 0, bundle })),
+        { kind: 'closed', address, at: 0, outcome: 'ok', commits: commitLog.length },
+      ];
+      const stored = createStoredRecordGraph({
+        loadLog: () => ({
+          entries,
+          readSources: native.readSources,
+          reads: native.reads,
+          attention: {},
+          controlDeps: {},
+        }),
+      });
+      const memory = createRecordGraph([native]);
+      return Promise.all([memory, stored].map((g) => g.parents(ids(g).reader, context())));
+    };
+    const small = await page(65_536);
+    const large = await page(65_537);
+    expect(large).toEqual(small);
+    for (const result of large) {
+      expect(result.complete).toBe(true);
+      expect(result.edges.map((edge) => edge.attribution)).toEqual(source.kind === 'base' ? [] : ['recorded-read']);
+    }
+  });
+
+  it.each([
     ['future/self commit', () => sourceEvidence(book({ kind: 'committed', commitIdx: 2 }))],
     [
       'foreign log',

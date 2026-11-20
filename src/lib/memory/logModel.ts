@@ -66,6 +66,23 @@ interface RootHistory {
 
 const MODELS = new WeakMap<readonly CommitBundle[], LogModel>();
 
+interface ValueReader {
+  readonly copyValue: <T>(value: T) => T;
+  readonly equal: (left: unknown, right: unknown) => boolean;
+}
+
+/** Scope the existing model to one synchronous admitted-record read, without retaining its work budget. */
+export function withLogValueReader<T>(log: readonly CommitBundle[], reader: ValueReader, read: () => T): T {
+  const prior = MODELS.get(log);
+  MODELS.set(log, new LogModel(log, reader));
+  try {
+    return read();
+  } finally {
+    if (prior) MODELS.set(log, prior);
+    else MODELS.delete(log);
+  }
+}
+
 /** Is the log immutable — the array and every bundle and trace frozen (an engine snapshot's log)? */
 function isFrozenLog(log: readonly CommitBundle[]): boolean {
   if (!Object.isFrozen(log)) return false;
@@ -130,9 +147,17 @@ export class LogModel {
   private readonly changesByKey = new Map<string, number[]>();
   private readonly writersByKey = new Map<string, number[]>();
 
-  constructor(readonly log: readonly CommitBundle[]) {
+  constructor(readonly log: readonly CommitBundle[], private readonly reader?: ValueReader) {
     this.index = buildWriterIndex(log);
     for (const bundle of log) queryWork.units += bundle.trace.length;
+  }
+
+  copyValue<T>(value: T): T {
+    return (this.reader?.copyValue ?? structuredClone)(value);
+  }
+
+  private equal(left: unknown, right: unknown): boolean {
+    return this.reader?.equal(left, right) ?? deepEqual(left, right, 'copies');
   }
 
   // ── rows ─────────────────────────────────────────────────────────────────
@@ -195,6 +220,7 @@ export class LogModel {
     const rr = this.rootRows(root);
     queryWork.units += rr.rows.length;
     foldKey(rr.rows, [root], {
+      copyValue: this.reader?.copyValue,
       generations: {
         at: (c, state) => {
           let keep = false;
@@ -232,26 +258,31 @@ export class LogModel {
   }
 
   /** Every commit across which the value at `key` changed — one fold for this key (the fallback shape). */
-  private ownChanges(key: string): number[] {
-    let changes = this.changesByKey.get(key);
+  private ownChanges(key: string, before: number): number[] {
+    // A reader with a value allowance may only compare the prefix this question asks about.
+    const memoKey = this.reader ? JSON.stringify([key, before]) : key;
+    let changes = this.changesByKey.get(memoKey);
     if (changes !== undefined) return changes;
     const segs = key.split(DELIM);
     const verdict = new Map<number, boolean>();
     let commit = -1;
     let start: unknown;
-    queryWork.units += this.rootRows(segs[0]).rows.length;
-    foldKey(this.rootRows(segs[0]).rows, segs, {
+    const rows = this.rootRows(segs[0]).rows;
+    const included = this.reader ? rows.slice(0, historyPrefix(rows, before)) : rows;
+    queryWork.units += included.length;
+    foldKey(included, segs, {
+      copyValue: this.reader?.copyValue,
       everyRow: true,
       observe: (touch, before, after) => {
         if (touch.commitIdx !== commit) {
           commit = touch.commitIdx;
           start = before;
         }
-        verdict.set(commit, !deepEqual(start, after, 'copies'));
+        verdict.set(commit, !this.equal(start, after));
       },
     });
     changes = [...verdict].filter(([, changed]) => changed).map(([c]) => c);
-    this.changesByKey.set(key, changes);
+    this.changesByKey.set(memoKey, changes);
     return changes;
   }
 
@@ -265,7 +296,7 @@ export class LogModel {
     const root = ancestors[0].path;
     // The answer reads the rows of the window: refuse it when one of them is a verb the law does not know.
     this.refuseThrough(root, before - 1, after);
-    if (this.needsOwnFold(key, ancestors)) return between(this.ownChanges(key), after, before);
+    if (this.needsOwnFold(key, ancestors)) return between(this.ownChanges(key, before), after, before);
     const h = this.history(root);
     const candidates = ascendingUnion([
       ...ancestors.map((a) => between(a.positions, after, before)),
@@ -275,7 +306,7 @@ export class LogModel {
     queryWork.units += candidates.length;
     return candidates.filter((c) => {
       const g = h.kept.get(c);
-      return g !== undefined && !deepEqual(nativeGet(g.before, rest), nativeGet(g.after, rest), 'copies');
+      return g !== undefined && !this.equal(nativeGet(g.before, rest), nativeGet(g.after, rest));
     });
   }
 
@@ -350,14 +381,14 @@ export class LogModel {
           }
         }
         queryWork.units += rows.length;
-        return foldKey(rows, segs);
+        return foldKey(rows, segs, { copyValue: this.reader?.copyValue });
       }
     }
     const rows = this.rowsUnderRoot(key, idx);
     queryWork.units += rows.length;
     if (!rows.some((row) => row.relation !== undefined)) return undefined;
     // A memoised model folds from the last generation it keeps at or before `idx` — the rows after it only.
-    if (MODELS.get(this.log) === this) {
+    if (!this.reader && MODELS.get(this.log) === this) {
       const h = this.history(segs[0]);
       const kept = lastBefore(h.keptAt, idx + 1);
       if (kept !== -1) {
@@ -368,8 +399,20 @@ export class LogModel {
         return detached(foldKey(after, segs, { anchored: true, start: h.kept.get(kept)?.after }));
       }
     }
-    return foldKey(rows, segs, { anchored: true });
+    return foldKey(rows, segs, { anchored: true, copyValue: this.reader?.copyValue });
   }
+}
+
+/** First row at or beyond an exclusive commit cutoff in the already ordered root rows. */
+function historyPrefix(rows: readonly Touch[], cutoff: number): number {
+  let low = 0;
+  let high = rows.length;
+  while (low < high) {
+    const middle = (low + high) >>> 1;
+    if (rows[middle].commitIdx < cutoff) low = middle + 1;
+    else high = middle;
+  }
+  return low;
 }
 
 /** A value the caller owns: a container is cloned, a primitive is itself. */

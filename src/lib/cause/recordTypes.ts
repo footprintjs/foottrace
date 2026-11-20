@@ -62,6 +62,7 @@ export interface RecordIdentity extends RecordNode {
 export interface PreparedRecordScope {
   address: LogAddress;
   log: CommitBundle[];
+  maximumValueWork?: number;
   reads?: Map<string, string[]>;
   control?: Map<string, ControlDependency>;
   marks?: Map<string, readonly Attention[]>;
