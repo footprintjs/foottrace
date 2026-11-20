@@ -14,3 +14,7 @@ export const sharedSourceLinksV1 = JSON.parse(readFileSync(new URL('./v1.json', 
   readonly boundWrite: Pick<RecordSourceLink['output'], 'runtimeStageId' | 'commitIdx'>;
   readonly checkPairs: readonly CheckPair[];
 };
+
+export function readEngineSourceLinksFixture<T>(name: string): T {
+  return JSON.parse(readFileSync(new URL(`./engine/${name}.json`, import.meta.url), 'utf8')) as T;
+}

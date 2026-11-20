@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readEngineSourceLinksFixture as fixture } from '../../../../test/fixtures/source-links/read.js';
 import { describe, expect, it } from 'vitest';
 import { bindSourceLinkWrite, readSourceLinkRow } from '../../../cause.js';
 import type { RecordScope, RecordSourceLink } from '../../../cause.js';
@@ -18,11 +18,6 @@ interface EngineRecord {
   reads?: RecordScope['reads'];
 }
 type Encoded<T = EngineRecord> = Record<Encoding, T>;
-
-const fixture = <T>(name: string): T =>
-  JSON.parse(
-    readFileSync(new URL(`../../../../test/fixtures/source-links/engine/${name}.json`, import.meta.url), 'utf8'),
-  ) as T;
 
 // The paired written/read record was produced by make-real-engine-record.cjs with footprintjs 14.0.0.
 const writtenAndRead = fixture<Encoded>('real-engine-record-full-and-delta');
