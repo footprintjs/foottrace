@@ -26,6 +26,14 @@ const witness = `
     gaps: () => [],
   };
   const finding = await explain(graph, 'symptom');
+  let strategyPath;
+  const withheld = await explain(graph, 'symptom', {
+    includeBackward: true,
+    rankRoots(_candidates, _context, walk) {
+      strategyPath = pathTo(walk.edges, 'symptom', 'source');
+      return { select: [], withheld: [{ nodeId: 'source', reason: 'host-policy' }] };
+    },
+  });
   const marked = await attentionList(graph, { nodeIds: ['source', 'symptom'] });
   const limited = await explain(graph, 'symptom', { maxDepth: 0 });
   const controller = new AbortController();
@@ -33,6 +41,9 @@ const witness = `
   const cancelled = await explain(graph, 'symptom', { signal: controller.signal });
   const proof = { root: finding.rootCause, path: finding.path, impact: finding.impact.nodes,
     confidence: finding.confidence, gaps: finding.gaps, marked: marked.nodes.map((node) => node.nodeId),
+    policy: { strategyPath, publicPath: pathTo(withheld.backward.edges, 'symptom', 'source'),
+      withoutRoot: withheld.rootCause === undefined, alternatives: withheld.alternatives,
+      withheld: withheld.withheldRoots, confidence: withheld.confidence },
     limited: limited.confidence === 'incomplete' && !limited.rootCause && limited.gaps.some((gap) => gap.code === 'depth-limit'),
     cancelled: cancelled.confidence === 'incomplete' && !cancelled.rootCause && cancelled.gaps.some((gap) => gap.code === 'cancelled') };
 `;
@@ -43,6 +54,14 @@ const expected = {
   confidence: 'complete',
   gaps: [],
   marked: ['source'],
+  policy: {
+    strategyPath: ['symptom', 'source'],
+    publicPath: ['symptom', 'source'],
+    withoutRoot: true,
+    alternatives: ['source'],
+    withheld: [{ nodeId: 'source', reason: 'host-policy' }],
+    confidence: 'complete',
+  },
   limited: true,
   cancelled: true,
 };
@@ -79,8 +98,8 @@ describe('the optional cause package door', () => {
   it.each(['CJS', 'ESM'] as const)('executes bounded public cause queries through the built %s door', (format) => {
     const imports =
       format === 'ESM'
-        ? 'import { explain, attentionList } from "foottrace/cause";'
-        : 'const { explain, attentionList } = require("foottrace/cause");';
+        ? 'import { explain, attentionList, pathTo } from "foottrace/cause";'
+        : 'const { explain, attentionList, pathTo } = require("foottrace/cause");';
     const code = imports + '(async () => {' + witness + 'console.log(JSON.stringify(proof)); })();';
     const output = execFileSync(process.execPath, [...(format === 'ESM' ? ['--input-type=module'] : []), '-e', code], {
       cwd: root,
@@ -130,8 +149,8 @@ describe('the optional cause package door', () => {
     async (format) => {
       const imports =
         format === 'ESM'
-          ? 'import { explain, attentionList } from "foottrace/cause";'
-          : 'const { explain, attentionList } = require("foottrace/cause");';
+          ? 'import { explain, attentionList, pathTo } from "foottrace/cause";'
+          : 'const { explain, attentionList, pathTo } = require("foottrace/cause");';
       const bundled = await build({
         stdin: {
           contents: imports + 'globalThis.proof = (async () => {' + witness + 'return proof; })();',

@@ -1,4 +1,15 @@
-import { explain, type BackwardResult, type CauseGraph, type CauseResult, type TraversalLimits } from 'foottrace/cause';
+import {
+  explain,
+  pathTo,
+  type BackwardResult,
+  type CauseGraph,
+  type CauseResult,
+  type RootSelection,
+  type RootStrategy,
+  type RootStrategyWalk,
+  type TraversalLimits,
+  type WithheldRoot,
+} from 'foottrace/cause';
 import type { Attention } from 'foottrace';
 
 const mark: Attention = { kind: 'error', reason: 'ERROR_RECORDED', evidence: ['proof:source'] };
@@ -10,6 +21,20 @@ const reverse: Promise<BackwardResult | undefined> = explain(graph, 'source', { 
   (finding) => finding.backward,
 );
 void reverse;
+const withheld: WithheldRoot = { nodeId: 'source', reason: 'host-policy' };
+const rankRoots: RootStrategy = (_marked, _context, walk: RootStrategyWalk): RootSelection => {
+  const path = pathTo(walk.edges, 'symptom', withheld.nodeId);
+  // @ts-expect-error Public paths are immutable in both module formats.
+  path.push(withheld.nodeId);
+  return { select: [], withheld: [withheld] };
+};
+const withheldResult: Promise<readonly WithheldRoot[] | undefined> = explain(graph, 'symptom', { rankRoots }).then(
+  (finding) => finding.withheldRoots,
+);
+void withheldResult;
+const legacyRankRoots: RootStrategy = (candidates, { signal }) =>
+  signal.aborted ? [] : candidates.map(({ nodeId }) => nodeId);
+void explain(graph, 'source', { rankRoots: legacyRankRoots });
 // @ts-expect-error Backward evidence is requested with a boolean, not a model-provided string.
 void explain(graph, 'source', { includeBackward: 'true' });
 const backward: TraversalLimits = { maxNodes: 10, maxCalls: 50 };

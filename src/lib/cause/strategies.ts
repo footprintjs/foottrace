@@ -1,7 +1,9 @@
-import type { NodeId, RootStrategy } from './types.js';
+import type { GraphContext, MarkedNode, NodeId } from './types.js';
+
+type ScoreStrategy = (candidates: readonly MarkedNode[], context: GraphContext) => readonly NodeId[];
 
 /** Host-computed quality drops or impact counts: scores rank recorded candidates, never create evidence. */
-function maximum(scores: ReadonlyMap<NodeId, number>): RootStrategy {
+function maximum(scores: ReadonlyMap<NodeId, number>): ScoreStrategy {
   return (candidates) => {
     let best = -Infinity;
     const tied: NodeId[] = [];
@@ -17,5 +19,5 @@ function maximum(scores: ReadonlyMap<NodeId, number>): RootStrategy {
     return Object.freeze(tied);
   };
 }
-export const largestDrop = (scores: ReadonlyMap<NodeId, number>): RootStrategy => maximum(scores);
-export const mostAffected = (counts: ReadonlyMap<NodeId, number>): RootStrategy => maximum(counts);
+export const largestDrop = (scores: ReadonlyMap<NodeId, number>): ScoreStrategy => maximum(scores);
+export const mostAffected = (counts: ReadonlyMap<NodeId, number>): ScoreStrategy => maximum(counts);
