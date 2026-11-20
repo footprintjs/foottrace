@@ -32,7 +32,7 @@ export function boundWrite(
     const firstDoor = replay.first(witness.runtimeStageId);
     if (firstDoor === undefined || !replay.read(witness.runtimeStageId, output.key)) return undefined;
     const view = replay.window(firstDoor);
-    if (replay.writtenBetween({ key: output.key }, view.start, view.end)) return undefined;
+    if (replay.hasWindowWrite(output.key, view.start, view.end)) return undefined;
     index = replay.writer(output, view.start);
   }
   if (index === undefined || index < first || replay.redacted(output, index) || !replay.resolves(output, index))

@@ -14,6 +14,13 @@ import {
   witness,
 } from '../../../../test/fixtures/source-links/recordHarness.js';
 import type { Encoding } from '../../../../test/fixtures/source-links/recordHarness.js';
+import {
+  inputWindowPair,
+  outputWindowPair,
+  placements,
+  relations,
+  type WindowRecipe,
+} from '../../../../test/fixtures/source-links/windowPairs.js';
 import type { CommitBundle, TraceEntry } from '../../memory/types.js';
 import { DELIM } from '../../record-paths/codec.js';
 
@@ -205,4 +212,52 @@ describe.each(encodings)('%s source-link paired records', (encoding) => {
       },
     );
   }, 30_000);
+});
+
+const overlapVerbs = ['set', 'append', 'merge', 'delete'] as const satisfies readonly TraceEntry['verb'][];
+const windowRecipes = fc.record({
+  placement: fc.constantFrom(...placements),
+  relation: fc.constantFrom(...relations),
+  hidden: fc.string({ maxLength: 16 }),
+});
+const overlap = (recipe: WindowRecipe) => recipe.placement === 'window' && recipe.relation !== 'beside';
+
+async function checkInputWindow(recipe: WindowRecipe, encoding: Encoding) {
+  for (const adapter of adapters) {
+    const [first, second] = await inputWindowPair(recipe, encoding, adapter);
+    expect(JSON.stringify(second), `${adapter} input window twin`).toBe(JSON.stringify(first));
+    expect(first.sourceLinks?.map(({ standing }) => standing)).toEqual(overlap(recipe) ? undefined : ['witnessed']);
+    expect(first.sourceLinkGaps?.map(({ code }) => code)).toEqual([overlap(recipe) ? 'ambiguous' : 'unavailable']);
+  }
+}
+
+function checkOutputWindow(recipe: WindowRecipe, encoding: Encoding) {
+  const [first, second] = outputWindowPair(recipe, encoding);
+  expect(second.binding, 'read-checked output window twin').toEqual(first.binding);
+  expect(first.binding).toEqual(overlap(recipe) ? undefined : first.checkedWrite);
+}
+
+describe.each(encodings)('%s tracked nested windows', (encoding) => {
+  it.each(overlapVerbs)('uses the path of an above-key %s for both window checks', async (verb) => {
+    const recipe = { placement: 'window', relation: 'above', hidden: 'sample', verb } as const;
+    await checkInputWindow(recipe, encoding);
+    checkOutputWindow(recipe, encoding);
+  });
+
+  it('classifies input by row placement and relation to the tracked key', async () => {
+    await fc.assert(
+      fc.asyncProperty(windowRecipes, (recipe) => checkInputWindow(recipe, encoding)),
+      {
+        seed,
+        numRuns: 256,
+      },
+    );
+  }, 30_000);
+
+  it('binds read-checked output by row placement and relation to the tracked key', () => {
+    fc.assert(
+      fc.property(windowRecipes, (recipe) => checkOutputWindow(recipe, encoding)),
+      { seed, numRuns: 256 },
+    );
+  });
 });
