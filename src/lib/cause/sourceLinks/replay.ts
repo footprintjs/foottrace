@@ -166,7 +166,7 @@ export function sourceLinkReplay(record: ReplayRecord, budget: { left: number })
     if (!parts.slice(1).some((part) => arrayIndex.test(part))) return false;
     const path = normalisePath(parts);
     for (const merge of merges) {
-      if (merge.index > through) break;
+      if (merge.index > through || merge.index >= accounted) break;
       spend(budget, 1);
       if (relation(merge.path, path) !== 'around') continue;
       const rowParts = pathSegments(merge.path);

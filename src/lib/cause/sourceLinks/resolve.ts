@@ -78,6 +78,7 @@ export function resolveLink(
   if (commitIdx >= replay.accounted) return outputGap('not-collected');
   if (replay.log[commitIdx]?.runtimeStageId !== runtimeStageId) return outputGap('stale');
   if (replay.redacted(link.output, commitIdx)) return outputGap('redacted');
+  if (replay.unionTouchesPosition(link.output, link.witness.commitIdx)) return outputGap('ambiguous');
   if (!replay.resolves(link.output, commitIdx)) return outputGap('stale');
   if (link.check === 'no-match' || link.check === 'not-checked') return outputGap(link.check);
   if (!link.input || !lookup.view) return outputGap('not-collected');

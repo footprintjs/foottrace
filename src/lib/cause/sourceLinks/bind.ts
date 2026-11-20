@@ -10,6 +10,7 @@ export function committedRow(replay: SourceLinkReplay, location: SourceLinkRowLo
   const commit = replay.log[location.commitIdx];
   if (commit?.runtimeStageId !== location.runtimeStageId || replay.redacted(location, location.commitIdx))
     return undefined;
+  if (replay.unionTouchesPosition(location, location.commitIdx)) return undefined;
   const start = replay.appended(location.key, location.commitIdx);
   if (start === undefined || location.element < start) return undefined;
   const entry = replay.list(location.key, location.commitIdx)?.element(location.element);
@@ -68,7 +69,8 @@ export function bindSourceLinkWrite(
     const reads = mapOf(recordOwn(scope, 'reads'), log.length, (value) => names(value, 128, true), budget);
     const replay = sourceLinkReplay({ log, base, reads }, budget);
     const row = committedRow(replay, where);
-    return row === undefined ? undefined : boundWrite(replay, row, where);
+    if (row === undefined || replay.unionTouchesPosition(row.output, where.commitIdx)) return undefined;
+    return boundWrite(replay, row, where);
   } catch {
     return undefined;
   }

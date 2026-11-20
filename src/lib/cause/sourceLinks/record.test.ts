@@ -233,6 +233,43 @@ describe.each([
     expect(await laterParents(afterWitness)).toEqual(besidePage);
   });
 
+  it.each(['output', 'witness'] as const)('uses the same projection for a position under a %s union', async (role) => {
+    const key = role === 'output' ? 'answer' : 'evidence';
+    const wire: RecordSourceLink =
+      role === 'output'
+        ? { ...link, output: { ...link.output, element: 2 } }
+        : { ...link, witness: { ...link.witness, element: 2 } };
+    const witness = { ...row, ...(role === 'output' ? { output: { ...row.output, element: 2 } } : {}) };
+    const source = fixture([servedRow], wire, witness);
+    const [consumer, door] = source.commitLog as readonly CommitBundle[];
+    const policy: SourceLinkPolicy = (locator) =>
+      locator.key !== key || (locator.at === 'write' && locator.element === 2);
+    const read = (first: string) => {
+      const scope = {
+        ...source,
+        initialState: { ...source.initialState, [key]: [first, 'second'] },
+        commitLog: [
+          consumer,
+          {
+            ...door,
+            trace: door.trace.map((item) => (item.path === key ? { ...item, verb: 'merge' } : item)),
+            updates: { [key]: ['second', role === 'output' ? 'selected' : witness] },
+          },
+        ],
+      };
+      const reader = graph(scope, policy);
+      return reader.parents(reader.nodeId(address, wire.output), context());
+    };
+    const first = await read('first');
+    if (role === 'output') {
+      expect(first.sourceLinks).toBeUndefined();
+      expect(first.sourceLinkGaps).toMatchObject([{ code: 'ambiguous' }]);
+    } else {
+      expect(first.sourceLinks?.[0].standing).toBe('declared');
+    }
+    expect(JSON.stringify(await read('second'))).toBe(JSON.stringify(first));
+  });
+
   const selectedProfile = { key: 'profile', pointer: '/selected' };
 
   function profileWrite(before: string, after: { selected: string; other: string }, path: string) {
@@ -304,7 +341,9 @@ describe.each([
         allowSelectedProfile,
       );
     expect((await read(65_536)).sourceLinks?.[0].standing).toBe('witnessed');
-    expect(await read(65_537)).toEqual({ edges: [], complete: false });
+    const refused = await read(65_537);
+    expect(refused).toMatchObject({ edges: [], complete: false });
+    expect(refused.sourceLinks).toBeUndefined();
   });
 
   it('keeps an early object citation after 100 appends at default limits', async () => {
