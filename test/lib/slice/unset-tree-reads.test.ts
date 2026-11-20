@@ -149,3 +149,52 @@ describe('unset reads in live and saved execution trees', () => {
     expect(savedWalk).toEqual(walk(live));
   });
 });
+
+describe('unset-read list bounds', () => {
+  it('inspects the occupied slot of a maximally sparse array within a few milliseconds', () => {
+    const sparse: string[] = [];
+    sparse.length = 2 ** 32 - 1;
+    sparse[5] = 'y';
+    let probes = 0;
+    const countIndex = (key: PropertyKey) => {
+      // An index-scanning regression fails promptly without traversing four billion holes.
+      if (typeof key === 'string' && /^\d+$/.test(key) && ++probes > 16) throw new Error('scanned sparse slots');
+    };
+    const names = new Proxy(sparse, {
+      get(target, key, receiver) {
+        countIndex(key);
+        return Reflect.get(target, key, receiver);
+      },
+      has(target, key) {
+        countIndex(key);
+        return Reflect.has(target, key);
+      },
+      getOwnPropertyDescriptor(target, key) {
+        countIndex(key);
+        return Reflect.getOwnPropertyDescriptor(target, key);
+      },
+    });
+    const tree = { runtimeStageId: 'b#1', stageReads: { x: 1 }, undefinedReadKeys: names };
+    const elapsed = Array.from({ length: 3 }, () => {
+      const start = performance.now();
+      const read = keysReadFromExecutionTree(tree).lookup('b#1');
+      const duration = performance.now() - start;
+      expect(read).toEqual(['x', 'y']);
+      return duration;
+    });
+    expect(probes).toBe(3);
+    expect(Math.min(...elapsed)).toBeLessThan(5);
+  });
+
+  it('keeps a million distinct names and deduplicates a million repeated names', () => {
+    const names = Array.from({ length: 1_000_000 }, (_, i) => 'k' + String(i).padStart(6, '0'));
+    const tree = { runtimeStageId: 'b#1', stageReads: { x: 1 }, undefinedReadKeys: names };
+    const distinct = keysReadFromExecutionTree(tree).lookup('b#1');
+    expect(distinct).toHaveLength(names.length + 1);
+    expect(names.every((name, index) => distinct[index] === name)).toBe(true);
+    expect(distinct[names.length]).toBe('x');
+
+    const repeated = keysReadFromExecutionTree({ ...tree, undefinedReadKeys: names.fill('y') }).lookup('b#1');
+    expect(repeated).toEqual(['x', 'y']);
+  });
+});

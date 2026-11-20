@@ -208,6 +208,8 @@ The root package's `findReadSources` also reports an `absenceReason` when
 there is no visible writer for a valid read. `redacted` means a redaction at or
 above the queried key could hide a writer within the read's bound.
 `never-written` describes writes in the supplied log through that bound.
+Pass `{ initialState }` to get a separate `initialStatePresence` of
+`present`, `absent`, or `unknown` for the key before the run.
 
 ## 3. Explain a selected node within bounds
 

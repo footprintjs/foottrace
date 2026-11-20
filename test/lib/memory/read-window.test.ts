@@ -938,16 +938,17 @@ describe('the public door: what a step could have read', () => {
   it('findReadSources answers for a STEP, where findLastWriter answers for a position in the log', () => {
     const { log } = sideBySide();
     expect(findLastWriter(log, 'x', 2)?.runtimeStageId).toBe('fast#0'); // the last write before slow's commit
-    expect(findReadSources(log, 2, 'x')).toEqual({ before: 0, during: [] }); // what slow read: the seed's
+    expect(findReadSources(log, 2, 'x')).toEqual({ before: 0, during: [], initialStatePresence: 'unknown' }); // slow read the seed's
     expect(findReadSources(log, 2, 'never-written')).toEqual({
       before: -1,
       during: [],
       absenceReason: 'never-written',
+      initialStatePresence: 'unknown',
     });
-    expect(findReadSources(log, 1, 'x')).toEqual({ before: 0, during: [] }); // a step with no stamp
+    expect(findReadSources(log, 1, 'x')).toEqual({ before: 0, during: [], initialStatePresence: 'unknown' }); // a step with no stamp
 
     const sources = findReadSources(sideBySide(true).log, 2, 'x');
-    expect(sources).toEqual({ before: 0, during: [1] });
+    expect(sources).toEqual({ before: 0, during: [1], initialStatePresence: 'unknown' });
     expect([overlapOf(sources, 0), overlapOf(sources, 1)]).toEqual(['replaced-while-running', 'written-while-running']);
   });
 });

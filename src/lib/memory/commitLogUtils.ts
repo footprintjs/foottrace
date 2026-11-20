@@ -12,7 +12,7 @@ import { leavesStringAbove, logModel, memoisedModel } from './logModel.js';
 import { nativeGet } from './pathOps.js';
 import { type ReadSources, readSourcesOf } from './readWindow.js';
 import { windowOf } from './windowPlacement.js';
-import { DELIM } from '../record-paths/codec.js';
+import { DELIM, pathSegments } from '../record-paths/codec.js';
 import type { CommitBundle, CommitPhase } from './types.js';
 import { type Touch, foldKey, isTotal, isVerb, UnknownVerbError } from './verbs.js';
 
@@ -63,6 +63,31 @@ export function findLastWriter(commitLog: CommitBundle[], key: string, beforeIdx
 export interface WindowedReadSources extends ReadSources {
   /** No writer in the supplied log could be seen by this read. */
   readonly absenceReason?: RegisteredCode<'never-written' | 'redacted'>;
+  /** Whether the supplied initial state holds this key as an own data property. */
+  readonly initialStatePresence: 'present' | 'absent' | 'unknown';
+}
+
+function initialStatePresence(options: unknown, key: string): WindowedReadSources['initialStatePresence'] {
+  if (typeof options !== 'object' || options === null) return 'unknown';
+  try {
+    const base = Object.getOwnPropertyDescriptor(options, 'initialState');
+    if (!base || !Object.hasOwn(base, 'value')) return 'unknown';
+    let current: unknown = base.value;
+    const segments = pathSegments(key);
+    for (const [index, segment] of segments.entries()) {
+      if (typeof current !== 'object' || current === null || Array.isArray(current)) {
+        return index === 0 ? 'unknown' : 'absent';
+      }
+      const slot = Object.getOwnPropertyDescriptor(current, segment);
+      if (!slot) return Reflect.has(current, segment) ? 'unknown' : 'absent';
+      if (!Object.hasOwn(slot, 'value')) return 'unknown';
+      if (index === segments.length - 1) return 'present';
+      current = slot.value;
+    }
+  } catch {
+    // A proxy that refuses inspection supplies no initial-state evidence.
+  }
+  return 'unknown';
 }
 
 /**
@@ -72,7 +97,7 @@ export interface WindowedReadSources extends ReadSources {
  * its read window. `during` empty: `before` is the source, for certain. Otherwise each of them is a
  * possible source and the real one is among them; `overlapOf(sources, at)` gives the mark of one.
  * With no visible writer, `absenceReason` describes the log through the read's last possible look.
- * It makes no claim about initial state or writes outside the supplied log.
+ * `initialStatePresence` separately describes the supplied base and does not add a log writer.
  *
  * WHY NOT `findLastWriter(commitLog, key, position)`: that dates the read at the step's commit. For a
  * step that read `key` when it started and committed after a sibling wrote it, the sibling is then
@@ -87,18 +112,19 @@ export function findReadSources(
   commitLog: readonly CommitBundle[],
   position: number,
   key: string,
+  options?: { readonly initialState?: Readonly<Record<string, unknown>> },
 ): WindowedReadSources {
   const window = windowOf(commitLog, position);
   const sources = readSourcesOf(key, window, (path, before) => lastWriterPosition(commitLog, path, before));
-  if (
+  const logAnswer =
     sources.before !== -1 ||
     sources.during.length ||
     !Number.isSafeInteger(position) ||
     position < 0 ||
     position >= commitLog.length
-  )
-    return sources;
-  return { ...sources, absenceReason: noVisibleWriterReason(commitLog, key, window.end) };
+      ? sources
+      : { ...sources, absenceReason: noVisibleWriterReason(commitLog, key, window.end) };
+  return { ...logAnswer, initialStatePresence: initialStatePresence(options, key) };
 }
 
 /** {@link findLastWriter}'s answer as an ARRAY position (-1: no commit before `beforeIdx` wrote `key`). */
