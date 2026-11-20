@@ -81,6 +81,11 @@ export function deepEqual(a: any, b: any, opaque: OpaqueRule = 'identity'): bool
   return equalPairs(a, b, undefined, opaque);
 }
 
+/** Reader-only hook: account for a potentially content-dependent string comparison first. */
+export function equalWithTextWork(a: unknown, b: unknown, spendText: (units: number) => void): boolean {
+  return equalPairs(a, b, newSeen(spendText), 'copies');
+}
+
 /**
  * How {@link deepEqual} compares two OPAQUE values (a Blob, a `DOMException` —
  * content this library cannot read):
@@ -134,6 +139,7 @@ export type OpaqueRule = 'identity' | 'copies';
  * keeps: `low` is the lowlink, the list is the component stack.)
  */
 interface SeenPairs {
+  readonly spendText?: (units: number) => void;
   /** `a → b → state` (see above). */
   readonly pairs: WeakMap<object, Map<object, number>>;
   /** The stack depth the next pair gets. */
@@ -152,7 +158,15 @@ const PROVEN = -1;
 const DISPROVEN = -2;
 const LEANING = -3;
 
+function newSeen(spendText?: (units: number) => void): SeenPairs {
+  return { pairs: new WeakMap(), depth: 0, low: Infinity, leaning: [], leaningLow: Infinity, met: [], spendText };
+}
+
 function equalPairs(a: any, b: any, seen: SeenPairs | undefined, opaque: OpaqueRule): boolean {
+  if (seen?.spendText && typeof a === 'string' && typeof b === 'string') {
+    if (a.length !== b.length) return false;
+    seen.spendText(a.length);
+  }
   if (a === b) return true; // same reference or identical primitive
   if (typeof a !== typeof b) return false;
   if (a === null || b === null) return a === b; // one is null, the other isn't
@@ -187,7 +201,7 @@ function equalPairs(a: any, b: any, seen: SeenPairs | undefined, opaque: OpaqueR
 
 /** The kinds whose content is other values: compared part by part, under the cycle guard. */
 function equalContainers(a: any, b: any, kind: ValueKind, seen: SeenPairs | undefined, opaque: OpaqueRule): boolean {
-  seen ??= { pairs: new WeakMap(), depth: 0, low: Infinity, leaning: [], leaningLow: Infinity, met: [] };
+  seen ??= newSeen();
   let partners = seen.pairs.get(a);
   const state = partners?.get(b);
   if (state === PROVEN) return true;

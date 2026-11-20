@@ -136,7 +136,7 @@ export function prepareRecordScope(
     try {
       const raw = recordOwn(value, 'initialState');
       if (raw !== null && typeof raw === 'object' && !Array.isArray(raw))
-        sourceLinkBase = dataCopy(raw, budget, { allowLongText: true }) as Record<string, unknown>;
+        sourceLinkBase = dataCopy(raw, budget) as Record<string, unknown>;
     } catch (error) {
       const code = recordRefusalCode(error);
       sourceLinks = { links: [], gaps: [code === 'node-limit' ? 'truncated' : 'invalid-data'] };
@@ -145,6 +145,7 @@ export function prepareRecordScope(
   const scope: PreparedRecordScope = {
     address,
     log,
+    maximumValueWork: maximumFields,
     reads,
     control,
     marks,

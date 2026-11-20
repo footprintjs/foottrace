@@ -177,19 +177,20 @@ export class RecordedPayload {
     private readonly overwrite: MemoryPatch,
     private readonly detach: boolean,
     private readonly only?: string[],
+    private readonly copyValue = structuredClone,
   ) {}
 
   /** What a `set` places and an `append` adds: `overwrite[path]`, cloned when detaching. */
   value(segs: string[]): unknown {
     const recorded = nativeGet(this.overwrite, segs);
-    return this.detach ? structuredClone(recorded) : recorded;
+    return this.detach ? this.copyValue(recorded) : recorded;
   }
 
   /** The accumulated merge delta at `path`: `updates[path]`, from the bundle's one copy. */
   delta(segs: string[]): unknown {
     if (this.deltas === undefined) {
       const source = this.only === undefined ? this.updates : atPath(this.updates, this.only);
-      this.deltas = this.detach ? structuredClone(source) : source;
+      this.deltas = this.detach ? this.copyValue(source) : source;
     }
     return nativeGet(this.deltas, segs);
   }
@@ -466,6 +467,8 @@ export interface KeyFold {
   readonly start?: unknown;
   /** A recorded own root can be present with the value undefined. */
   readonly startPresent?: boolean;
+  /** Copy the containers in already admitted data while sharing immutable scalars. */
+  readonly copyValue?: <T>(value: T) => T;
   /** Charge or refuse work before a reader's fold allocates the next generation. */
   readonly beforeRow?: (touch: Touch, state: Readonly<Record<string, unknown>>) => void;
   /**
@@ -534,7 +537,7 @@ export function foldKey(touches: readonly Touch[], segs: string[], options: KeyF
         kept = touch.commitIdx;
         keptBefore = nativeGet(state, segs);
       }
-      at = new RecordedPayload(touch.bundle.updates, touch.bundle.overwrite, true, [root]);
+      at = new RecordedPayload(touch.bundle.updates, touch.bundle.overwrite, true, [root], options.copyValue);
       atCommit = touch.commitIdx;
     }
     options.beforeRow?.(touch, state);

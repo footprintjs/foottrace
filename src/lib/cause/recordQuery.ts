@@ -3,16 +3,24 @@ import { resolveRecordNode } from './recordIdentity.js';
 import { inspectRecordNode } from './recordInspection.js';
 import { subflowParents } from './recordSubflowGraph.js';
 import { recordGapEvidence } from './recordGapEvidence.js';
+import { truncatedRecordRead, withRecordValueFallback, withRecordValueReads } from './recordValueWork.js';
 import type { RecordLoadFailure, RecordScopeLoader, ResolvedRecordNode } from './recordTypes.js';
 import type { GraphContext, NodeId } from './types.js';
 
 /** Both dependency directions share the same admitted node and canonical inspection within a query. */
-export function createRecordQuery(loader: RecordScopeLoader, maximumEdges: number) {
+export function createRecordQuery(loader: RecordScopeLoader, maximumEdges: number, maximumFields: number) {
   const resolutionOwner = {},
     inspectionOwner = {},
     boundaryOwner = {};
   const inspectLocal = (node: ResolvedRecordNode, context: GraphContext) => {
-    const inspect = () => inspectRecordNode(node, maximumEdges, loader.extraGapCodes(node.scope));
+    const inspect = () =>
+      withRecordValueFallback(
+        () =>
+          withRecordValueReads(node.scope.log, maximumFields, () =>
+            inspectRecordNode(node, maximumEdges, loader.extraGapCodes(node.scope)),
+          ),
+        truncatedRecordRead,
+      );
     return queryMemo(context)?.remember(inspectionOwner, node, inspect) ?? inspect();
   };
   return {
@@ -26,6 +34,7 @@ export function createRecordQuery(loader: RecordScopeLoader, maximumEdges: numbe
     parents(node: ResolvedRecordNode, context: GraphContext) {
       const inspect = async () => {
         const local = inspectLocal(node, context);
+        if (local.adjacency.gaps) return local;
         const cross = await subflowParents(node, context, loader, maximumEdges);
         const coverage = recordGapEvidence();
         for (const gap of local.gaps) coverage.addGap(gap);

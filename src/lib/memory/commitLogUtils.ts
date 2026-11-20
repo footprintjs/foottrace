@@ -289,7 +289,11 @@ export function commitValueAtWithBasis(
   const baseHoldsRoot = base !== undefined && Object.prototype.hasOwnProperty.call(base, root);
   const value =
     anchor === -1 && baseHoldsRoot
-      ? foldKey(rows, key.split(DELIM), { anchored: true, start: structuredClone(base[root]) })
+      ? foldKey(rows, key.split(DELIM), {
+          anchored: true,
+          start: model.copyValue(base[root]),
+          copyValue: (value) => model.copyValue(value),
+        })
       : model.valueAt(key, end);
 
   const codes = new Set<ValueBasis>();

@@ -57,16 +57,11 @@ export function spend(budget: { left: number }, count: number): void {
 }
 export const addressKey = (a: LogAddress): string => JSON.stringify([a.logRunId, ...a.drillPath]);
 /** Iterative bounded copy: data descriptors only, no getters/toJSON/prototypes or opaque class instances. */
-export function dataCopy(value: unknown, budget: { left: number }, { allowLongText = false } = {}): unknown {
+export function dataCopy(value: unknown, budget: { left: number }): unknown {
   const leaf = (v: unknown): boolean => v === null || typeof v !== 'object';
   const check = (v: unknown): void => {
     spend(budget, 1);
-    if (
-      typeof v === 'function' ||
-      typeof v === 'symbol' ||
-      (!allowLongText && typeof v === 'string' && v.length > 65536)
-    )
-      throw new RecordRefusal();
+    if (typeof v === 'function' || typeof v === 'symbol') throw new RecordRefusal();
   };
   check(value);
   if (leaf(value)) return value;
@@ -115,6 +110,10 @@ export function dataCopy(value: unknown, budget: { left: number }, { allowLongTe
     }
   }
   return root;
+}
+/** Copy previously admitted plain operands without cloning immutable scalars. */
+export function copyRecordValue<T>(value: T): T {
+  return dataCopy(value, { left: Number.MAX_SAFE_INTEGER }) as T;
 }
 /** `after`: the index of the copy before this one in the log (-1 for the first); the copy's own rises past it. */
 export function bundleOf(value: unknown, after: number, budget: { left: number }): CommitBundle {
