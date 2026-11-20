@@ -380,6 +380,10 @@ describe('cause reader public ownership', () => {
       'attentionList',
       'largestDrop',
       'mostAffected',
+      'pathTo',
+      'RootStrategyWalk',
+      'RootSelection',
+      'WithheldRoot',
       'createRecordGraph',
       'createStoredRecordGraph',
     ]) {

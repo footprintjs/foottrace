@@ -1,5 +1,6 @@
 /** Optional read-only cause and impact queries over recorded dependency graphs. */
 export { explain, attentionList } from './lib/cause/explain.js';
+export { pathTo } from './lib/cause/walk.js';
 export { largestDrop, mostAffected } from './lib/cause/strategies.js';
 export { createRecordGraph } from './lib/cause/recordAdapter.js';
 export { createStoredRecordGraph } from './lib/cause/storedRecordAdapter.js';
@@ -22,11 +23,14 @@ export type {
   MarkedNode,
   MaybePromise,
   NodeId,
+  RootSelection,
   RootStrategy,
+  RootStrategyWalk,
   SourceLinkPage,
   TraversedEdge,
   TraversalLimits,
   WalkLimits,
+  WithheldRoot,
 } from './lib/cause/types.js';
 export type {
   CaptureAwareRecordGraph,
