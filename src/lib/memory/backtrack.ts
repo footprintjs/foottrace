@@ -77,7 +77,14 @@
  * ```
  */
 
-import type { CausalChainOptions, CausalEdge, CausalNode, KeysReadLookup } from './backtrackTypes.js';
+import type {
+  CausalChainOptions,
+  CausalChainWithUnchangedWritesOptions,
+  CausalEdgeWithUnchangedWrites,
+  CausalNode,
+  CausalNodeWithUnchangedWrites,
+  KeysReadLookup,
+} from './backtrackTypes.js';
 import { builtOnBefore, readFromView, replacesValue, viewOverlapOf } from './builtOn.js';
 import { buildCommitIndex } from './commitLogUtils.js';
 import { requireControlDepsFunction } from './controlDeps.js';
@@ -88,15 +95,18 @@ import { placesOf } from './windowPlacement.js';
 import { createWriterLookup } from './writerLookup.js';
 import { prepareUnchangedWrites } from './unchangedWrites.js';
 import type { CommitBundle, TraceEntry, UntrackedSource } from './types.js';
-import type { UnchangedWriteGap } from './unchangedWriteTypes.js';
+import type { UnchangedWriteGap, UnchangedWriteRecording } from './unchangedWriteTypes.js';
 
 // The walk back's door inside the package. Its declarations (`backtrackTypes.ts`), the two ways to read
 // a result (`backtrackViews.ts`) and the writer lookup (`writerLookup.ts`) live beside it. They are
 // handed out here so that an importer names one file, as it did when all of it was this file.
 export type {
   CausalChainOptions,
+  CausalChainWithUnchangedWritesOptions,
   CausalEdge,
+  CausalEdgeWithUnchangedWrites,
   CausalNode,
+  CausalNodeWithUnchangedWrites,
   ControlDependency,
   ControlDepLookup,
   EdgeWeigher,
@@ -159,7 +169,19 @@ export function causalChain(
   getKeysRead: KeysReadLookup,
   options?: CausalChainOptions,
 ): CausalNode | undefined {
-  return buildCausalChain(commitLog, startId, getKeysRead, options);
+  // Without a paired recording the builder emits only data and control edges.
+  return buildCausalChain(commitLog, startId, getKeysRead, options) as CausalNode | undefined;
+}
+
+/** Walk back with separate evidence of retained writes that did not change a value. */
+export function causalChainWithUnchangedWrites(
+  commitLog: CommitBundle[],
+  startId: string,
+  getKeysRead: KeysReadLookup,
+  recording: UnchangedWriteRecording,
+  options?: CausalChainWithUnchangedWritesOptions,
+): CausalNodeWithUnchangedWrites | undefined {
+  return buildCausalChain(commitLog, startId, getKeysRead, options, undefined, { recording });
 }
 
 /**
@@ -173,23 +195,25 @@ export function causalChainFromCommit(
   getKeysRead: KeysReadLookup,
   options?: CausalChainOptions,
 ): CausalNode | undefined {
-  return buildCausalChain(commitLog, writer.runtimeStageId, getKeysRead, options, writer);
+  return buildCausalChain(commitLog, writer.runtimeStageId, getKeysRead, options, writer) as CausalNode | undefined;
 }
 
 function buildCausalChain(
   commitLog: CommitBundle[],
   startId: string,
   getKeysRead: KeysReadLookup,
-  options?: CausalChainOptions,
+  options?: CausalChainOptions | CausalChainWithUnchangedWritesOptions,
   selectedWriter?: CommitBundle,
-): CausalNode | undefined {
+  retained?: { recording: UnchangedWriteRecording },
+): CausalNodeWithUnchangedWrites | undefined {
   const maxDepth = options?.maxDepth ?? 20;
   const maxNodes = options?.maxNodes ?? 100;
   const controlDeps = options?.controlDeps;
   // Refused here, at the call and before the log is read: a wrong value (a saved map) would otherwise fail
   // from deep inside the walk, or never, when the start id is absent.
   requireControlDepsFunction(controlDeps, 'causalChain');
-  const weigh = options?.weigh;
+  // Only the opt-in entry supplies a recording, so a legacy weigher sees only legacy nodes.
+  const weigh = options?.weigh as CausalChainWithUnchangedWritesOptions['weigh'];
   const perWrite = options?.edgeAttribution === 'per-write';
 
   // RFC-003 D4 — truncation visibility. Set only when a limit actually
@@ -206,16 +230,7 @@ function buildCausalChain(
 
   const startIdx = idxMap.get(startId);
   if (startIdx === undefined) return undefined;
-  let unchangedWrites: ReturnType<typeof prepareUnchangedWrites> | undefined;
-  if (options) {
-    try {
-      const slot = Object.getOwnPropertyDescriptor(options, 'unchangedWrites');
-      const source = slot && (Object.hasOwn(slot, 'value') ? slot.value : null);
-      if (source !== undefined) unchangedWrites = prepareUnchangedWrites(source, commitLog);
-    } catch {
-      unchangedWrites = prepareUnchangedWrites(undefined, commitLog);
-    }
-  }
+  const unchangedWrites = retained && prepareUnchangedWrites(retained.recording, commitLog);
 
   const startCommit = selectedWriter ?? commitLog[startIdx];
   // Where the root's own writes sit: the selected bundle (a slice may anchor at a continuation), else
@@ -229,9 +244,9 @@ function buildCausalChain(
   const windowAt = places.window;
 
   // Node dedup map: runtimeStageId → CausalNode (ensures DAG, not tree)
-  const nodeMap = new Map<string, CausalNode>();
+  const nodeMap = new Map<string, CausalNodeWithUnchangedWrites>();
 
-  const root: CausalNode = {
+  const root: CausalNodeWithUnchangedWrites = {
     runtimeStageId: startId,
     stageId: startCommit.stageId,
     stageName: startCommit.stage,
@@ -310,7 +325,7 @@ function buildCausalChain(
   const rootPartials = (options?.rootLinkKeys ?? []).flatMap((key) =>
     startPos >= 0 && findWriter(key, startPos + 1) === startPos ? partialWrite(startId, key, startPos) : [],
   );
-  const queue: Array<[CausalNode, number, number, string[], readonly Partial[]]> = [
+  const queue: Array<[CausalNodeWithUnchangedWrites, number, number, string[], readonly Partial[]]> = [
     [root, startIdx, 0, rootReads, rootPartials],
   ];
   let visited = 1;
@@ -323,9 +338,9 @@ function buildCausalChain(
    * only a possible source of the read (`readWindow.ts · overlapOf`).
    */
   function linkParent(
-    node: CausalNode,
+    node: CausalNodeWithUnchangedWrites,
     parentPos: number,
-    kind: CausalEdge['kind'],
+    kind: CausalEdgeWithUnchangedWrites['kind'],
     key: string | undefined,
     depth: number,
     overlap?: SourceOverlap,
@@ -408,7 +423,7 @@ function buildCausalChain(
     // Which edges the child keeps to this parent for this key is one rule, the same whatever order
     // the walk meets the links in (`parentEdges.ts · takeLink`). The weigher (D4) stamps the weight
     // when an edge is made; `undefined` → 1.0 — the engine never computes weights itself.
-    const sameLink = (e: CausalEdge): boolean =>
+    const sameLink = (e: CausalEdgeWithUnchangedWrites): boolean =>
       e.parent.runtimeStageId === parentId && e.kind === kind && e.key === key;
     if (takeLink(node.parentEdges, sameLink, { overlap, builtOn })) {
       // Error isolation (review finding): a consumer weigher that throws

@@ -60,8 +60,39 @@ test('the actual offline pack supports located reads in both public module forma
     assert.deepEqual(unpacked.exports, source.exports);
     fs.writeFileSync(path.join(consumer, 'package.json'), '{"private":true,"type":"module"}');
 
-    for (const name of ['consumer.cts', 'consumer.mts', 'tsconfig.json'])
-      fs.copyFileSync(path.join(__dirname, name), path.join(consumer, name));
+    // Exercise the legacy and opt-in root declarations in the same unpacked package.
+    const causalEdgeDeclarations = `
+      import { causalChain, causalChainWithUnchangedWrites, formatCausalChain, type CausalChainOptions,
+        type CausalEdge, type CommitBundle, type UnchangedWriteRecording } from 'foottrace';
+
+      const formatters: Record<CausalEdge['kind'], string> = { data: 'value', control: 'decider' };
+      const formatEdge = ({ kind }: CausalEdge): string => formatters[kind];
+      function checkCausalEdgeTypes(log: CommitBundle[], recording: UnchangedWriteRecording) {
+        const lookup = (): string[] => [];
+        const options: CausalChainOptions = { maxDepth: 3 };
+        causalChain(log, 'decide#2', lookup)?.parentEdges.map(formatEdge);
+        causalChain(log, 'decide#2', lookup, options)?.parentEdges.map(formatEdge);
+        // @ts-expect-error Legacy options do not enable the wider graph.
+        causalChain(log, 'decide#2', lookup, { unchangedWrites: recording });
+
+        const optedIn = causalChainWithUnchangedWrites(log, 'decide#2', lookup, recording, { maxDepth: 3 });
+        type OptInEdge = NonNullable<typeof optedIn>['parentEdges'][number];
+        const allFormatters: Record<OptInEdge['kind'], string> = {
+          ...formatters,
+          'unchanged-write': 'tracked write',
+        };
+        optedIn?.parents[0]?.parentEdges.map(({ kind }) => allFormatters[kind]);
+        if (optedIn) void formatCausalChain(optedIn);
+        // @ts-expect-error An exhaustive legacy formatter cannot handle an opt-in edge.
+        optedIn?.parentEdges.map(formatEdge);
+      }
+      void checkCausalEdgeTypes;
+    `;
+    for (const name of ['consumer.cts', 'consumer.mts', 'tsconfig.json']) {
+      const target = path.join(consumer, name);
+      fs.copyFileSync(path.join(__dirname, name), target);
+      if (name !== 'tsconfig.json') fs.appendFileSync(target, causalEdgeDeclarations);
+    }
     const typescript = require.resolve('typescript', { paths: [root] });
     const compiler = require.resolve('typescript/bin/tsc', { paths: [root] });
     const ts = require(typescript);
@@ -160,6 +191,45 @@ test('the actual offline pack supports located reads in both public module forma
         assert.deepEqual(hidden.occurrence.source, { kind: 'unavailable', reason: 'redacted' });
         assert.deepEqual(Reflect.ownKeys(capturedFrame), capturedKeys);
       } finally { record.retire(); }
+
+      const causalBundle = (idx, stageId, overwrite, paths) => ({
+        idx, stage: stageId, stageId, runtimeStageId: stageId + '#' + idx,
+        trace: paths.map(path => ({ path, verb: 'set' })), overwrite, updates: {}, redactedPaths: [],
+      });
+      const causalLog = [
+        causalBundle(0, 'seed', { complete: true, manifest: ['fixture'] }, ['complete', 'manifest']),
+        causalBundle(1, 'audit', {}, []),
+        causalBundle(2, 'decide', { decision: 'ok' }, ['decision']),
+      ];
+      const causalRecording = {
+        runId: 'fixture', logAddress: { logRunId: 'fixture', drillPath: [] }, commitLog: causalLog,
+        executionTree: [
+          { id: 'seed', runtimeStageId: 'seed#0', stageWrites: { complete: true, manifest: ['fixture'] } },
+          { id: 'audit', runtimeStageId: 'audit#1', stageWrites: { complete: true }, stageReads: { manifest: ['fixture'] } },
+          { id: 'decide', runtimeStageId: 'decide#2', stageWrites: { decision: 'ok' }, stageReads: { complete: true } },
+        ],
+      };
+      const causalLookup = id => id === 'decide#2' ? ['complete'] : id === 'audit#1' ? ['manifest'] : [];
+      const valueParent = {
+        runtimeStageId: 'seed#0', stageId: 'seed', stageName: 'seed', keysWritten: ['complete', 'manifest'],
+        linkedBy: 'complete', depth: 1, parents: [], parentEdges: [],
+      };
+      const legacyBytes = JSON.stringify({
+        runtimeStageId: 'decide#2', stageId: 'decide', stageName: 'decide', keysWritten: ['decision'],
+        linkedBy: '', depth: 0, parents: [valueParent],
+        parentEdges: [{ parent: valueParent, kind: 'data', key: 'complete', weight: 1 }],
+      });
+      assert.equal(JSON.stringify(rootDoor.causalChain(causalLog, 'decide#2', causalLookup)), legacyBytes);
+      const withWrites = rootDoor.causalChainWithUnchangedWrites(causalLog, 'decide#2', causalLookup, causalRecording);
+      const edgeFacts = ({ kind, key, parent }) => [kind, key, parent.runtimeStageId];
+      assert.deepEqual(withWrites.parentEdges.map(edgeFacts), [
+        ['data', 'complete', 'seed#0'],
+        ['unchanged-write', 'complete', 'audit#1'],
+      ]);
+      assert.deepEqual(withWrites.parentEdges[1].parent.parentEdges.map(edgeFacts), [['data', 'manifest', 'seed#0']]);
+      assert.equal(JSON.stringify(rootDoor.causalChain(causalLog, 'decide#2', causalLookup, {
+        unchangedWrites: causalRecording,
+      })), legacyBytes);
     `;
     const expectedPackage = JSON.stringify({ name: source.name, version: source.version });
     const cjs = path.join(consumer, 'consumer.cjs');

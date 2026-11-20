@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   causalChain,
+  causalChainWithUnchangedWrites,
   commitValueAt,
   findLastWriter,
   findReadSources,
@@ -120,11 +121,13 @@ function sample(
   return { recording: paired(Object.freeze(commitLog), stages), initialState, stages };
 }
 
-function walk(recording: Recording, optIn = true) {
+function walk(recording: Recording, optIn = true): ReturnType<typeof causalChainWithUnchangedWrites> {
   // The public walk accepts a mutable array type but never mutates the recording.
   const log = recording.commitLog as CommitBundle[];
   const keys = keysReadFromExecutionTree(recording.executionTree);
-  return causalChain(log, reader, keys.lookup, { ...(optIn && { unchangedWrites: recording }) });
+  return optIn
+    ? causalChainWithUnchangedWrites(log, reader, keys.lookup, recording)
+    : causalChain(log, reader, keys.lookup);
 }
 
 function edgeFacts(edges: NonNullable<ReturnType<typeof walk>>['parentEdges']) {
@@ -208,11 +211,16 @@ describe('unchanged writes and value provenance', () => {
   it('uses the unchanged stage’s retained reads under per-write attribution', () => {
     const { recording } = sample();
     const keys = keysReadFromExecutionTree(recording.executionTree);
-    const result = causalChain(recording.commitLog as CommitBundle[], reader, keys.lookup, {
-      edgeAttribution: 'per-write',
-      rootLinkKeys: ['history'],
-      unchangedWrites: recording,
-    });
+    const result = causalChainWithUnchangedWrites(
+      recording.commitLog as CommitBundle[],
+      reader,
+      keys.lookup,
+      recording,
+      {
+        edgeAttribution: 'per-write',
+        rootLinkKeys: ['history'],
+      },
+    );
     const audit = result?.parents.find((item) => item.runtimeStageId === 'audit#1');
     expect(edgeFacts(audit!.parentEdges)).toEqual([['data', 'manifest', 'seed#0']]);
     expect(audit?.keysWritten).toEqual([]);
@@ -364,7 +372,7 @@ describe('unchanged-write scope and capture evidence', () => {
     const { recording } = sample();
     const log = [...recording.commitLog];
     const keys = keysReadFromExecutionTree(recording.executionTree);
-    const result = causalChain(log, reader, keys.lookup, { unchangedWrites: recording });
+    const result = causalChainWithUnchangedWrites(log, reader, keys.lookup, recording);
     expect(edgeFacts(result!.parentEdges)).toEqual([['data', complete, 'seed#0']]);
     expect(result?.unchangedWriteGaps).toContainEqual(
       expect.objectContaining({ key: complete, reason: 'scope-mismatch' }),
@@ -413,14 +421,13 @@ describe('unchanged-write scope and capture evidence', () => {
     expect(JSON.stringify(result)).not.toContain('foreign evidence accessor');
   });
 
-  it('refuses an accessor at the opt-in boundary without reading it', () => {
+  it('leaves the default walk unchanged when an options object has an unrelated accessor', () => {
     const { recording } = sample();
     const get = vi.fn(() => recording);
     const options = Object.defineProperty({}, 'unchangedWrites', { get });
     const keys = keysReadFromExecutionTree(recording.executionTree);
-    const result = causalChain(recording.commitLog as CommitBundle[], reader, keys.lookup, options);
-    expect(edgeFacts(result!.parentEdges)).not.toContainEqual(['unchanged-write', complete, 'audit#1']);
-    expect(result?.unchangedWriteGaps).toContainEqual(expect.objectContaining({ key: complete, reason: 'malformed' }));
+    const log = recording.commitLog as CommitBundle[];
+    expect(causalChain(log, reader, keys.lookup, options)).toEqual(causalChain(log, reader, keys.lookup));
     expect(get).not.toHaveBeenCalled();
   });
 

@@ -11,7 +11,7 @@
 import type { RegisteredCode } from './honesty.js';
 import type { BuiltOn, SourceOverlap } from './parentEdges.js';
 import type { UntrackedSource } from './types.js';
-import type { UnchangedWriteGap, UnchangedWriteRecording } from './unchangedWriteTypes.js';
+import type { UnchangedWriteGap } from './unchangedWriteTypes.js';
 
 /** A single node in the causal DAG. */
 export interface CausalNode {
@@ -43,8 +43,6 @@ export interface CausalNode {
    * `controlDeps` option) add a `'control'` edge to the governing decider.
    */
   parentEdges: CausalEdge[];
-  /** Unknown retained-write evidence for a read in an opt-in causal walk. */
-  unchangedWriteGaps?: readonly (UnchangedWriteGap & { readonly key: string })[];
   /**
    * RFC-003 D2 honesty marker — stamped from the stage's
    * `CommitBundle.untrackedSources`. Present when this stage ALSO consumed
@@ -128,7 +126,7 @@ export interface CausalNode {
  */
 export interface CausalEdge {
   parent: CausalNode;
-  kind: 'data' | 'control' | 'unchanged-write';
+  kind: 'data' | 'control';
   key?: string;
   weight: number;
   /**
@@ -182,6 +180,30 @@ export interface CausalEdge {
   builtOn?: BuiltOn;
 }
 
+/** A node in an opt-in walk that includes retained writes without value changes. */
+export interface CausalNodeWithUnchangedWrites extends Omit<CausalNode, 'parents' | 'parentEdges'> {
+  parents: CausalNodeWithUnchangedWrites[];
+  parentEdges: CausalEdgeWithUnchangedWrites[];
+  /** Unknown retained-write evidence for a read in this walk. */
+  unchangedWriteGaps?: readonly (UnchangedWriteGap & { readonly key: string })[];
+}
+
+/** An edge in an opt-in walk. Value and control edges retain their original fields. */
+export interface CausalEdgeWithUnchangedWrites extends Omit<CausalEdge, 'parent' | 'kind'> {
+  parent: CausalNodeWithUnchangedWrites;
+  kind: CausalEdge['kind'] | 'unchanged-write';
+}
+
+/** Like the default walk, only data and control edges are passed to the weigher. */
+export interface CausalChainWithUnchangedWritesOptions extends Omit<CausalChainOptions, 'weigh'> {
+  weigh?: (
+    child: CausalNodeWithUnchangedWrites,
+    parent: CausalNodeWithUnchangedWrites,
+    key: string | undefined,
+    kind: CausalEdge['kind'],
+  ) => number | undefined;
+}
+
 /**
  * RFC-003 D3 — a control dependency resolved for one execution step:
  * which decider/selector execution allowed this stage to run.
@@ -222,8 +244,6 @@ export interface CausalChainOptions {
   maxDepth?: number;
   /** Maximum total nodes to visit (default: 100). Hard cap for safety. */
   maxNodes?: number;
-  /** Include separately labelled retained writes with no value change from the paired root recording. */
-  unchangedWrites?: UnchangedWriteRecording;
   /**
    * RFC-003 D3 — control-dependence lookup. When provided, expanding a node
    * ALSO links a `'control'` edge to its governing decider (labeled by the
