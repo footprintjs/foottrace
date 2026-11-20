@@ -177,6 +177,62 @@ describe.each([
     expect(stale.sourceLinkGaps?.[0].code).toBe('stale');
   });
 
+  it('treats a served position under an intervening union as ambiguous', async () => {
+    const input = { key: 'history', element: 2 };
+    const wire = { ...laterLink, input };
+    const served = [{ ...servedRow, served: [{ key: input.key, elements: [[0, 3] as const] }] }];
+    const source = fixture(served, wire, { ...row, input });
+    const policy: SourceLinkPolicy = (locator) =>
+      locator.key !== input.key || (locator.at === 'view' && locator.element === input.element);
+    const read = (first: string, verb: 'merge' | 'append') =>
+      laterParents(
+        withLaterWrite(
+          source,
+          { history: [first, 'second', 'selected'] },
+          {
+            ...bundle('change', 1, { history: ['second'] }),
+            trace: [{ path: 'history', verb }],
+            updates: { history: ['second'] },
+          },
+        ),
+        policy,
+      );
+    const union = await read('first', 'merge');
+    expect(union.sourceLinks).toBeUndefined();
+    expect(union.sourceLinkGaps).toMatchObject([{ code: 'ambiguous' }]);
+    expect(JSON.stringify(await read('second', 'merge'))).toBe(JSON.stringify(union));
+    const append = await read('first', 'append');
+    expect(append.sourceLinks?.[0].standing).toBe('witnessed');
+    expect(JSON.stringify(await read('second', 'append'))).toBe(JSON.stringify(append));
+  });
+
+  it('checks array positions in pointers and limits the union check to their branch and witness', async () => {
+    const input = { key: 'profile', pointer: '/items/2' };
+    const wire = { ...laterLink, input };
+    const served = [{ ...servedRow, served: [{ key: input.key }] }];
+    const source = fixture(served, wire, { ...row, input });
+    const initialState = { profile: { items: ['first', 'second', 'selected'] } };
+    const merge = (delta: object, idx = 1): CommitBundle => ({
+      ...bundle('change', idx, {}),
+      trace: [{ path: 'profile', verb: 'merge' }],
+      updates: { profile: delta },
+    });
+    const beforeWitness = await laterParents(withLaterWrite(source, initialState, merge({ items: ['second'] })));
+    expect(beforeWitness.sourceLinkGaps).toMatchObject([{ code: 'ambiguous' }]);
+    const [consumer, door] = source.commitLog as readonly CommitBundle[];
+    const beforeView = {
+      ...source,
+      initialState,
+      commitLog: [merge({ items: ['second'] }, 0), { ...consumer, idx: 1 }, { ...door, idx: 2 }],
+    };
+    expect((await laterParents(beforeView)).sourceLinkGaps).toMatchObject([{ code: 'ambiguous' }]);
+    const beside = withLaterWrite(source, initialState, merge({ other: { items: ['second'] } }));
+    const besidePage = await laterParents(beside);
+    expect(besidePage.sourceLinks?.[0].standing).toBe('witnessed');
+    const afterWitness = { ...beside, commitLog: [...beside.commitLog, merge({ items: ['second'] }, 3)] };
+    expect(await laterParents(afterWitness)).toEqual(besidePage);
+  });
+
   const selectedProfile = { key: 'profile', pointer: '/selected' };
 
   function profileWrite(before: string, after: { selected: string; other: string }, path: string) {

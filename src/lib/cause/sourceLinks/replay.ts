@@ -1,6 +1,6 @@
 import { deepEqual } from '../../memory/equality.js';
 import { lastBefore, relation, rootOf } from '../../memory/keyPaths.js';
-import { isDeniedSegment, nativeGet } from '../../memory/pathOps.js';
+import { isDeniedSegment, nativeGet, ownChild } from '../../memory/pathOps.js';
 import type { CommitBundle } from '../../memory/types.js';
 import { windowsOf } from '../../memory/windowPlacement.js';
 import { normalisePath, pathSegments } from '../../record-paths/codec.js';
@@ -24,12 +24,14 @@ function selectedParts(place: SourceLinkSelection): string[] | undefined {
   return [...parts, ...tail];
 }
 
+const arrayIndex = /^(0|[1-9][0-9]*)$/u;
+
 /** RFC 6901 list tokens use canonical indices, independently of own array properties. */
 function selected(value: HistoryValue, path: readonly string[]): HistoryValue {
   let current = value;
   for (const part of path) {
     if (current.list) {
-      if (!/^(0|[1-9][0-9]*)$/u.test(part)) return historyValue(false, undefined);
+      if (!arrayIndex.test(part)) return historyValue(false, undefined);
       current = current.list.element(Number(part));
     } else {
       const parent = current.value;
@@ -66,6 +68,7 @@ export function sourceLinkReplay(record: ReplayRecord, budget: { left: number })
   const costPerTraceRow = 4;
   let indexCost = 1;
   const rootCosts = new Map<string, number>();
+  const mergesByRoot = new Map<string, { index: number; path: string }[]>();
   log.forEach((bundle, index) => {
     if (!firstByOwner.has(bundle.runtimeStageId)) firstByOwner.set(bundle.runtimeStageId, index);
     spend(budget, bundle.trace.length);
@@ -74,6 +77,12 @@ export function sourceLinkReplay(record: ReplayRecord, budget: { left: number })
       indexCost += costPerTraceRow;
       const root = rootOf(row.path);
       rootCosts.set(root, (rootCosts.get(root) ?? 0) + costPerTraceRow);
+      if (row.verb === 'merge') {
+        const merges = mergesByRoot.get(root);
+        const merge = { index, path: row.path };
+        if (merges) merges.push(merge);
+        else mergesByRoot.set(root, [merge]);
+      }
       for (const key of row.readKeys ?? []) known.add(key);
     }
     reads.set(bundle.runtimeStageId, known);
@@ -148,6 +157,33 @@ export function sourceLinkReplay(record: ReplayRecord, budget: { left: number })
     return index < 0 ? undefined : index;
   }
 
+  /** An array union can shift a position based on members outside that position's grant. */
+  function unionTouchesPosition(place: SourceLinkSelection, through: number): boolean {
+    const merges = mergesByRoot.get(rootOf(place.key));
+    const selectors = selectedParts(place);
+    if (!merges || !selectors) return false;
+    const parts = [...pathSegments(place.key), ...selectors];
+    if (!parts.slice(1).some((part) => arrayIndex.test(part))) return false;
+    const path = normalisePath(parts);
+    for (const merge of merges) {
+      if (merge.index > through) break;
+      spend(budget, 1);
+      if (relation(merge.path, path) !== 'around') continue;
+      const rowParts = pathSegments(merge.path);
+      spend(budget, parts.length);
+      let operand: unknown = nativeGet(log[merge.index].updates, rowParts);
+      for (const part of parts.slice(rowParts.length)) {
+        // Stop at the first array. Its shape settles the question without reading any entry.
+        if (Array.isArray(operand)) {
+          if (arrayIndex.test(part)) return true;
+          break;
+        }
+        operand = ownChild(operand, part);
+      }
+    }
+    return false;
+  }
+
   function redacted(place: SourceLinkSelection, through: number): boolean {
     const parts = selectedParts(place);
     if (!parts) return true;
@@ -179,6 +215,7 @@ export function sourceLinkReplay(record: ReplayRecord, budget: { left: number })
     },
     list: (key: string, index: number) => history(key)?.at(index).list,
     appended,
+    unionTouchesPosition,
     selectedWrite,
     writtenBetween(place: SourceLinkSelection, start: number, end: number): boolean {
       return (writer(place, end) ?? -1) >= start;

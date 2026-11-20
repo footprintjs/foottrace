@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Cause record graphs can show recorded source links when the host grants their exact locators. An indexed citation affected by a recorded list union reports an ambiguous input.
+
 ## 2.2.0 — 2026-11-19
 
 ### Added

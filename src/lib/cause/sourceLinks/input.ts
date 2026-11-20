@@ -48,6 +48,8 @@ export function resolveInput(
   const first = replay.first(consumer);
   if (first === undefined || link.witness.commitIdx < first) return { gap: 'not-collected' };
   if (first >= replay.accounted || link.witness.commitIdx >= replay.accounted) return { gap: 'not-collected' };
+  // Check operand shape before a writer or value lookup can fold the input.
+  if (replay.unionTouchesPosition(input, link.witness.commitIdx)) return { gap: 'ambiguous' };
   const view = replay.window(first);
   if (replay.writtenBetween({ key: input.key }, view.start, view.end)) return { gap: 'ambiguous' };
   const viewStop = view.start - 1;
