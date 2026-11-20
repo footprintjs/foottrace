@@ -4,6 +4,8 @@ import { checkOf } from './rows.js';
 import { count, keyOf, outputSelection, selection } from './selectors.js';
 import type { RecordSourceLink, RecordSourceLinks, SourceLinkRowLocation } from './types.js';
 
+export const maximumSourceLinks = 256;
+
 export interface SourceLinkInventory {
   readonly links: readonly RecordSourceLink[];
   readonly gaps: readonly GapCode[];
@@ -71,7 +73,7 @@ export function admitSourceLinks(raw: unknown, budget: { left: number }): Source
       if (typeof value !== 'string' || !Object.hasOwn(limitationGaps, value)) throw new RecordRefusal();
       limitations.add(limitationGaps[value as keyof typeof limitationGaps]);
     }
-    const rawLinks = recordList(recordOwn(raw, 'links'), 256);
+    const rawLinks = recordList(recordOwn(raw, 'links'), maximumSourceLinks);
     const links: RecordSourceLink[] = [];
     for (const value of rawLinks) {
       try {
