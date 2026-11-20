@@ -159,7 +159,10 @@ describe('cause stored adapter', () => {
     await expect(g.openScope(address, ctx())).rejects.toMatchObject({ code: 'timeout' });
     expect(seen?.aborted).toBe(true);
     const n = g.nodeId(address, { runtimeStageId: 'end#3', commitIdx: 3, key: 'z' });
-    expect((await g.gaps(n, ctx())).map((g) => g.code)).toContain('timeout');
+    const timeoutGaps = [{ code: 'timeout', evidence: [] }];
+    expect(await g.gaps(n, ctx())).toEqual(timeoutGaps);
+    expect(await g.parents(n, ctx())).toEqual({ edges: [], complete: false, gaps: timeoutGaps });
+    expect(await g.children(n, ctx())).toEqual({ edges: [], complete: false, gaps: timeoutGaps });
     const failed = createStoredRecordGraph({
       loadLog: async () => {
         throw new Error('SECRET');
@@ -168,6 +171,12 @@ describe('cause stored adapter', () => {
     const f = failed.nodeId(address, { runtimeStageId: 'end#3', commitIdx: 3, key: 'z' });
     expect(await failed.gaps(f, ctx())).toEqual([{ code: 'unavailable', evidence: [] }]);
     expect(JSON.stringify(await failed.gaps(f, ctx()))).not.toContain('SECRET');
+    const unavailable = { edges: [], complete: false, gaps: [{ code: 'unavailable', evidence: [] }] };
+    expect(await failed.parents(f, ctx())).toEqual(unavailable);
+    expect(await failed.children(f, ctx())).toEqual(unavailable);
+    const absent = createRecordGraph([]);
+    expect(await absent.parents(f, ctx())).toEqual(unavailable);
+    expect(await absent.children(f, ctx())).toEqual(unavailable);
   });
   it('rejects a loader returning another scope and cancels an externally aborted load', async () => {
     const other = { logRunId: 'other', drillPath: [] };

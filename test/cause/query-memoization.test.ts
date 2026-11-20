@@ -323,8 +323,9 @@ describe('query-local record resolution and canonical inspection', () => {
     const inner = await raw.promise;
     expect(codes(result)).toContain('cancelled');
     expect(result.rootCause).toBeUndefined();
-    expect(inner.parents).toEqual({ edges: [], complete: false });
-    expect(inner.gaps).toEqual([{ code: 'cancelled', evidence: [] }]);
+    const cancelGaps = [{ code: 'cancelled', evidence: [] }];
+    expect(inner.parents).toEqual({ edges: [], complete: false, gaps: cancelGaps });
+    expect(inner.gaps).toEqual(cancelGaps);
     expect(inner.attention).toEqual([]);
     expect(count.resolve).toHaveBeenCalledTimes(4);
     expect(count.inspect).not.toHaveBeenCalled();
