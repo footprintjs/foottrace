@@ -96,6 +96,8 @@ export interface CauseResult extends SourceLinkPage {
   /** Selected node → candidate, following recorded dependency edges. */
   readonly path: readonly NodeId[];
   readonly alternatives: readonly NodeId[];
+  /** Nodes withheld by a host root policy, separately from coverage gaps. */
+  readonly withheldRoots?: readonly WithheldRoot[];
   /** Included only when includeBackward is true; no extra graph traversal is performed. */
   readonly backward?: BackwardResult;
   readonly impact: ImpactResult;
@@ -117,11 +119,28 @@ export interface TraversalLimits {
 export interface WalkLimits extends TraversalLimits {
   readonly timeoutMs?: number;
 }
+/** Bounded reverse-walk evidence already admitted for the current query. */
+export interface RootStrategyWalk {
+  readonly nodeId: NodeId;
+  readonly nodes: readonly NodeId[];
+  readonly edges: readonly TraversedEdge[];
+  readonly candidates: readonly MarkedNode[];
+}
+export interface WithheldRoot {
+  readonly nodeId: NodeId;
+  /** Host code at most 64 characters long. */
+  readonly reason: string;
+}
+export interface RootSelection {
+  readonly select: readonly NodeId[];
+  readonly withheld?: readonly WithheldRoot[];
+}
 /** A strategy selects a tied best tier of already recorded marked nodes; it cannot introduce identities. */
 export type RootStrategy = (
   candidates: readonly MarkedNode[],
   context: GraphContext,
-) => MaybePromise<readonly NodeId[]>;
+  walk: RootStrategyWalk,
+) => MaybePromise<readonly NodeId[] | RootSelection>;
 /** Reorder all already discovered impact references; never inject or drop evidence. */
 export type ImpactStrategy = (nodes: readonly NodeId[], context: GraphContext) => MaybePromise<readonly NodeId[]>;
 export interface ExplainOptions extends WalkLimits {
