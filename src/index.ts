@@ -96,6 +96,13 @@ export type {
   KeysReadLookup,
 } from './lib/memory/backtrack.js';
 export { causalChain, flattenCausalDAG, formatCausalChain } from './lib/memory/backtrack.js';
+export { findUnchangedWrites } from './lib/memory/unchangedWrites.js';
+export type {
+  UnchangedWrite,
+  UnchangedWriteGap,
+  UnchangedWriteRecording,
+  UnchangedWriteResult,
+} from './lib/memory/unchangedWriteTypes.js';
 export { controlDepsFromMap } from './lib/memory/controlDeps.js';
 export type { UntrackedSource } from './lib/memory/types.js';
 export type {

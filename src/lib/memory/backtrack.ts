@@ -86,7 +86,9 @@ import { overlapOf, readSourcesOf } from './readWindow.js';
 import { type BuiltOn, type SourceOverlap, takeLink } from './parentEdges.js';
 import { placesOf } from './windowPlacement.js';
 import { createWriterLookup } from './writerLookup.js';
+import { prepareUnchangedWrites } from './unchangedWrites.js';
 import type { CommitBundle, TraceEntry, UntrackedSource } from './types.js';
+import type { UnchangedWriteGap } from './unchangedWriteTypes.js';
 
 // The walk back's door inside the package. Its declarations (`backtrackTypes.ts`), the two ways to read
 // a result (`backtrackViews.ts`) and the writer lookup (`writerLookup.ts`) live beside it. They are
@@ -204,6 +206,16 @@ function buildCausalChain(
 
   const startIdx = idxMap.get(startId);
   if (startIdx === undefined) return undefined;
+  let unchangedWrites: ReturnType<typeof prepareUnchangedWrites> | undefined;
+  if (options) {
+    try {
+      const slot = Object.getOwnPropertyDescriptor(options, 'unchangedWrites');
+      const source = slot && (Object.hasOwn(slot, 'value') ? slot.value : null);
+      if (source !== undefined) unchangedWrites = prepareUnchangedWrites(source, commitLog);
+    } catch {
+      unchangedWrites = prepareUnchangedWrites(undefined, commitLog);
+    }
+  }
 
   const startCommit = selectedWriter ?? commitLog[startIdx];
   // Where the root's own writes sit: the selected bundle (a slice may anchor at a continuation), else
@@ -313,11 +325,12 @@ function buildCausalChain(
   function linkParent(
     node: CausalNode,
     parentPos: number,
-    kind: 'data' | 'control',
+    kind: CausalEdge['kind'],
     key: string | undefined,
     depth: number,
     overlap?: SourceOverlap,
     builtOn?: BuiltOn,
+    retainedReads?: readonly string[],
   ): void {
     const parentCommit = commitLog[parentPos];
     const parentId = parentCommit.runtimeStageId;
@@ -334,7 +347,7 @@ function buildCausalChain(
     const resolveLinkReads = (): [string[], boolean] =>
       kind === 'data'
         ? readsForLinks(parentCommit, key !== undefined ? [key] : undefined)
-        : [getKeysRead(parentId), true];
+        : [retainedReads === undefined ? getKeysRead(parentId) : [...retainedReads], true];
 
     let parentNode = nodeMap.get(parentId);
     if (!parentNode) {
@@ -375,7 +388,7 @@ function buildCausalChain(
       //    THAT write: only the reads not yet expanded are enqueued (monotone, so it terminates).
       //  - the link under its write of this key, when that write did not replace the value.
       let delta: string[] = [];
-      if (perWrite && !fullyExpanded.has(parentId)) {
+      if ((perWrite && !fullyExpanded.has(parentId)) || kind === 'unchanged-write') {
         const [linkReads, linkIsFull] = resolveLinkReads();
         const expanded = expandedReads.get(parentId)!;
         delta = linkReads.filter((k) => !expanded.has(k));
@@ -402,7 +415,7 @@ function buildCausalChain(
       // must degrade to the default weight, never crash the slice — the
       // same contract every other consumer callback in the library gets.
       let weight = 1.0;
-      if (weigh) {
+      if (weigh && kind !== 'unchanged-write') {
         try {
           weight = weigh(node, parentNode, key, kind) ?? 1.0;
         } catch {
@@ -454,6 +467,29 @@ function buildCausalChain(
         linkParent(node, sources.before, 'data', key, depth, overlapOf(sources, sources.before));
       }
       for (const at of sources.during) linkParent(node, at, 'data', key, depth, overlapOf(sources, at));
+    }
+
+    if (unchangedWrites) {
+      const gaps = [...(node.unchangedWriteGaps ?? [])];
+      const stamp = (key: string, gap: UnchangedWriteGap) => JSON.stringify([key, gap.reason, gap.commitIdx]);
+      const seenGaps = new Set(gaps.map((gap) => stamp(gap.key, gap)));
+      const addGap = (key: string, gap: UnchangedWriteGap) => {
+        const id = stamp(key, gap);
+        if (seenGaps.has(id)) return;
+        seenGaps.add(id);
+        gaps.push({ key, ...gap });
+      };
+      for (const key of keysRead) {
+        const result = unchangedWrites.read(key, window.start);
+        for (const gap of result.gaps) addGap(key, gap);
+        if (window.end > window.start) {
+          addGap(key, { code: 'concurrent-write', reason: 'window-incomplete' });
+        }
+        for (const write of result.writes) {
+          linkParent(node, write.commitIdx, 'unchanged-write', key, depth, undefined, undefined, write.readKeys);
+        }
+      }
+      if (gaps.length > 0) node.unchangedWriteGaps = gaps;
     }
 
     // Built-on edges: for each write of this node that did not replace its key, the commit that

@@ -1,9 +1,9 @@
 import type { LogAddress } from '../memory/eventPosition.js';
-import { addressOf, recordOwn } from './recordValidation.js';
+import { addressOf, recordOwn } from '../evidence/recordData.js';
 import type { RecordScopeLoader } from './recordTypes.js';
 import type { GraphContext } from './types.js';
-import { decodeRecordCapture } from './recordCapture/decode.js';
-import { exact, interval, member } from './recordCapture/shape.js';
+import { decodeRecordCapture } from '../evidence/recordCapture/decode.js';
+import { exact, interval, member } from '../evidence/recordCapture/shape.js';
 import {
   CAPTURE_CHANNELS,
   CAPTURE_MODES,
@@ -11,7 +11,7 @@ import {
   type CaptureObservation,
   type CaptureQuery,
   type CaptureReason,
-} from './recordCapture/types.js';
+} from '../evidence/recordCapture/types.js';
 
 export { decodeRecordCapture };
 export type {
@@ -23,7 +23,7 @@ export type {
   CaptureQuery,
   CaptureReason,
   CaptureWitness,
-} from './recordCapture/types.js';
+} from '../evidence/recordCapture/types.js';
 
 const unknown = (reason: CaptureReason): CaptureCoverage => ({ state: 'collection-unknown', reasons: [reason] });
 

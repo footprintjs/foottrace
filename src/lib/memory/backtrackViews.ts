@@ -113,6 +113,10 @@ export function formatCausalChain(root: CausalNode): string {
     if (controlEdge) {
       linkParts.push(`[control${controlEdge.key ? `: ${controlEdge.key}` : ''}]${weightSuffix(controlEdge)}`);
     }
+    for (const edge of edgesFromChild ?? []) {
+      if (edge.kind === 'unchanged-write' && edge.key !== undefined)
+        linkParts.push(`tracked write of ${shownPath(edge.key)} with no recorded value change`);
+    }
     const link = linkParts.length > 0 ? ` ← ${linkParts.join(' ← ')}` : '';
 
     const writes = node.keysWritten.length > 0 ? ` [wrote: ${node.keysWritten.map(shownPath).join(', ')}]` : '';
@@ -121,6 +125,11 @@ export function formatCausalChain(root: CausalNode): string {
     if (node.incompleteSources && node.incompleteSources.length > 0) {
       lines.push(
         `${'  '.repeat(indent + 1)}⚠ also consumed ${node.incompleteSources.join('/')} — slice may be incomplete here`,
+      );
+    }
+    for (const gap of node.unchangedWriteGaps ?? []) {
+      lines.push(
+        `${'  '.repeat(indent + 1)}⚠ unchanged-write evidence for ${shownPath(gap.key)} is unknown (${gap.reason})`,
       );
     }
 

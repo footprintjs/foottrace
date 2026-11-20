@@ -78,6 +78,7 @@ export function sliceToJSON(slice: VariableSlice): SliceJSON {
       ...(node.preRunView !== undefined && { preRunView: node.preRunView }),
     };
     for (const edge of node.parentEdges) {
+      if (edge.kind === 'unchanged-write') continue;
       edges.push({
         from: node.runtimeStageId,
         to: edge.parent.runtimeStageId,

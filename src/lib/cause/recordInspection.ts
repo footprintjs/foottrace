@@ -60,6 +60,7 @@ function projectParentEdges(
   // When this step looked at state: placed once for the node, then asked per edge.
   const window = windowOf(scope.log, firstCommitIndex);
   for (const edge of parentEdges) {
+    if (edge.kind === 'unchanged-write') continue;
     if (edges.length >= maximumEdges) {
       addGap('edge-limit');
       break;

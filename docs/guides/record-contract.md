@@ -48,6 +48,19 @@ producer that writes only top-level keys never needs it.
 The validator does not coerce another type to a string or impose a new path
 syntax: empty strings and historical string spellings remain accepted.
 
+The commit log records net value changes. FootPrint's `onWrite` reports
+individual staged operations, while `onCommit` and `stageWrites` keep the
+stage's last tracked write per key under enabled retention. A stage can write
+without changing the value. `findUnchangedWrites(recording, key, beforeIdx)`
+looks for that evidence after the last change and before an exclusive commit
+position for an unambiguous top-level key. Pass the same root recording as `{ unchangedWrites: recording }` to
+`causalChain` to see separate `unchanged-write` edges strictly before each
+reader's window. A related trace row rules out that evidence. An ambiguous
+join or missing retention produces a gap. A trusted, completed write-capture
+note and its independent `captureWitness` can distinguish an empty tracked
+stage from missing coverage. The existing value-source edges and the default
+walk retain their meaning.
+
 ### Delivered-answer window
 
 Under `writeProvenance: 'reads-prefix'`, `RecordFrame.noteReadAttempt(id)` records a delivered

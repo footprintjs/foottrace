@@ -11,6 +11,7 @@
 import type { RegisteredCode } from './honesty.js';
 import type { BuiltOn, SourceOverlap } from './parentEdges.js';
 import type { UntrackedSource } from './types.js';
+import type { UnchangedWriteGap, UnchangedWriteRecording } from './unchangedWriteTypes.js';
 
 /** A single node in the causal DAG. */
 export interface CausalNode {
@@ -42,6 +43,8 @@ export interface CausalNode {
    * `controlDeps` option) add a `'control'` edge to the governing decider.
    */
   parentEdges: CausalEdge[];
+  /** Unknown retained-write evidence for a read in an opt-in causal walk. */
+  unchangedWriteGaps?: readonly (UnchangedWriteGap & { readonly key: string })[];
   /**
    * RFC-003 D2 honesty marker — stamped from the stage's
    * `CommitBundle.untrackedSources`. Present when this stage ALSO consumed
@@ -125,7 +128,7 @@ export interface CausalNode {
  */
 export interface CausalEdge {
   parent: CausalNode;
-  kind: 'data' | 'control';
+  kind: 'data' | 'control' | 'unchanged-write';
   key?: string;
   weight: number;
   /**
@@ -219,6 +222,8 @@ export interface CausalChainOptions {
   maxDepth?: number;
   /** Maximum total nodes to visit (default: 100). Hard cap for safety. */
   maxNodes?: number;
+  /** Include separately labelled retained writes with no value change from the paired root recording. */
+  unchangedWrites?: UnchangedWriteRecording;
   /**
    * RFC-003 D3 — control-dependence lookup. When provided, expanding a node
    * ALSO links a `'control'` edge to its governing decider (labeled by the

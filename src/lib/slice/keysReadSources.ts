@@ -11,38 +11,12 @@
 
 import type { KeysReadLookup } from '../memory/backtrack.js';
 import type { ExecutionTree } from '../memory/types.js';
+import { trackedReadNames } from '../memory/stageReadNames.js';
 import type { KeysReadSource } from './types.js';
 
 /** Narrow only the object shape this reader uses; stored values stay opaque. */
 function isReadTreeObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function ownDataValue(holder: object, key: string): unknown {
-  const slot = Object.getOwnPropertyDescriptor(holder, key);
-  return slot && Object.hasOwn(slot, 'value') ? slot.value : undefined;
-}
-
-/** Merge the engine's unset-read names into the existing read map. */
-function trackedReadNames(node: object, stageReads: Record<string, unknown> | undefined): string[] {
-  const keys = stageReads === undefined ? [] : Object.keys(stageReads);
-  try {
-    const unset = ownDataValue(node, 'undefinedReadKeys');
-    if (!Array.isArray(unset)) return keys;
-    const unsetKeys: string[] = [];
-    // Enumerate actual array indices, without scanning holes or consulting a caller's iterator.
-    for (const name of Object.getOwnPropertyNames(unset)) {
-      const index = Number(name);
-      if (!Number.isInteger(index) || index < 0 || index >= 2 ** 32 - 1 || String(index) !== name) continue;
-      const key = ownDataValue(unset, name);
-      if (typeof key === 'string') unsetKeys.push(key);
-    }
-    // Use the engine's lexical order when the side list contributes evidence.
-    return unsetKeys.length === 0 ? keys : [...new Set([...keys, ...unsetKeys])].sort();
-  } catch {
-    // A throwing descriptor lookup or revoked optional list supplies no evidence.
-    return keys;
-  }
 }
 
 /**
