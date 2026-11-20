@@ -8,12 +8,13 @@ import type {
   Gap,
   ImpactResult,
   NodeId,
+  WithheldRoot,
 } from './types.js';
 import { Session } from './session.js';
 import { frontier, pathTo, walk } from './walk.js';
 import { gap, graphName, nodeIds, graphOwn, uniqueGaps } from './validation.js';
 import { sourceLinkPage } from './sourceLinks/page.js';
-import { admitRanking } from './ranking.js';
+import { admitRanking, admitRootRanking } from './ranking.js';
 
 /** Read-only deterministic cause localisation and impact. No inference from timestamps or structural ancestry. */
 export async function explain(graph: CauseGraph, nodeId: NodeId, options: ExplainOptions = {}): Promise<CauseResult> {
@@ -24,23 +25,37 @@ export async function explain(graph: CauseGraph, nodeId: NodeId, options: Explai
       impactBudget = session.direction('impact');
     const backward = await walk(session, backwardBudget, [nodeId], 'parents');
     const missing: Gap[] = [...backward.gaps];
-    let candidates = frontier(backward).map((item) => item.nodeId);
+    const defaultCandidates = frontier(backward);
+    const defaultIds = defaultCandidates.map((item) => item.nodeId);
+    let candidates: readonly NodeId[] = defaultIds;
+    let withheldRoots: readonly WithheldRoot[] | undefined;
     const rank = graphOwn(options, 'rankRoots');
     if (rank !== undefined) {
       if (typeof rank !== 'function') throw new TypeError('CAUSE_CONFIGURATION_INVALID');
       const eligible = backward.marked.filter((item) => item.attention.some((mark) => mark.kind !== 'not-collected'));
+      const strategyWalk = Object.freeze({
+        nodeId,
+        nodes: backward.nodes,
+        edges: backward.edges,
+        candidates: Object.freeze(defaultCandidates),
+      });
       const selection = await session.invoke(
         backwardBudget,
         undefined,
-        () => rank(Object.freeze(eligible), session.context),
+        () => rank(Object.freeze(eligible), session.context, strategyWalk),
         (raw) =>
-          admitRanking(raw, new Set(eligible.map((item) => item.nodeId)), {
-            exactPermutation: false,
-            maximum: session.limits.maxNodes,
-          }),
+          admitRootRanking(
+            raw,
+            new Set(eligible.map((item) => item.nodeId)),
+            new Set(backward.nodes),
+            session.limits.maxNodes,
+          ),
       );
       if (selection.gap) missing.push(selection.gap, gap('strategy-failed'));
-      else candidates = [...(selection.value ?? [])];
+      else if (selection.value) {
+        candidates = selection.value.select;
+        if (selection.value.withheld?.length) withheldRoots = selection.value.withheld;
+      }
     }
     const stopped = session.stopGap(nodeId);
     if (stopped) missing.push(stopped);
@@ -81,12 +96,14 @@ export async function explain(graph: CauseGraph, nodeId: NodeId, options: Explai
       ...sourceLinkPage(forward.sourceLinks ?? [], forward.sourceLinkGaps ?? []),
     });
     const allGaps = uniqueGaps([...missing, ...impactGaps]);
+    const alternatives = candidates.length === 0 && withheldRoots ? defaultIds : candidates;
     return Object.freeze({
       nodeId,
       attention: backward.marked.find((item) => item.nodeId === nodeId)?.attention ?? Object.freeze([]),
       ...(rootCause ? { rootCause } : {}),
       path: rootCause ? pathTo(backward.edges, nodeId, rootCause) : Object.freeze([]),
-      alternatives: Object.freeze(rootCause ? [] : candidates),
+      alternatives: Object.freeze(rootCause ? [] : alternatives.filter((candidate) => candidate !== nodeId)),
+      ...(withheldRoots ? { withheldRoots } : {}),
       ...(backwardResult ? { backward: backwardResult } : {}),
       impact,
       confidence: allGaps.length ? 'incomplete' : 'complete',

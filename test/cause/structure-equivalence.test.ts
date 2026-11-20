@@ -2,6 +2,7 @@
  * Finite public-API byte witnesses captured from unchanged 4899960 source, before A1–A4 restructuring.
  * Foottrace #100 updates only record/preparation-limit: both pages carry the loader's node-limit gap,
  * so explain can report that reason without also adding the generic not-collected gap.
+ * The named root-strategy rows below remove only the investigated node from alternatives.
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
@@ -21,6 +22,30 @@ const baseline = JSON.parse(
   readFileSync(new URL('./fixtures/structure-equivalence.json', import.meta.url), 'utf8'),
 ) as Baseline;
 
+const selfAlternativeCases = new Map<string, 'explanation' | 'result' | 'root'>([
+  ['record/unfinished', 'explanation'],
+  ['record/untracked', 'explanation'],
+  ['record/redacted', 'explanation'],
+  ['record/adjacency-limit', 'explanation'],
+  ['graph/adjacency-getter', 'result'],
+  ['admission/graph-edge-overflow', 'root'],
+  ['ranking/foreign-root', 'root'],
+  ['ranking/missing-score', 'root'],
+  ['cancellation/during-dispatch', 'root'],
+  ['timeout/synchronous-port', 'root'],
+]);
+
+function expectedBytes(testCase: PublicCase): string {
+  const location = selfAlternativeCases.get(testCase.name);
+  if (!location) return testCase.json;
+  type AlternativeFields = { nodeId: string; alternatives: string[] };
+  const value = JSON.parse(testCase.json) as AlternativeFields & Record<'explanation' | 'result', AlternativeFields>;
+  const explanation = location === 'root' ? value : value[location];
+  expect(explanation.alternatives, testCase.name).toContain(explanation.nodeId);
+  explanation.alternatives = explanation.alternatives.filter((id) => id !== explanation.nodeId);
+  return JSON.stringify(value);
+}
+
 describe('A1–A4 structure-only public behavior witnesses', () => {
   it('matches the exact public JSON bytes and order of the captured baseline cases', async () => {
     expect(baseline.schemaVersion).toBe(1);
@@ -32,7 +57,7 @@ describe('A1–A4 structure-only public behavior witnesses', () => {
     const actual = await capturePublicBehavior(cause);
     expect(actual.map((item) => item.name)).toEqual(baseline.cases.map((item) => item.name));
     for (let index = 0; index < actual.length; index++) {
-      expect(actual[index].json, actual[index].name).toBe(baseline.cases[index].json);
+      expect(actual[index].json, actual[index].name).toBe(expectedBytes(baseline.cases[index]));
       expect(actual[index].json, actual[index].name).not.toContain(PRIVATE_SENTINEL);
     }
   });
