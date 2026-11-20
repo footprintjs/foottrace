@@ -51,7 +51,7 @@ export function resolveInput(
   // Check operand shape before a writer or value lookup can fold the input.
   if (replay.unionTouchesPosition(input, link.witness.commitIdx)) return { gap: 'ambiguous' };
   const view = replay.window(first);
-  if (replay.writtenBetween({ key: input.key }, view.start, view.end)) return { gap: 'ambiguous' };
+  if (replay.hasWindowWrite(input.key, view.start, view.end)) return { gap: 'ambiguous' };
   const viewStop = view.start - 1;
   if (replay.redacted(input, viewStop)) return { gap: 'redacted' };
   if (!replay.resolves(input, viewStop)) return { gap: 'stale' };
