@@ -1,5 +1,21 @@
 # Changelog
 
+## 2.3.0 — 2026-11-20
+
+### Added
+
+- The `findReadSources` result always carries `initialStatePresence`. With a plain `initialState` record it reports whether the key was present before the run, separately from the writers visible in the commit log. Without a supplied base it reports `unknown`.
+- Add optional source links to Foottrace record readers. A host policy can show which input a recorded check cited for a specific output. These links supplement the recorded dependency graph and carry their own evidence and omissions.
+
+### Changed
+
+- Reading a single replay stop with `stateAt` avoids copying plain objects and arrays twice. A replay cursor still returns an independent snapshot at each stop.
+
+### Fixed
+
+- Keep tracked reads of unset keys when walking saved execution trees, so causal walks see the same read names before and after a JSON round-trip.
+- Source-link readers use recorded write paths to identify overlap with tracked read windows.
+
 ## Unreleased
 
 ### Added
