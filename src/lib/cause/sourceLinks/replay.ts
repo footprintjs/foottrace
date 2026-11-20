@@ -1,10 +1,10 @@
-import { deepEqual } from '../../memory/equality.js';
 import { lastBefore, relation, rootOf } from '../../memory/keyPaths.js';
 import { isDeniedSegment, nativeGet, ownChild } from '../../memory/pathOps.js';
 import type { CommitBundle } from '../../memory/types.js';
 import { windowsOf } from '../../memory/windowPlacement.js';
 import { normalisePath, pathSegments } from '../../record-paths/codec.js';
 import { spend } from '../recordValidation.js';
+import { recordTextEquality } from '../recordValueWork.js';
 import { accountedCount, appendedStart, keyHistory, type KeyHistory } from './history.js';
 import { chargeShape } from './foldBudget.js';
 import { historyValue, type HistoryValue } from './historyValue.js';
@@ -54,14 +54,15 @@ function resolves(at: HistoryValue, place: SourceLinkSelection & Pick<SourceLink
 }
 
 /** Index one admitted log and reuse its based folds across every link in this projection. */
-export function sourceLinkReplay(record: ReplayRecord, budget: { left: number }) {
+export function sourceLinkReplay(record: ReplayRecord, budget: { left: number }, maximumTextWork = budget.left) {
   const { log, base } = record;
   const accounted = accountedCount(log, base);
   const window = windowsOf(log);
   const firstByOwner = new Map<string, number>();
   const reads = new Map<string, Set<string>>();
   const histories = new Map<string, KeyHistory>();
-  const writers = new Map<string, readonly number[]>();
+  const writers = new Map<string, { visits: number[]; scanned: number }>();
+  const equal = recordTextEquality(maximumTextWork);
   const scopedRedactions = new Map<string, number>();
   const suffixes = new Map<string, Map<number, number | undefined>>();
   spend(budget, log.length);
@@ -117,43 +118,48 @@ export function sourceLinkReplay(record: ReplayRecord, budget: { left: number })
     return writer(place, index + 1) === index;
   }
 
-  function writePositions(place: SourceLinkSelection): readonly number[] {
-    const identity = JSON.stringify([place.key, place.element, place.pointer]);
-    const existing = writers.get(identity);
-    if (existing) return existing;
-    const parts = selectedParts(place);
-    const path = parts && normalisePath([...pathSegments(place.key), ...parts]);
-    const timeline = path === undefined ? undefined : history(place.key);
-    const visits: number[] = [];
-    if (parts && path !== undefined && timeline) {
-      for (const index of timeline.commits) {
-        const rows = log[index].trace;
-        spend(budget, rows.length + 1);
-        const direct = rows.some((row) => {
-          const relative = relation(row.path, path);
-          return relative === 'exact' || relative === 'inside';
-        });
-        if (direct) {
-          visits.push(index);
-          continue;
-        }
-        const change = timeline.transition(index)!;
-        const before = selected(change.before, parts);
-        const after = selected(change.after, parts);
-        if (before.present && after.present && before.value !== after.value) {
-          chargeShape(budget, before.value);
-          chargeShape(budget, after.value);
-        }
-        if (before.present !== after.present || !deepEqual(before.value, after.value, 'copies')) visits.push(index);
-      }
-    }
-    writers.set(identity, visits);
-    return visits;
-  }
-
   function writer(place: SourceLinkSelection, before: number): number | undefined {
     if (before > accounted) return undefined;
-    const index = lastBefore(writePositions(place), before);
+    const parts = selectedParts(place);
+    if (!parts) return undefined;
+    const path = normalisePath([...pathSegments(place.key), ...parts]);
+    const timeline = history(place.key);
+    if (!timeline) return undefined;
+    const identity = JSON.stringify([place.key, place.element, place.pointer]);
+    let positions = writers.get(identity);
+    if (!positions) {
+      positions = { visits: [], scanned: 0 };
+      writers.set(identity, positions);
+    }
+    // A later write on the same path cannot participate in this locator's time window.
+    while (positions.scanned < timeline.commits.length) {
+      const index = timeline.commits[positions.scanned];
+      if (index >= before) break;
+      const rows = log[index].trace;
+      spend(budget, rows.length + 1);
+      const direct = rows.some((row) => {
+        const relative = relation(row.path, path);
+        return relative === 'exact' || relative === 'inside';
+      });
+      if (direct) positions.visits.push(index);
+      else {
+        const change = timeline.transition(index)!;
+        const prior = selected(change.before, parts);
+        const after = selected(change.after, parts);
+        if (
+          prior.present &&
+          after.present &&
+          (typeof prior.value === 'object' || typeof after.value === 'object') &&
+          prior.value !== after.value
+        ) {
+          chargeShape(budget, prior.value);
+          chargeShape(budget, after.value);
+        }
+        if (prior.present !== after.present || !equal(prior.value, after.value)) positions.visits.push(index);
+      }
+      positions.scanned++;
+    }
+    const index = lastBefore(positions.visits, before);
     return index < 0 ? undefined : index;
   }
 

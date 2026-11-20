@@ -3,7 +3,7 @@ import { nativeGet, nativeHas } from '../../memory/pathOps.js';
 import type { CommitBundle } from '../../memory/types.js';
 import { foldKey, isTotal, recordsTail } from '../../memory/verbs.js';
 import { pathSegments } from '../../record-paths/codec.js';
-import { spend } from '../recordValidation.js';
+import { copyRecordValue, spend } from '../recordValidation.js';
 import { chargeRow, chargeShape } from './foldBudget.js';
 import { historyLookup, historyValue, type Transition } from './historyValue.js';
 import { directHistory } from './listHistory.js';
@@ -41,6 +41,7 @@ export function keyHistory(
   const states = new Map<number, Transition>();
   const commits: number[] = [];
   foldKey(touches, segments, {
+    copyValue: copyRecordValue,
     start,
     startPresent: nativeHas(base, [root]),
     beforeRow: (touch, state) => chargeRow(budget, touch, state, root),

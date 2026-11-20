@@ -45,6 +45,7 @@ export function createSourceLinkProjection(policy: SourceLinkPolicy | undefined,
           reads: scope.reads,
         },
         budget,
+        maximumFields,
       ));
     const matchingNode = (id: string, index: number | undefined, key: string) =>
       id === identity.runtimeStageId && index === commitIndex && (identity.key === undefined || identity.key === key);
@@ -79,7 +80,8 @@ export function createSourceLinkProjection(policy: SourceLinkPolicy | undefined,
         }
         if (result.link) links.push(result.link);
       } catch (error) {
-        gaps.push({ code: recordRefusalCode(error) === 'node-limit' ? 'truncated' : 'invalid-data' });
+        const code = recordRefusalCode(error);
+        gaps.push({ code: code === 'node-limit' || code === 'truncated' ? 'truncated' : 'invalid-data' });
         break;
       }
     }

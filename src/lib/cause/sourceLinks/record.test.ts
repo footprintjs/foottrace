@@ -334,19 +334,15 @@ describe.each([
     expect(JSON.stringify(aboveLimit)).toBe(JSON.stringify(atLimit));
   });
 
-  it('still follows the older record-reader text cap for commit payloads', async () => {
+  it('discloses the same selected field with a long ungranted committed value', async () => {
     const read = (length: number) =>
       laterParents(
         profileWrite('', { selected: 'unchanged', other: 'x'.repeat(length) }, 'profile\u001fother'),
         allowSelectedProfile,
       );
-    expect((await read(65_536)).sourceLinks?.[0].standing).toBe('witnessed');
-    const refused = await read(65_537);
-    expect(refused).toEqual({
-      edges: [],
-      complete: false,
-      gaps: [{ code: 'invalid-data', evidence: [] }],
-    });
+    const before = await read(65_536);
+    expect(before.sourceLinks?.[0].standing).toBe('witnessed');
+    expect(JSON.stringify(await read(65_537))).toBe(JSON.stringify(before));
   });
 
   it('keeps an early object citation after 100 appends at default limits', async () => {
