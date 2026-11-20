@@ -69,7 +69,8 @@ export async function resolveRecordNode(
   try {
     const identity = readNodeIdentity(nodeId),
       scope = await loader.loadScope(identity.address, context);
-    if ('failure' in scope) return scope;
+    // A failed scope load has a page reason, separate from a missing node in an admitted scope.
+    if ('failure' in scope) return { ...scope, scopeLoadFailed: true };
     const commitIndex =
       identity.commitIdx ?? scope.log.findIndex((bundle) => bundle.runtimeStageId === identity.runtimeStageId);
     if (

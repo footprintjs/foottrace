@@ -13,6 +13,7 @@ import type {
   CaptureAwareRecordGraph,
   RecordGraphOptions,
   RecordLoaderResult,
+  RecordLoadFailure,
   RecordNode,
   RecordScope,
 } from './recordTypes.js';
@@ -20,7 +21,11 @@ import { addressKey, addressOf, recordList, recordOwn, RecordRefusal } from './r
 import type { Adjacency, GraphContext, NodeId } from './types.js';
 
 /** Give each failed port its own incomplete page rather than sharing a mutable edge array. */
-const unavailableAdjacency = (): Adjacency => ({ edges: [], complete: false });
+const unavailableAdjacency = (failure: RecordLoadFailure): Adjacency => ({
+  edges: [],
+  complete: false,
+  ...(failure.scopeLoadFailed ? { gaps: gapForRecordFailure(failure.failure) } : {}),
+});
 
 export type {
   CaptureAwareRecordGraph,
@@ -47,13 +52,13 @@ export function createLazyRecordGraph(
       captureCoverage(loader, address, query, context),
     openScope: (address: LogAddress, context: GraphContext) => openRecordScope(address, context, loader),
     async parents(nodeId: NodeId, context: GraphContext) {
-      return whenResolved(
+      return whenResolved<Promise<Adjacency>>(
         await query.resolve(nodeId, context),
         async (node) => {
           const { adjacency } = await query.parents(node, context);
           return withSourceLinkPage(adjacency, linksFor(node, context, 'parents'));
         },
-        async () => unavailableAdjacency(),
+        async (failure) => unavailableAdjacency(failure),
       );
     },
     async gaps(nodeId: NodeId, context: GraphContext) {
@@ -79,7 +84,7 @@ export function createLazyRecordGraph(
           );
           return withSourceLinkPage(adjacency, linksFor(node, context, 'children'));
         },
-        async () => unavailableAdjacency(),
+        async (failure) => unavailableAdjacency(failure),
       );
     },
   });

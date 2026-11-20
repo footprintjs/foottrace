@@ -342,8 +342,11 @@ describe.each([
       );
     expect((await read(65_536)).sourceLinks?.[0].standing).toBe('witnessed');
     const refused = await read(65_537);
-    expect(refused).toMatchObject({ edges: [], complete: false });
-    expect(refused.sourceLinks).toBeUndefined();
+    expect(refused).toEqual({
+      edges: [],
+      complete: false,
+      gaps: [{ code: 'invalid-data', evidence: [] }],
+    });
   });
 
   it('keeps an early object citation after 100 appends at default limits', async () => {

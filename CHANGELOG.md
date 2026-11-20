@@ -6,6 +6,10 @@
 
 - Cause record graphs can show recorded source links when the host grants their exact locators. An indexed input or output affected by a recorded list union is ambiguous. An affected witness leaves the link declared.
 
+### Fixed
+
+- Cause record graphs give a fixed reason on both adjacency pages when a scope fails to load. Each affected direction in `explain` reports that reason once and omits the generic `not-collected` gap for the failure.
+
 ## 2.2.0 — 2026-11-19
 
 ### Added

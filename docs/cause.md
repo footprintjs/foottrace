@@ -111,6 +111,8 @@ The stored adapter loads a requested log through the host, reuses `readStoredRec
 
 Direct `graph.openScope(address, { signal })` discovery rejects with a fixed `cause: record unavailable` error and a gap `code` on failure; an unavailable scope is never reported as an empty successful log. Public `explain` and `attentionList` queries turn unavailable reads into bounded incomplete findings.
 
+When a scope fails to load, `graph.parents` and `graph.children` each return an incomplete page with one fixed gap. `node-limit` means the record exceeds the reader's limits. `invalid-data` means the data could not be admitted as plain data. An unavailable host or record, a timeout, and cancellation use `unavailable`, `timeout`, and `cancelled` respectively. The gap contains no record content. `explain` reports the specific reason once in each affected direction and omits the generic `not-collected` gap for that failure.
+
 ## Optional native subflow observations
 
 `RecordScope.subflows` (and the stored host's same field) supplies a value-free

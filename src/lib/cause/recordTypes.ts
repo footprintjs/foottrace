@@ -75,6 +75,7 @@ export interface PreparedRecordScope {
 }
 export interface RecordLoadFailure {
   failure: Gap['code'];
+  scopeLoadFailed?: true;
 }
 export type LoadedRecordScope = PreparedRecordScope | RecordLoadFailure;
 export interface ResolvedRecordNode {

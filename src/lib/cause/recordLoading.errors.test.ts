@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { createRecordGraph, createStoredRecordGraph } from '../../cause.js';
 import { createRecordScopeLoader } from './recordLoading.js';
 import { nodeIdFor, resolveRecordNode } from './recordIdentity.js';
 import { RecordRefusal, projectLoaded } from './recordValidation.js';
@@ -123,3 +124,53 @@ describe('record boundary refusal identity', () => {
     expect(fixture.reads()).toBe(0);
   });
 });
+
+describe.each([
+  {
+    name: 'memory',
+    graph: (answer: unknown, maxFields?: number) =>
+      createRecordGraph([{ address, commitLog: [commit(answer)] }], { maxFields }),
+  },
+  {
+    name: 'storage',
+    graph: (answer: unknown, maxFields?: number) =>
+      createStoredRecordGraph(
+        {
+          loadLog: () => ({
+            entries: [
+              { kind: 'opened', address, at: 0, initialState: {} },
+              { kind: 'commit', address, at: 1, bundle: commit(answer) },
+              { kind: 'closed', address, at: 2, outcome: 'ok', commits: 1 },
+            ],
+          }),
+        },
+        { maxFields },
+      ),
+  },
+])('$name refused record pages', ({ graph }) => {
+  it.each([
+    { code: 'node-limit', answer: Array.from({ length: 100 }, () => 1), maxFields: 64 },
+    { code: 'invalid-data', answer: new Date(0), maxFields: undefined },
+  ] as const)('returns one fixed $code gap in both directions', async ({ code, answer, maxFields }) => {
+    const reader = graph(answer, maxFields);
+    const selected = reader.nodeId(address, { runtimeStageId: 'go#1', commitIdx: 0, key: 'answer' });
+    const gaps = [{ code, evidence: [] }];
+    const refused = { edges: [], complete: false, gaps };
+    expect(await reader.parents(selected, context)).toEqual(refused);
+    expect(await reader.children(selected, context)).toEqual(refused);
+    expect(await reader.gaps(selected, context)).toEqual(gaps);
+  });
+});
+
+function commit(answer: unknown) {
+  return {
+    idx: 0,
+    stage: 'go',
+    stageId: 'go',
+    runtimeStageId: 'go#1',
+    overwrite: { answer },
+    updates: {},
+    trace: [{ path: 'answer', verb: 'set' }],
+    redactedPaths: [],
+  };
+}
