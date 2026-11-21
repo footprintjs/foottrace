@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createRecordGraph, recordScopesFromSnapshot } from '../../../cause.js';
+import { commitValueAt, isCommitBundle } from '../../../index.js';
 
 const runId = 'run';
 const address = (...drillPath: string[]) => ({ logRunId: runId, drillPath });
@@ -45,6 +46,48 @@ describe('recordScopesFromSnapshot', () => {
     expect(await graph.openScope(address(), { signal: new AbortController().signal })).toEqual([
       graph.nodeId(address(), { runtimeStageId: 'start#0', commitIdx: 0 }),
     ]);
+  });
+
+  it.each([
+    ['accessor', 'invalid-data'],
+    ['overlong targets', 'node-limit'],
+    ['public name with unrelated payload', 'untracked-input'],
+  ] as const)('keeps snapshots usable with outside-input %s', async (kind, expected) => {
+    const get = vi.fn(() => {
+      throw new Error('outside-input accessor ran');
+    });
+    const writer = {
+      ...bundle(start.runtimeStageId, 0),
+      stage: 'start',
+      trace: [{ path: 'price', verb: 'set' }],
+      overwrite: { price: 5 },
+    };
+    const continuation = { ...bundle(start.runtimeStageId, 1), stage: 'start', phase: 'repeat' };
+    Object.defineProperty(continuation, 'outsideInputs', { get, enumerable: true });
+    if (kind === 'accessor') {
+      Object.defineProperty(writer, 'outsideInputs', { get, enumerable: true });
+    } else {
+      const value =
+        kind === 'overlong targets'
+          ? { call: { targets: new Array(100_001) } }
+          : Object.defineProperty({ declared: ['clock'] }, 'payload', { get, enumerable: true });
+      Object.defineProperty(writer, 'outsideInputs', { value, enumerable: true });
+    }
+    const { scopes, gaps } = recordScopesFromSnapshot({ ...snapshot(), commitLog: [writer, continuation] });
+    expect(gaps).toEqual([]);
+    expect(scopes).toHaveLength(1);
+    const commits = scopes[0].commitLog.filter(isCommitBundle);
+    expect(commits).toHaveLength(2);
+    expect(commitValueAt(commits, 1, 'price')).toBe(5);
+    expect(commits[0].outsideInputs).toEqual(
+      kind === 'public name with unrelated payload' ? { declared: ['clock'] } : undefined,
+    );
+    expect(commits[1]).not.toHaveProperty('outsideInputs');
+    const graph = createRecordGraph(scopes);
+    const node = graph.nodeId(address(), { runtimeStageId: start.runtimeStageId, commitIdx: 0, key: 'price' });
+    const coverage = await graph.gaps(node, { signal: new AbortController().signal });
+    expect(coverage.map(({ code }) => code)).toContain(expected);
+    expect(get).not.toHaveBeenCalled();
   });
 
   it('uses exact invocation stamps and preserves missing handoffs as scope boundaries', () => {

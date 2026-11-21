@@ -28,7 +28,7 @@ export {
   spend,
 } from '../evidence/recordData.js';
 /** Iterative bounded copy: data descriptors only, no getters/toJSON/prototypes or opaque class instances. */
-export function dataCopy(value: unknown, budget: { left: number }): unknown {
+export function dataCopy(value: unknown, budget: { left: number }, separatelyReadKey?: string): unknown {
   const leaf = (v: unknown): boolean => v === null || typeof v !== 'object';
   const check = (v: unknown): void => {
     spend(budget, 1);
@@ -61,7 +61,16 @@ export function dataCopy(value: unknown, budget: { left: number }): unknown {
     const { from, to } = work.pop()!;
     let keys: string[];
     try {
-      keys = Object.keys(from);
+      // The optional evidence's descriptor is read by its own admission, even when it throws.
+      keys =
+        from === value && separatelyReadKey !== undefined
+          ? Reflect.ownKeys(from).filter(
+              (key): key is string =>
+                typeof key === 'string' &&
+                key !== separatelyReadKey &&
+                Object.prototype.propertyIsEnumerable.call(from, key),
+            )
+          : Object.keys(from);
     } catch {
       throw new RecordRefusal();
     }
