@@ -1,7 +1,8 @@
 import type { GapCode } from '../../evidence/codes.js';
 import type { LogAddress } from '../../memory/eventPosition.js';
+import { relation } from '../../memory/keyPaths.js';
 import type { CommitBundle } from '../../memory/types.js';
-import { RecordRefusal, recordRefusalCode } from '../recordValidation.js';
+import { RecordRefusal, recordRefusalCode, spend } from '../recordValidation.js';
 import { isNativeChild, nativeParentOf } from './identity.js';
 import {
   address,
@@ -83,7 +84,7 @@ function writes(value: unknown, state: SubflowAdmission): readonly RecordHandoff
   );
 }
 
-/** A handoff names the actual surviving write, not a stage alias, an exit, or another visit. */
+/** Bind the cited bundle to its own execution, index and optional exact path. */
 function writtenAt(log: readonly CommitBundle[], id: string, index: number, path?: string): CommitBundle {
   const row = log[index];
   if (
@@ -95,6 +96,28 @@ function writtenAt(log: readonly CommitBundle[], id: string, index: number, path
   )
     return refuse();
   return row;
+}
+
+/** A continuation of the same execution can supersede a mapped write. Later visits are independent. */
+function checkLaterOutputWrites(
+  log: readonly CommitBundle[],
+  targetIndex: number,
+  executionId: string,
+  mapped: readonly RecordHandoffWrite[],
+  budget: { left: number },
+): void {
+  if (mapped.length === 0) return;
+  for (let index = targetIndex + 1; index < log.length; index++) {
+    spend(budget, 1);
+    const bundle = log[index];
+    if (bundle.runtimeStageId !== executionId || bundle.phase === 'exit') continue;
+    for (const entry of bundle.trace) {
+      for (const write of mapped) {
+        spend(budget, 1);
+        if (relation(entry.path, write.path) !== undefined) refuse();
+      }
+    }
+  }
 }
 
 function outputHandoff(
@@ -127,6 +150,7 @@ function outputHandoff(
     (limits.includes('privacy-active') && mapped.some((write) => write.reads.length))
   )
     return refuse();
+  checkLaterOutputWrites(log, commitIdx, runtimeStageId, mapped, budget);
   return Object.freeze({
     version: 1,
     attribution: 'observed-read-prefix',
