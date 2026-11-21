@@ -4,7 +4,6 @@ import { prepareReadSources } from './recordSources.js';
 import { prepareRecordSubflows, type PreparedRecordSubflows } from './recordSubflows.js';
 import { carryOutsideInputs, readOutsideInputs, type OutsideInputAdmission } from '../evidence/outsideInputs.js';
 import type { LogAddress } from '../memory/eventPosition.js';
-import { placedAt } from '../memory/readWindow.js';
 import { RUN_EVIDENCE_LIMITS } from '../run-evidence/kinds.js';
 import type {
   PreparedRecordScope,
@@ -16,12 +15,11 @@ import {
   addressKey,
   addressOf,
   dataCopy,
-  bundleOf,
-  recordList,
   mapOf,
   marksOf,
   recordName,
   names,
+  prepareRecordLog,
   recordOwn,
   RecordRefusal,
   recordRefusalCode,
@@ -73,16 +71,11 @@ export function prepareRecordScope(
   sourceLinkPolicyIsSet = false,
 ): PreparedRecordScope {
   if (addressKey(addressOf(recordOwn(value, 'address'))) !== addressKey(address)) throw new RecordRefusal();
-  const rawLog = recordList(recordOwn(value, 'commitLog'), maximumCommits),
-    budget = { left: maximumFields },
+  const budget = { left: maximumFields },
     outsideAllowance = { left: maximumFields };
   const firstExecutions = new Set<string>();
   const outsideByExecution = new Map<string, OutsideInputAdmission>();
-  let after = -1;
-  const log = rawLog.map((_, commitIndex) => {
-    const raw = recordOwn(rawLog, String(commitIndex));
-    const bundle = bundleOf(raw, after, budget);
-    after = placedAt(bundle, after);
+  const log = prepareRecordLog(recordOwn(value, 'commitLog'), maximumCommits, budget, (raw, bundle) => {
     if (!firstExecutions.has(bundle.runtimeStageId)) {
       firstExecutions.add(bundle.runtimeStageId);
       if (bundle.phase === undefined) {
@@ -92,7 +85,6 @@ export function prepareRecordScope(
           outsideByExecution.set(bundle.runtimeStageId, outside);
       }
     }
-    return bundle;
   });
   const reads = mapOf(
     recordOwn(value, 'reads'),

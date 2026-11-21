@@ -1,3 +1,4 @@
+import { RECORD_ADDRESS_MAX_DEPTH } from '../../evidence/recordData.js';
 import { nativeExecution } from '../../ids/nativeExecution.js';
 import type { LogAddress } from '../../memory/eventPosition.js';
 import { addressOf, recordName, recordOwn, RecordRefusal, spend } from '../recordValidation.js';
@@ -101,7 +102,7 @@ export function execution(value: unknown, state: SubflowAdmission): string {
 export function address(value: unknown, state: SubflowAdmission): LogAddress {
   const raw = object(value, ['logRunId', 'drillPath'], [], state);
   const logRunId = name(raw.logRunId, state);
-  const drillPath = list(raw.drillPath, 16, (id) => execution(id, state), state);
+  const drillPath = list(raw.drillPath, RECORD_ADDRESS_MAX_DEPTH, (id) => execution(id, state), state);
   return addressOf({ logRunId, drillPath });
 }
 export function integer(value: unknown, maximum = Number.MAX_SAFE_INTEGER): number {

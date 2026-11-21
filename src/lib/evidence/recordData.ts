@@ -30,9 +30,11 @@ export function recordList(value: unknown, maximum: number, expectedLength?: num
     expectedLength,
   });
 }
+export const RECORD_ADDRESS_MAX_DEPTH = 16;
+
 export function addressOf(value: unknown): LogAddress {
   const logRunId = recordName(recordOwn(value, 'logRunId')),
-    drillPath = names(recordOwn(value, 'drillPath'), 16);
+    drillPath = names(recordOwn(value, 'drillPath'), RECORD_ADDRESS_MAX_DEPTH);
   if (logRunId.length + drillPath.reduce((n, s) => n + s.length, 0) > 1536) throw new RecordRefusal();
   return Object.freeze({ logRunId, drillPath: Object.freeze(drillPath) });
 }

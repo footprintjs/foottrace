@@ -1,5 +1,5 @@
 import { viewStampFits } from '../memory/builtOn.js';
-import { admitStamps } from '../memory/readWindow.js';
+import { admitStamps, placedAt } from '../memory/readWindow.js';
 import { readAttemptWindow } from '../evidence/readAttempts.js';
 import { parseAttemptId } from '../ids/attemptId.js';
 /** Admission before the existing readers touch untrusted record fields. Payloads never leave this module's graph. */
@@ -172,6 +172,27 @@ export function bundleOf(value: unknown, after: number, budget: { left: number }
           })(),
         }),
   };
+}
+
+/**
+ * Admit a whole log in recorded order under the caller's shared field allowance.
+ * The scope's internal hook may admit optional evidence using its own allowance.
+ */
+export function prepareRecordLog(
+  value: unknown,
+  maximum: number,
+  budget: { left: number },
+  onBundle?: (raw: unknown, bundle: CommitBundle) => void,
+): CommitBundle[] {
+  const rows = recordList(value, maximum);
+  let after = -1;
+  return rows.map((_, index) => {
+    const raw = recordOwn(rows, String(index));
+    const bundle = bundleOf(raw, after, budget);
+    after = placedAt(bundle, after);
+    onBundle?.(raw, bundle);
+    return bundle;
+  });
 }
 export function mapOf<T>(
   value: unknown,
