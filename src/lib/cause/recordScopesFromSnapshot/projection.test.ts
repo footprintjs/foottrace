@@ -139,6 +139,31 @@ describe('recordScopesFromSnapshot', () => {
     expect(recordScopesFromSnapshot({ ...base, commitLog }).gaps).toEqual([{ code: 'node-limit' }]);
   });
 
+  it.each([
+    [31, 1, true],
+    [32, 1, false],
+    [0, 256, true],
+    [0, 257, false],
+  ])(
+    'opens a projection of %i children and %i commits with the documented graph limits',
+    async (children, commits, fitsDefault) => {
+      const ids = Array.from({ length: children }, (_, index) => `mount#${index + 1}`);
+      const { scopes } = recordScopesFromSnapshot({
+        ...snapshot(),
+        commitLog: Array.from({ length: commits }, (_, index) => bundle(start.runtimeStageId, index)),
+        executionTree: { ...start, children: ids.map(mount) },
+        subflowResults: Object.fromEntries(ids.map((id) => [id, { treeContext: context([id]) }])),
+      });
+      expect(scopes).toHaveLength(children + 1);
+      const options = { maxScopes: 256, maxCommits: 4096 };
+      const query = { signal: new AbortController().signal };
+      await expect(createRecordGraph(scopes, options).openScope(address(), query)).resolves.toHaveLength(commits);
+      const openWithDefault = createRecordGraph(scopes).openScope(address(), query);
+      if (fitsDefault) await expect(openWithDefault).resolves.toHaveLength(commits);
+      else await expect(openWithDefault).rejects.toMatchObject({ code: 'node-limit' });
+    },
+  );
+
   it('uses one scope limit across a wide run and never enumerates the result aliases', () => {
     const wide = (children: number) => {
       const ids = Array.from({ length: children }, (_, i) => `mount#${i + 1}`);

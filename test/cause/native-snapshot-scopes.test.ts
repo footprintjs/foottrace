@@ -52,3 +52,20 @@ it('keeps the explicit gaps on observed read-source modes', () => {
     channel: 'readSources',
   });
 });
+
+it.each([
+  ['an unsupported version', { version: 2 }],
+  ['an unrecorded write', { writes: [{ path: 'unrecorded', reads: [] }] }],
+])('keeps child coverage incomplete for %s', (_, changes) => {
+  const snapshot = structuredClone(corpus.find(({ name }) => name === 'on')!.snapshot) as {
+    subflowResults: Record<string, { outputHandoff: object }>;
+  };
+  const child = recordScopesFromSnapshot(snapshot).scopes[1];
+  expect(child.complete).toBe(true);
+  Object.assign(snapshot.subflowResults['payment#1'].outputHandoff, changes);
+
+  const { scopes, gaps } = recordScopesFromSnapshot(snapshot);
+  expect(scopes[0].complete).toBe(true);
+  expect(scopes[1].complete).toBe(false);
+  expect(gaps).toContainEqual({ code: 'invalid-data', address: child.address });
+});

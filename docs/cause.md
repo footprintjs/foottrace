@@ -380,19 +380,24 @@ or saved engine snapshot into the scopes accepted by `createRecordGraph`:
 import { createRecordGraph, recordScopesFromSnapshot } from 'foottrace/cause';
 
 const { scopes, gaps } = recordScopesFromSnapshot(snapshot);
-const graph = createRecordGraph(scopes);
+const graph = createRecordGraph(scopes, { maxScopes: 256, maxCommits: 4096 });
 // Show gaps alongside the graph when evidence or a scope could not be projected.
 ```
 
 The adapter joins a child by exact invocation and log address. A missing or
-unfinished handoff leaves its boundary closed. Reads come from each scope's
-own execution tree. When present, an own `controlDeps` map supplies the scope's
+unfinished handoff leaves its boundary closed. A refused output handoff cannot
+certify child coverage, and its refusal is reported at that child's address.
+Reads come from each scope's own execution tree. When present, an own
+`controlDeps` map supplies the scope's
 recorded control dependencies. The graph still checks the handoff before
 crossing. A snapshot without a root log address returns a `not-collected` gap.
 
 Graph scopes deeper than 16 are omitted and reported as `depth-limit` gaps
 with their depth and address. Discovery is bounded at 256 scopes and a shared
 100,000-unit work allowance, with at most 4,096 commits per admitted scope.
+The graph defaults to 32 scopes (including the root) and 256 commits per
+scope. Set `maxScopes` and `maxCommits` together for larger projections as in
+the example. The graph still applies its separate field and edge limits.
 The reader rejects accessors without invoking their bodies. Reflective
 operations can execute Proxy traps, so parse inert JSON before passing the
 snapshot if caller code must never run at this boundary.

@@ -87,6 +87,7 @@
   "src/lib/cause/recordScopesFromSnapshot/read.ts": 0,
   "src/lib/cause/recordScopesFromSnapshot/tree.ts": 0,
   "src/lib/cause/recordScopesFromSnapshot/capture.ts": 0,
+  "src/lib/cause/recordScopesFromSnapshot/coverage.ts": 3,
   "src/lib/cause/storedRecordAdapter.ts": 3,
   "src/cause.ts": 4,
   "src/lib/cause/recordValidation.ts": 3,

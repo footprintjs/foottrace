@@ -1,6 +1,7 @@
 import { RECORD_ADDRESS_MAX_DEPTH, recordRefusalCode, refuseRecord, spend } from '../evidence/recordData.js';
 import type { LogAddress } from '../memory/eventPosition.js';
 import { rootCapture, rootSources } from './recordScopesFromSnapshot/capture.js';
+import { admittedChildCuts } from './recordScopesFromSnapshot/coverage.js';
 import {
   field,
   list,
@@ -35,7 +36,7 @@ interface ScopeInput {
   readonly raw: unknown;
   readonly history: unknown;
   readonly address: LogAddress;
-  readonly output?: RecordSubflowMount['outputHandoff'];
+  readonly coveredUntil?: number;
 }
 
 interface Projection {
@@ -106,20 +107,9 @@ function nextScopes(state: Projection, address: LogAddress, mounts: readonly str
         ...(output === undefined ? {} : { outputHandoff: output }),
       });
     }
-    children.push({ raw: child.raw, history: child.history, address: child.address, output });
+    children.push({ raw: child.raw, history: child.history, address: child.address });
   }
   return { children, records };
-}
-
-function coveredChild(input: ScopeInput, length: number, budget: Budget): boolean {
-  const cut = field(input.output, 'child'),
-    address = field(cut, 'address');
-  return (
-    input.output?.status === 'captured' &&
-    address !== undefined &&
-    sameAddress(snapshotAddress(address, budget), input.address) &&
-    field(cut, 'beforeCommitIdx') === length
-  );
 }
 
 function visit(input: ScopeInput, state: Projection): void {
@@ -132,6 +122,7 @@ function visit(input: ScopeInput, state: Projection): void {
   if (depth > MAX_DISCOVERY_DEPTH) return;
   const projection = snapshotTree(field(raw, depth ? 'stageContexts' : 'executionTree'), budget);
   const { children, records } = nextScopes(state, address, projection.mounts, depth < RECORD_ADDRESS_MAX_DEPTH);
+  let cuts: ReadonlyMap<string, number> | undefined;
   if (depth <= RECORD_ADDRESS_MAX_DEPTH) {
     const log = list(input.history, budget, MAX_LOG).map((bundle) => dataCopy(bundle, budget));
     const capture = rootCapture(raw, address, log.length, budget);
@@ -142,7 +133,7 @@ function visit(input: ScopeInput, state: Projection): void {
         state.gaps.push({ code: 'unavailable', address, channel });
     }
     const complete =
-      coveredChild(input, log.length, budget) ||
+      input.coveredUntil === log.length ||
       (capture?.completed === true &&
         capture.channels.reads.mode === 'full' &&
         capture.channels.reads.status === 'collected' &&
@@ -163,18 +154,28 @@ function visit(input: ScopeInput, state: Projection): void {
           ) as RecordFanoutCollection[])
         : [];
     const controlDeps = controlMap(field(raw, 'controlDeps'), projection.ids, budget);
+    const subflows = { version: 1, status: 'partial', mounts: records, collections } as const;
     state.scopes.push({
       address,
       commitLog: Object.freeze(log),
       initialState,
       reads: projection.reads,
       complete,
-      subflows: { version: 1, status: 'partial', mounts: records, collections },
+      subflows,
       ...(readSources === undefined ? {} : { readSources }),
       ...(controlDeps === undefined ? {} : { controlDeps }),
     });
+    const admission = admittedChildCuts(subflows, address, log, budget);
+    cuts = admission?.cuts;
+    if (admission?.refusal) {
+      for (const mount of records) {
+        if (mount.outputHandoff !== undefined) state.gaps.push({ code: admission.refusal, address: mount.child });
+      }
+    }
   }
-  for (const child of children) visit(child, state);
+  for (const child of children) {
+    visit({ ...child, coveredUntil: cuts?.get(child.address.drillPath[depth]) }, state);
+  }
 }
 
 /**
