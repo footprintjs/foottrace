@@ -6,7 +6,7 @@
 import type { GapCode } from '../evidence/codes.js';
 import type { LogAddress } from '../memory/eventPosition.js';
 import { type Admission, isExecutionId } from './fields.js';
-import { type Channel, type LogFold, mountOf } from './logFold.js';
+import { type Channel, type LogFold, mountOf, outsideInputsOf } from './logFold.js';
 import type { EvidenceChannel, RunEvidenceWhy, StoredMarks, StoredReads, StoredRunningSubflow } from './rows.js';
 
 const NOT_COLLECTED_ROWS: readonly [] = Object.freeze([]) as readonly [];
@@ -42,15 +42,20 @@ export function channelOf<T>(
     : Object.freeze({ status: 'partial', rows: frozen, gaps: Object.freeze([...gaps]) });
 }
 
-export function readsChannel(folds: readonly LogFold[], given: readonly GapCode[] = []): EvidenceChannel<StoredReads> {
+export function readsChannel(
+  folds: readonly LogFold[],
+  a: Admission,
+  given: readonly GapCode[] = [],
+): EvidenceChannel<StoredReads> {
   const rows: StoredReads[] = [];
   const extra = new Set<GapCode>(given);
   for (const fold of folds) {
     if (fold.collects?.reads !== 'keys') continue;
     for (const [id, { about }] of fold.abouts) {
       const untracked = fold.untracked.get(id);
-      if (untracked !== undefined) extra.add('untracked-input');
-      if (about.readsOmitted) extra.add('truncated');
+      const outsideInputs = outsideInputsOf(fold, id, a);
+      if (untracked !== undefined || outsideInputs !== undefined) extra.add('untracked-input');
+      if (about.readsOmitted || outsideInputs?.call?.incomplete) extra.add('truncated');
       rows.push(
         Object.freeze({
           id,
@@ -58,6 +63,7 @@ export function readsChannel(folds: readonly LogFold[], given: readonly GapCode[
           keys: about.reads ?? Object.freeze([]),
           ...(about.readsOmitted ? { omitted: about.readsOmitted } : {}),
           ...(untracked === undefined ? {} : { untracked: Object.freeze([...untracked]) }),
+          ...(outsideInputs === undefined ? {} : { outsideInputs }),
         }),
       );
     }

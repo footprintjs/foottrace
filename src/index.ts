@@ -113,6 +113,7 @@ export type {
 } from './lib/memory/unchangedWriteTypes.js';
 export { controlDepsFromMap } from './lib/memory/controlDeps.js';
 export type { UntrackedSource } from './lib/memory/types.js';
+export type { OutsideInputs } from './lib/evidence/outsideInputs.js';
 export type {
   ArrayProvenance,
   AttributionBasis,

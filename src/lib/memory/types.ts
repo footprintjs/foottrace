@@ -2,12 +2,13 @@
  * types.ts — the record's types: a bundle, its rows, its patches, its encoding, and the
  * execution tree as the record's readers read it.
  *
- * Imports only the record's leaf attention type. The record names nothing outside itself: the engine's frame
+ * Imports only leaf types for recorded evidence. The record names nothing outside itself: the engine's frame
  * types — the stage snapshot, flow messages and retention dials — remain in FootPrint's
  * `frameTypes.ts`. The closed record graph is enforced by scripts/check-layering.mjs.
  */
 
 import type { Attention } from '../cause/types.js';
+import type { OutsideInputs } from '../evidence/outsideInputs.js';
 
 // ── Patch & Trace ──────────────────────────────────────────────────────────
 
@@ -124,6 +125,8 @@ export interface CommitBundle {
    * values smuggled through JS closures are undetectable.
    */
   untrackedSources?: ReadonlyArray<UntrackedSource>;
+  /** Public outside-input evidence stamped on the execution's first bundle. */
+  outsideInputs?: OutsideInputs;
   /**
    * Declared tags (9.21.0) — the names the author put on this stage at build
    * time (`FlowChartBuilder.tag` / `options.tags`), stamped here by the

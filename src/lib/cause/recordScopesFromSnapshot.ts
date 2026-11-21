@@ -1,3 +1,4 @@
+import { carryOutsideInputs, readOutsideInputs } from '../evidence/outsideInputs.js';
 import { RECORD_ADDRESS_MAX_DEPTH, recordRefusalCode, refuseRecord, spend } from '../evidence/recordData.js';
 import type { LogAddress } from '../memory/eventPosition.js';
 import { rootCapture, rootSources } from './recordScopesFromSnapshot/capture.js';
@@ -43,6 +44,7 @@ interface Projection {
   readonly scopes: RecordScope[];
   readonly gaps: SnapshotScopeGap[];
   readonly budget: Budget;
+  readonly outsideBudget: Budget;
   readonly results: unknown;
   visited: number;
 }
@@ -112,6 +114,26 @@ function nextScopes(state: Projection, address: LogAddress, mounts: readonly str
   return { children, records };
 }
 
+/** Copy the value record and admit optional outside evidence independently on the first owning row. */
+function snapshotLog(history: unknown, budget: Budget, outsideBudget: Budget): readonly unknown[] {
+  const owners = new Set<string>();
+  return list(history, budget, MAX_LOG).map((raw) => {
+    const bundle = dataCopy(raw, budget, 'outsideInputs');
+    if (bundle === null || typeof bundle !== 'object') return bundle;
+    const id = field(bundle, 'runtimeStageId');
+    if (typeof id !== 'string' || id === '' || owners.has(id)) return bundle;
+    owners.add(id);
+    if (field(bundle, 'phase') !== undefined) return bundle;
+
+    const outside = readOutsideInputs(raw, (count) => spend(outsideBudget, count));
+    // Keep valid names available for the graph's own configured allowance. An invalid annotation has no public
+    // value to copy, so pass its refusal through the existing private admission.
+    if (outside.outsideInputs !== undefined) Object.assign(bundle, { outsideInputs: outside.outsideInputs });
+    else carryOutsideInputs(bundle, outside);
+    return bundle;
+  });
+}
+
 function visit(input: ScopeInput, state: Projection): void {
   const { raw, address } = input,
     { budget } = state;
@@ -124,7 +146,7 @@ function visit(input: ScopeInput, state: Projection): void {
   const { children, records } = nextScopes(state, address, projection.mounts, depth < RECORD_ADDRESS_MAX_DEPTH);
   let cuts: ReadonlyMap<string, number> | undefined;
   if (depth <= RECORD_ADDRESS_MAX_DEPTH) {
-    const log = list(input.history, budget, MAX_LOG).map((bundle) => dataCopy(bundle, budget));
+    const log = snapshotLog(input.history, budget, state.outsideBudget);
     const capture = rootCapture(raw, address, log.length, budget);
     for (const channel of ['reads', 'writes', 'readSources'] as const) {
       const observed = capture?.channels[channel];
@@ -191,7 +213,14 @@ export function recordScopesFromSnapshot(snapshot: unknown): SnapshotRecordScope
     if (rawAddress === undefined) return { scopes: [], gaps: [{ code: 'not-collected' }] };
     const address = snapshotAddress(rawAddress, budget);
     if (address.drillPath.length !== 0) throw refuseRecord();
-    const state = { scopes: [], gaps: [], budget, results: field(snapshot, 'subflowResults'), visited: 0 };
+    const state = {
+      scopes: [],
+      gaps: [],
+      budget,
+      outsideBudget: { left: MAX_WORK },
+      results: field(snapshot, 'subflowResults'),
+      visited: 0,
+    };
     visit({ raw: snapshot, history: field(snapshot, 'commitLog'), address }, state);
     return { scopes: state.scopes, gaps: state.gaps };
   } catch (error) {

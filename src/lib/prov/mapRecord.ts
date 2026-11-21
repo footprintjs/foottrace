@@ -1,5 +1,6 @@
 import { collectReadCoverage, collectScopeCoverage } from '../cause/recordCoverage.js';
 import type { GapCode } from '../evidence/codes.js';
+import { readOutsideInputs } from '../evidence/outsideInputs.js';
 import type { ProvMapping } from './mapping.js';
 import { translateCommit } from './translateCommit.js';
 import type { ProvCommitContext } from './translation.js';
@@ -8,13 +9,16 @@ import type { AdmittedCommit } from './types.js';
 /** Canonical coverage readers stay at the driver boundary; the translator receives only owned facts. */
 function commitContext(mapping: ProvMapping, commit: AdmittedCommit): ProvCommitContext {
   const scopeGaps: GapCode[] = [];
-  collectScopeCoverage(mapping.scope, commit.bundle, undefined, (code) => scopeGaps.push(code));
+  const group = mapping.groups.get(commit.bundle.runtimeStageId),
+    owner = group?.[0],
+    outside = owner === commit ? readOutsideInputs(commit.bundle) : undefined;
+  collectScopeCoverage(mapping.scope, commit.bundle, undefined, (code) => scopeGaps.push(code), outside);
   return {
     ids: mapping.ids,
     activities: mapping.activities,
     parent: mapping.controls.get(commit.bundle.runtimeStageId),
     hasUntrackedInput: () =>
-      mapping.groups.get(commit.bundle.runtimeStageId)?.some((entry) => entry.bundle.untrackedSources?.length) ?? false,
+      owner?.bundle.outsideInputs !== undefined || !!group?.some((entry) => entry.bundle.untrackedSources?.length),
     scopeGaps,
     hides: (path: string) => mapping.hidden(path),
     readGaps: (row: AdmittedCommit['rows'][number]) => {

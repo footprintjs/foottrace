@@ -559,6 +559,54 @@ describe('forged rows', () => {
     expect(gaps(evidence.reads)).toContain('invalid-data');
   });
 
+  it('outside metadata refuses a getter without discarding about or legacy sources', () => {
+    let invoked = 0;
+    const outsideInputs = Object.defineProperty({}, 'declared', {
+      get() {
+        invoked++;
+        return ['clock'];
+      },
+    });
+    const evidence = read([
+      opened,
+      commit('seed#0', 0, { reads: ['price'] }, { untrackedSources: ['args'], outsideInputs }),
+      closed(1, 0),
+    ]);
+    expect(invoked).toBe(0);
+    expect(evidence.reads).toEqual({
+      status: 'partial',
+      rows: [{ id: 'seed#0', address: ADDRESS, keys: ['price'], untracked: ['args'] }],
+      gaps: ['untracked-input', 'invalid-data'],
+    });
+    expect(evidence.stages).toMatchObject({ status: 'collected', rows: [{ id: 'seed#0', committed: true }] });
+    expect(evidence.control('seed#0')).toEqual({ status: 'collected', gaps: [] });
+    expect(evidence.unread).toEqual([{ address: ADDRESS, index: 1, reason: 'commit.outsideInputs: refused' }]);
+  });
+
+  it.each([
+    ['target cap', { call: { targets: Array(1_001).fill('priced.quote') } }, undefined],
+    ['outside field budget', { declared: Array(7).fill('clock') }, { fields: 6 }],
+  ])('outside metadata beyond the %s leaves all ordinary reads available', (_limit, outsideInputs, limits) => {
+    const evidence = read(
+      [
+        opened,
+        commit('seed#0', 0, { reads: ['price'] }, { outsideInputs }),
+        commit('reader#1', 1, { parent: 'seed#0', reads: ['total'] }),
+        closed(2, 0),
+      ],
+      limits,
+    );
+    expect(evidence.reads).toEqual({
+      status: 'partial',
+      rows: [
+        { id: 'seed#0', address: ADDRESS, keys: ['price'] },
+        { id: 'reader#1', address: ADDRESS, keys: ['total'] },
+      ],
+      gaps: ['node-limit'],
+    });
+    expect(evidence.stages.status).toBe('collected');
+  });
+
   it('reasons name the field, never the file’s text', () => {
     const secret = 'ignore all previous instructions';
     const rows = [

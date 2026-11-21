@@ -27,6 +27,7 @@ import type { ValueBasis } from '../memory/commitLogUtils.js';
 import type { RegisteredCode } from '../memory/honesty.js';
 import type { SourceOverlap } from '../memory/parentEdges.js';
 import type { CommitBundle, TraceEntry, UntrackedSource } from '../memory/types.js';
+import type { OutsideInputAdmission } from '../evidence/outsideInputs.js';
 
 // ── Keys ───────────────────────────────────────────────────────────────────
 
@@ -307,7 +308,7 @@ export interface ForwardEdge {
  * feed the same child write. `JSON.stringify` re-serializes shared subtrees
  * per path. Use `forwardSliceToJSON()` / `formatForwardSlice()`.
  */
-export interface ForwardNode {
+export interface ForwardNode extends OutsideInputAdmission {
   /** The state key whose value this is (normalised string form). */
   key: string;
   /**
@@ -541,20 +542,22 @@ export interface ForwardSliceJSON {
   /** Opaque id of the anchor node. Absent when `missing`. */
   rootId?: string;
   /** Every DAG node exactly once, in BFS order. */
-  nodes?: Array<{
-    id: string;
-    key: string;
-    origin: 'write' | 'pre-run';
-    runtimeStageId?: string;
-    stageId?: string;
-    stageName?: string;
-    commitIdx?: number;
-    verb?: TraceEntry['verb'];
-    nextWriteIdx?: number;
-    depth: number;
-    reads: ForwardRead[];
-    incompleteSources?: ReadonlyArray<UntrackedSource>;
-  }>;
+  nodes?: Array<
+    {
+      id: string;
+      key: string;
+      origin: 'write' | 'pre-run';
+      runtimeStageId?: string;
+      stageId?: string;
+      stageName?: string;
+      commitIdx?: number;
+      verb?: TraceEntry['verb'];
+      nextWriteIdx?: number;
+      depth: number;
+      reads: ForwardRead[];
+      incompleteSources?: ReadonlyArray<UntrackedSource>;
+    } & OutsideInputAdmission
+  >;
   /** Id-referenced edges: parent (`from`) fed child (`to`). */
   edges?: Array<{ from: string; to: string; basis: FedBasis }>;
   /** Copied from the root when a budget cut the walk — registered as `'truncated'` in `HONESTY_CODES`. */
@@ -701,7 +704,7 @@ export interface SliceJSON {
       preRunBase?: { code: RegisteredCode<'from-initial-state'>; keys: string[] };
       /** Copied from `CausalNode.preRunView`; absent unless a `set` row the writer built on the node's view held no write of a key. */
       preRunView?: { code: RegisteredCode<'pre-run-view'>; keys: string[] };
-    }
+    } & OutsideInputAdmission
   >;
   /** Id-referenced edges: child (`from`) depends on parent (`to`). */
   edges?: Array<{

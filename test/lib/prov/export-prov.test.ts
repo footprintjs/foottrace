@@ -29,6 +29,42 @@ describe('the bounded, value-free PROV exporter', () => {
     ]);
   });
 
+  it('flags admitted outside inputs and keeps malformed or excessive side evidence separate from writes', async () => {
+    let accesses = 0;
+    const row = (path: string) => [{ path, verb: 'set', readKeys: [] }];
+    const malformed = (bundle: object) =>
+      Object.defineProperty(bundle, 'outsideInputs', {
+        get() {
+          accesses++;
+          throw new Error('outside-input secret');
+        },
+      });
+    const result = await exportProv(
+      {
+        commitLog: [
+          step('mount#0', row('x'), {
+            outsideInputs: { declared: ['clock'], call: { targets: [], incomplete: true } },
+          }),
+          malformed(step('mount#0', row('y'), { phase: 'exit' })),
+          malformed(step('bad#1', row('z'))),
+          step('cap#2', row('p'), { outsideInputs: { call: { targets: Array(301).fill('public') } } }),
+          step('next#3', row('q')),
+        ],
+      },
+      { ...options, maxFields: 300 },
+    );
+    expect(kind(result, 'prov:Activity').filter((node) => node['ft:untrackedInput'] === true)).toHaveLength(1);
+    expect(kind(result, 'prov:Entity').map((node) => node['ft:path'])).toEqual(['x', 'y', 'z', 'p', 'q']);
+    expect(result.gaps.filter((gap) => ['truncated', 'invalid-data', 'node-limit'].includes(gap.code))).toEqual([
+      { code: 'truncated', commitIdx: 0 },
+      { code: 'invalid-data', commitIdx: 2 },
+      { code: 'node-limit', commitIdx: 3 },
+    ]);
+    expect(result.gaps.find((gap) => gap.code === 'untracked-input')?.count).toBe(1);
+    expect(accesses).toBe(0);
+    expect(text(result)).not.toContain('outside-input secret');
+  });
+
   it('keeps each write occurrence and never reads retained final or intermediate values', async () => {
     let accesses = 0;
     const payload = Object.defineProperty({}, 'x', {

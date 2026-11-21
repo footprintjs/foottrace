@@ -2,6 +2,7 @@
 
 import type { Attention } from '../cause/types.js';
 import type { GapCode } from '../evidence/codes.js';
+import type { OutsideInputs } from '../evidence/outsideInputs.js';
 import type { LogAddress } from '../memory/eventPosition.js';
 import type { UntrackedSource } from '../memory/types.js';
 import type { RunDecisionNote, RunStopNote } from './kinds.js';
@@ -57,6 +58,8 @@ export interface StoredReads {
   readonly omitted?: number;
   /** `bundle.untrackedSources`: args, env or a silent read fed this stage too. */
   readonly untracked?: readonly UntrackedSource[];
+  /** Public names of outside inputs recorded on this execution's owning bundle. */
+  readonly outsideInputs?: OutsideInputs;
 }
 
 /** The attention marks one execution carried. */

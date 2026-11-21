@@ -2,6 +2,7 @@ import { admitSourceLinks, type SourceLinkInventory } from './sourceLinks/admiss
 import { decodeRecordCapture } from './recordCapture.js';
 import { prepareReadSources } from './recordSources.js';
 import { prepareRecordSubflows, type PreparedRecordSubflows } from './recordSubflows.js';
+import { carryOutsideInputs, readOutsideInputs, type OutsideInputAdmission } from '../evidence/outsideInputs.js';
 import type { LogAddress } from '../memory/eventPosition.js';
 import { RUN_EVIDENCE_LIMITS } from '../run-evidence/kinds.js';
 import type {
@@ -70,8 +71,21 @@ export function prepareRecordScope(
   sourceLinkPolicyIsSet = false,
 ): PreparedRecordScope {
   if (addressKey(addressOf(recordOwn(value, 'address'))) !== addressKey(address)) throw new RecordRefusal();
-  const budget = { left: maximumFields };
-  const log = prepareRecordLog(recordOwn(value, 'commitLog'), maximumCommits, budget);
+  const budget = { left: maximumFields },
+    outsideAllowance = { left: maximumFields };
+  const firstExecutions = new Set<string>();
+  const outsideByExecution = new Map<string, OutsideInputAdmission>();
+  const log = prepareRecordLog(recordOwn(value, 'commitLog'), maximumCommits, budget, (raw, bundle) => {
+    if (!firstExecutions.has(bundle.runtimeStageId)) {
+      firstExecutions.add(bundle.runtimeStageId);
+      if (bundle.phase === undefined) {
+        const outside = readOutsideInputs(raw, (count) => spend(outsideAllowance, count));
+        carryOutsideInputs(bundle, outside);
+        if (outside.outsideInputs !== undefined || outside.outsideInputGap !== undefined)
+          outsideByExecution.set(bundle.runtimeStageId, outside);
+      }
+    }
+  });
   const reads = mapOf(
     recordOwn(value, 'reads'),
     maximumCommits,
@@ -147,6 +161,7 @@ export function prepareRecordScope(
     subflows,
     ...(sourceLinks ? { sourceLinks } : {}),
     ...(sourceLinkBase ? { sourceLinkBase } : {}),
+    ...(outsideByExecution.size ? { outsideByExecution } : {}),
   };
   if (readSources) scope.sourceCoveredExecutions = sourceCoveredExecutions(scope);
   return scope;

@@ -63,7 +63,7 @@ test('the actual offline pack supports located reads in both public module forma
     // Exercise the legacy and opt-in root declarations in the same unpacked package.
     const causalEdgeDeclarations = `
       import { causalChain, causalChainWithUnchangedWrites, formatCausalChain, type CausalChainOptions,
-        type CausalEdge, type CommitBundle, type UnchangedWriteRecording } from 'foottrace';
+        type CausalEdge, type CommitBundle, type UnchangedWriteRecording, type UntrackedSource } from 'foottrace';
 
       const formatters: Record<CausalEdge['kind'], string> = { data: 'value', control: 'decider' };
       const formatEdge = ({ kind }: CausalEdge): string => formatters[kind];
@@ -87,6 +87,20 @@ test('the actual offline pack supports located reads in both public module forma
         optedIn?.parentEdges.map(formatEdge);
       }
       void checkCausalEdgeTypes;
+
+      const legacySources: Record<UntrackedSource, string> = {
+        args: 'run input', env: 'environment', silent: 'silent read',
+      };
+      function formatSource(source: UntrackedSource): string {
+        return legacySources[source];
+      }
+      function checkOutsideInputTypes(bundle: CommitBundle) {
+        bundle.untrackedSources?.map(formatSource);
+        bundle.outsideInputs = { declared: ['clock'], call: { targets: ['quote-service'], incomplete: true } };
+        // @ts-expect-error Declared names do not widen the legacy source union.
+        formatSource('clock');
+      }
+      void checkOutsideInputTypes;
     `;
     for (const name of ['consumer.cts', 'consumer.mts', 'tsconfig.json']) {
       const target = path.join(consumer, name);
@@ -118,7 +132,7 @@ test('the actual offline pack supports located reads in both public module forma
       assert.equal(fs.realpathSync(resolved.resolvedFileName), fs.realpathSync(expected));
       declarationTargets[extension] = path.relative(installed, expected);
     }
-    run(process.execPath, [compiler, '-p', configFile], consumer, 30000);
+    run(process.execPath, [compiler, '-p', configFile, '--noUncheckedIndexedAccess'], consumer, 30000);
 
     const assertions = String.raw`
       const { RecordFrame, SharedMemory, createReadSourceRecord } = write;

@@ -631,6 +631,36 @@ describe('CommitStamp.about — the frame hands it to the log', () => {
   });
 });
 
+it('commits a detached outside-input annotation only on the owning bundle', () => {
+  const state = new SharedMemory(undefined, { n: 0 });
+  const sink = memorySink();
+  const log = new EventLog(state.getState(), { sink, address: ROOT });
+  const names = ['clock'];
+  const targets = ['prices.quote'];
+  const stamp = {
+    stage: 'Step',
+    stageId: 'step',
+    runtimeStageId: 'step#1',
+    outsideInputs: { declared: names, call: { targets } },
+  };
+  const owner = new RecordFrame(state, log);
+  owner.write(owner.at([], 'n'), 1, 'set');
+  owner.commit(() => stamp);
+  owner.release();
+  names[0] = 'changed';
+  targets.push('late.call');
+
+  const continuation = new RecordFrame(state, log);
+  continuation.commit(() => ({ ...stamp, phase: 'exit' }));
+  continuation.release();
+
+  const [first, exit] = only(sink.entries, 'commit');
+  expect(first.bundle.outsideInputs).toEqual({ declared: ['clock'], call: { targets: ['prices.quote'] } });
+  expect(exit.bundle).not.toHaveProperty('outsideInputs');
+  expect(log.list()[0].outsideInputs).toEqual(first.bundle.outsideInputs);
+  expect(state.getState()).toEqual({ n: 1 });
+});
+
 describe('a named-field adapter', () => {
   /** What an adapter sees, and the entries a named-field copy of them stores. */
   function capture() {

@@ -62,6 +62,16 @@ note and its independent `captureWitness` can distinguish an empty tracked
 stage from missing coverage. The default `causalChain` and its `CausalEdge`
 type still use `data` and `control` edges.
 
+An execution's first commit may include `outsideInputs` with public names
+declared by the author and names of retained, observed native call targets.
+`causalChain` and the slice views show those separately from value-source
+edges. A target list marked incomplete does not account for every call.
+A malformed or oversized field is reported separately from the value facts
+in the commit. Use labels from code, without arguments, returned values,
+credentials or exception text. Undeclared inputs such as a clock or a
+closure can go undetected. Historical records keep their existing shape and
+the `untrackedSources` vocabulary stays `args`, `env` and `silent`.
+
 ### Delivered-answer window
 
 Under `writeProvenance: 'reads-prefix'`, `RecordFrame.noteReadAttempt(id)` records a delivered

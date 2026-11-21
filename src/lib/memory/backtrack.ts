@@ -96,6 +96,7 @@ import { createWriterLookup } from './writerLookup.js';
 import { prepareUnchangedWrites } from './unchangedWrites.js';
 import type { CommitBundle, TraceEntry, UntrackedSource } from './types.js';
 import type { UnchangedWriteGap, UnchangedWriteRecording } from './unchangedWriteTypes.js';
+import { readOutsideInputs } from '../evidence/outsideInputs.js';
 
 // The walk back's door inside the package. Its declarations (`backtrackTypes.ts`), the two ways to read
 // a result (`backtrackViews.ts`) and the writer lookup (`writerLookup.ts`) live beside it. They are
@@ -256,6 +257,7 @@ function buildCausalChain(
     parents: [],
     parentEdges: [],
     ...incompleteSourcesFragment(startCommit),
+    ...readOutsideInputs(commitLog[startIdx]),
   };
   nodeMap.set(startId, root);
 
@@ -388,6 +390,7 @@ function buildCausalChain(
         parents: [],
         parentEdges: [],
         ...incompleteSourcesFragment(parentCommit),
+        ...readOutsideInputs(commitLog[parentIdx]),
       };
       nodeMap.set(parentId, parentNode);
       visited++;

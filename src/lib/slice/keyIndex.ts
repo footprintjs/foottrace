@@ -58,6 +58,8 @@ import type { CommitBundle, TraceEntry } from '../memory/types.js';
  * so `'cfg.a'` stays the literal key it may be.
  */
 export interface KeyIndex {
+  /** First retained bundle position by execution, shared by reads and outside inputs. */
+  readonly firstCommits: ReadonlyMap<string, number>;
   /** Where every path was written — the writer rule's index (`keyPaths · buildWriterIndex`). */
   readonly writers: WriterIndex;
   /** key → commit ARRAY positions that WROTE it under the writer rule, ascending. Memoised per key. */
@@ -139,7 +141,7 @@ export function buildKeyIndex(commitLog: CommitBundle[], lookup: KeysReadLookup)
     }
     push(byName, name, at);
   };
-  const executions = new Set<string>();
+  const firstCommits = new Map<string, number>();
   const windows = new Map<number, ReadWindow>();
   const views = new Map<number, ReadWindow>();
   const places = placesOf(commitLog);
@@ -148,8 +150,8 @@ export function buildKeyIndex(commitLog: CommitBundle[], lookup: KeysReadLookup)
     // Reads: one lookup per EXECUTION, at its first bundle (see THE INVERSION above). A later bundle
     // of the same runtimeStageId is a continuation; the stage read before its own commit, and the
     // backward walk dates it there too (`commitLogUtils · buildCommitIndex`).
-    const first = !executions.has(bundle.runtimeStageId);
-    executions.add(bundle.runtimeStageId);
+    const first = !firstCommits.has(bundle.runtimeStageId);
+    if (first) firstCommits.set(bundle.runtimeStageId, i);
     // Rows the writer built on the view belong to the BUNDLE, first or not (`viewReadersOf`), and so does
     // the moment that view was pinned: a later commit of a step has a view of its own.
     const viewed = new Set<string>();
@@ -222,6 +224,7 @@ export function buildKeyIndex(commitLog: CommitBundle[], lookup: KeysReadLookup)
 
   const isKnown = (key: string): boolean => writesOf(key).length > 0 || readsOf(key).length > 0;
   return {
+    firstCommits,
     writers,
     writesOf,
     closingWritesOf,

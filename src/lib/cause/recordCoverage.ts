@@ -1,4 +1,5 @@
 import type { CommitBundle } from '../memory/types.js';
+import type { OutsideInputAdmission } from '../evidence/outsideInputs.js';
 import { relation } from '../memory/keyPaths.js';
 import { forwardSliceForKey } from '../slice/forwardSliceForKey.js';
 import { builtOnChildPositions } from './recordBuiltOn.js';
@@ -35,10 +36,11 @@ export function collectScopeCoverage(
   bundle: CommitBundle,
   extraGapCodes: readonly Gap['code'][] | undefined,
   addGap: AddRecordGap,
+  outside: OutsideInputAdmission | undefined = scope.outsideByExecution?.get(bundle.runtimeStageId),
 ): void {
   for (const code of extraGapCodes ?? []) addGap(code);
   if (!scope.complete || scope.control === undefined || scope.marks === undefined) addGap('not-collected');
-  if (bundle.untrackedSources?.length) addGap('untracked-input');
+  if (bundle.untrackedSources?.length || outside?.outsideInputs !== undefined) addGap('untracked-input');
   if (bundle.redactedPaths.length) addGap('redacted');
   // The native record adapter does not project external call nodes. A host adapter may add
   // admitted call relations, but this view must not call their absence complete ancestry.
@@ -47,6 +49,8 @@ export function collectScopeCoverage(
     addGap('conservative');
     addGap('not-collected');
   }
+  if (outside?.outsideInputs?.call?.incomplete) addGap('truncated');
+  if (outside?.outsideInputGap !== undefined) addGap(outside.outsideInputGap);
 }
 
 /** A read-only identity has no new value life; unqualified executions retain written-key encounter order. */

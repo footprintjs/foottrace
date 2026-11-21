@@ -2,6 +2,7 @@ import type { CaptureCoverage, CaptureObservation, CaptureQuery, CaptureWitness 
 import type { ControlDependency } from '../memory/backtrack.js';
 import type { LogAddress } from '../memory/eventPosition.js';
 import type { CommitBundle } from '../memory/types.js';
+import type { OutsideInputAdmission } from '../evidence/outsideInputs.js';
 import type { PreparedReadSources, RecordReadSources } from './recordSources.js';
 import type { SourceLinkInventory } from './sourceLinks/admission.js';
 import type { RecordSourceLinks, SourceLinkPolicy } from './sourceLinks/types.js';
@@ -73,6 +74,7 @@ export interface PreparedRecordScope {
   sourceLinks?: SourceLinkInventory;
   sourceLinkBase?: Record<string, unknown>;
   sourceCoveredExecutions?: ReadonlySet<string>;
+  outsideByExecution?: ReadonlyMap<string, OutsideInputAdmission>;
 }
 export interface RecordLoadFailure {
   failure: Gap['code'];

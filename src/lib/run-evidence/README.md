@@ -44,6 +44,8 @@ A file with no `collects`, including every file an older writer made, reads `not
 
 `about.reads` joins `bundle.untrackedSources`, which reads `partial` (`untracked-input`): that stage also read what no name shows.
 
+The reads row can also carry `outsideInputs` from that execution's first owning bundle in the same log. It lists declared public input names and native call targets when recorded. These inputs make the channel `partial` (`untracked-input`). A refused outside-input field contributes `invalid-data` or `node-limit` while the ordinary reads and other channels remain available.
+
 An admitted entry or non-seed commit whose first `about` was never supplied leaves reads and attention `partial` (`not-collected`), even when the log closed with accurate counts. A supplied but refused annotation retains its precise `invalid-data` or `truncated` gap; it cannot certify empty coverage. A first commit can fail before storing its annotation; a continuation cannot replace it. Known stage and control facts remain usable. A log with no entered execution can still have genuinely collected-empty channels, and an explicit `reads: off` remains `not-collected` (`reads-off`).
 
 ## Threat model: a record file is untrusted input
