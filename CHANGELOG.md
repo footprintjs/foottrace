@@ -1,5 +1,28 @@
 # Changelog
 
+## 2.3.0 — 2026-11-21
+
+### Added
+
+- Bind several committed source-link rows in one scope with one replay and report when the binding allowance runs out. Each locator must be a plain object.
+- Project an engine snapshot into record graph scopes with `recordScopesFromSnapshot` from `foottrace/cause`, including explicit gaps for omitted scopes.
+- Optional commit `outsideInputs` records declared public source names and observed native call targets. Causal walks and slice views surface this evidence without changing the legacy `UntrackedSource` type or the value fold.
+- The `findReadSources` result always carries `initialStatePresence`. With a plain `initialState` record it reports whether the key was present before the run, separately from the writers visible in the commit log. Without a supplied base it reports `unknown`.
+- Add optional source links to Foottrace record readers. A host policy can show which input a recorded check cited for a specific output. These links supplement the recorded dependency graph and carry their own evidence and omissions.
+- Cause root strategies receive the frozen backward walk and can return host-withheld roots separately from graph coverage. The cause entry point exports `pathTo` for the recorded edges.
+- `findUnchangedWrites` and `causalChainWithUnchangedWrites` show matched stages that tracked a write without changing the value. The opt-in walk adds an `'unchanged-write'` edge to `CausalEdgeWithUnchangedWrites`. The default `causalChain` and `CausalEdge` keep the existing `data` and `control` kinds.
+
+### Changed
+
+- Reading a single replay stop with `stateAt` avoids copying plain objects and arrays twice. A replay cursor still returns an independent snapshot at each stop.
+
+### Fixed
+
+- Keep tracked reads of unset keys when walking saved execution trees, so causal walks see the same read names before and after a JSON round-trip.
+- Read cause records with long text payloads, including tool results and messages. Keep record shape limits and report truncation when a selected text comparison exceeds its work budget.
+- Cause explanations exclude the investigated node from its own alternatives.
+- Source-link readers use recorded write paths to identify overlap with tracked read windows.
+
 ## Unreleased
 
 ### Added
