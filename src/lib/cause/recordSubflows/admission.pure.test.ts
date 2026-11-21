@@ -196,7 +196,7 @@ describe('pure bounded metadata admission', () => {
     g.log[1].phase = 'exit';
     refused(g);
   });
-  it('charges the suffix to the shared budget by commit and path comparison', () => {
+  it('charges the shared index, later execution bundles and each path comparison', () => {
     const f = fixture();
     const start = 10000;
     const baseline = { left: start };
@@ -207,10 +207,12 @@ describe('pure bounded metadata admission', () => {
       { ...later, idx: 3, phase: 'exit' },
       { ...later, idx: 4, phase: 'repeat', trace: [{ path: 'other', verb: 'set' }] },
     );
-    const at = { left: start - baseline.left + 4 };
+    // Index the three added bundles, then visit the two matching bundles and compare one path.
+    const extraWork = 3 + 2 + 1;
+    const at = { left: start - baseline.left + extraWork };
     expect(prepareRecordSubflows(f.inventory, parent, f.log, at, 32).record).toBeDefined();
     expect(at.left).toBe(0);
-    const below = { left: start - baseline.left + 3 };
+    const below = { left: start - baseline.left + extraWork - 1 };
     expect(prepareRecordSubflows(f.inventory, parent, f.log, below, 32)).toEqual({ gaps: ['node-limit'] });
     expect(f.log).toHaveLength(5);
   });

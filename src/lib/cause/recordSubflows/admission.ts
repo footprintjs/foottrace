@@ -1,6 +1,6 @@
 import type { GapCode } from '../../evidence/codes.js';
 import type { LogAddress } from '../../memory/eventPosition.js';
-import { relation } from '../../memory/keyPaths.js';
+import { lowerBound, relation } from '../../memory/keyPaths.js';
 import type { CommitBundle } from '../../memory/types.js';
 import { RecordRefusal, recordRefusalCode, spend } from '../recordValidation.js';
 import { isNativeChild, nativeParentOf } from './identity.js';
@@ -98,6 +98,20 @@ function writtenAt(log: readonly CommitBundle[], id: string, index: number, path
   return row;
 }
 
+function indexOutputCommits(log: readonly CommitBundle[], budget: { left: number }): Map<string, number[]> {
+  const indexes = new Map<string, number[]>();
+  for (let index = 0; index < log.length; index++) {
+    spend(budget, 1);
+    const { runtimeStageId } = log[index];
+    const execution = indexes.get(runtimeStageId);
+    if (execution) execution.push(index);
+    else indexes.set(runtimeStageId, [index]);
+  }
+  return indexes;
+}
+
+type OutputCommitIndexes = (executionId: string) => readonly number[];
+
 /** A continuation of the same execution can supersede a mapped write. Later visits are independent. */
 function checkLaterOutputWrites(
   log: readonly CommitBundle[],
@@ -105,12 +119,14 @@ function checkLaterOutputWrites(
   executionId: string,
   mapped: readonly RecordHandoffWrite[],
   budget: { left: number },
+  outputCommitIndexes: OutputCommitIndexes,
 ): void {
   if (mapped.length === 0) return;
-  for (let index = targetIndex + 1; index < log.length; index++) {
+  const indexes = outputCommitIndexes(executionId);
+  for (let offset = lowerBound(indexes, targetIndex + 1); offset < indexes.length; offset++) {
     spend(budget, 1);
-    const bundle = log[index];
-    if (bundle.runtimeStageId !== executionId || bundle.phase === 'exit') continue;
+    const bundle = log[indexes[offset]];
+    if (bundle.phase === 'exit') continue;
     for (const entry of bundle.trace) {
       for (const write of mapped) {
         spend(budget, 1);
@@ -127,6 +143,7 @@ function outputHandoff(
   id: string,
   log: readonly CommitBundle[],
   budget: { left: number },
+  outputCommitIndexes: OutputCommitIndexes,
 ): RecordOutputHandoff {
   const state = admission(budget),
     raw = object(value, HANDOFF_FIELDS, [], state);
@@ -150,7 +167,7 @@ function outputHandoff(
     (limits.includes('privacy-active') && mapped.some((write) => write.reads.length))
   )
     return refuse();
-  checkLaterOutputWrites(log, commitIdx, runtimeStageId, mapped, budget);
+  checkLaterOutputWrites(log, commitIdx, runtimeStageId, mapped, budget, outputCommitIndexes);
   return Object.freeze({
     version: 1,
     attribution: 'observed-read-prefix',
@@ -215,6 +232,7 @@ function mount(
   ids: Set<string>,
   children: Set<string>,
   gaps: Set<GapCode>,
+  outputCommitIndexes: OutputCommitIndexes,
 ): RecordSubflowMount {
   const raw = object(value, ['runtimeStageId', 'child'], ['inputHandoff', 'outputHandoff'], state);
   const runtimeStageId = execution(raw.runtimeStageId, state),
@@ -231,7 +249,17 @@ function mount(
       ? { inputHandoff: inputHandoff(raw.inputHandoff, parent, child, runtimeStageId, log, state.budget, gaps) }
       : {}),
     ...(Object.hasOwn(raw, 'outputHandoff')
-      ? { outputHandoff: outputHandoff(raw.outputHandoff, parent, child, runtimeStageId, log, state.budget) }
+      ? {
+          outputHandoff: outputHandoff(
+            raw.outputHandoff,
+            parent,
+            child,
+            runtimeStageId,
+            log,
+            state.budget,
+            outputCommitIndexes,
+          ),
+        }
       : {}),
   });
 }
@@ -337,10 +365,16 @@ export function prepareRecordSubflows(
     const ids = new Set<string>(),
       children = new Set<string>(),
       targets = new Set<string>();
+    // The lazy index is shared by every output handoff in this admission.
+    let outputIndex: Map<string, number[]> | undefined;
+    const outputCommitIndexes: OutputCommitIndexes = (executionId) => {
+      outputIndex ??= indexOutputCommits(log, budget);
+      return outputIndex.get(executionId) ?? [];
+    };
     const mounts = list(
       raw.mounts,
       maximumScopes,
-      (entry) => mount(entry, parent, log, state, ids, children, gaps),
+      (entry) => mount(entry, parent, log, state, ids, children, gaps, outputCommitIndexes),
       state,
     );
     const collections = list(
