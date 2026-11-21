@@ -14,7 +14,16 @@ import { executionIndexOf } from '../ids/runtimeStageId.js';
 import type { LogAddress } from '../memory/eventPosition.js';
 import type { UntrackedSource } from '../memory/types.js';
 import type { StoredLog } from '../time-travel/storedRecord.js';
-import { admitAbout, admitCollects, admitDecision, admitSeq, admitStage, admitStop, admitUntracked } from './admit.js';
+import {
+  admitAbout,
+  admitCollects,
+  admitDecision,
+  admitLoop,
+  admitSeq,
+  admitStage,
+  admitStop,
+  admitUntracked,
+} from './admit.js';
 import { type Admission, executionId, ownField, spend } from './fields.js';
 import {
   type CommitAbout,
@@ -22,6 +31,8 @@ import {
   isRunNoteKind,
   type LogCollects,
   RUN_EVIDENCE_VERSION,
+  RUN_LOOP_EVIDENCE_VERSION,
+  type RunLoopNote,
   type RunNoteKind,
 } from './kinds.js';
 import type { RunEvidenceUnread, RunEvidenceWhy, StoredDecision, StoredStop } from './rows.js';
@@ -44,6 +55,7 @@ const NOTE_CHANNELS: Record<RunNoteKind, readonly Channel[]> = {
   'run.decision': ['decisions', 'control'],
   'run.stop': ['stops'],
   'run.stage': ['stages', 'control'],
+  'run.loop': ['control'],
 };
 
 /** One execution as one log saw it, from one row. */
@@ -78,6 +90,7 @@ export interface LogFold {
   readonly edges: LocalEdge[];
   decisions: { readonly row: StoredDecision; readonly index: number }[];
   readonly stops: StoredStop[];
+  readonly loops: { readonly note: RunLoopNote; readonly index: number }[];
   readonly seqs: Set<number>;
   maxSeq: number;
   runNotes: number;
@@ -95,6 +108,11 @@ function refused(fold: LogFold, channels: readonly Channel[], index: number, rea
     if (held === undefined) fold.taint.set(channel, new Set([code]));
     else held.add(code);
   }
+}
+
+/** Keep an inconsistent hop out of control without dropping other channels. */
+export function refuseLoop(fold: LogFold, index: number): void {
+  refused(fold, NOTE_CHANNELS['run.loop'], index, 'run.loop: no matching re-entry for this hop', 'invalid-data');
 }
 
 /** Does this log hold evidence? Absent, malformed and newer all answer no, each with its own name. */
@@ -129,6 +147,7 @@ export function newFold(log: StoredLog, includeOutsideInputs = false): LogFold {
     edges: [],
     decisions: [],
     stops: [],
+    loops: [],
     seqs: new Set(),
     maxSeq: -1,
     runNotes: 0,
@@ -227,6 +246,9 @@ function readNote(fold: LogFold, entry: unknown, index: number, a: Admission): v
       fold.decisions.push({ row: Object.freeze({ seq, ...admitDecision(data, a), address: fold.address }), index });
     } else if (kind === 'run.stop') {
       fold.stops.push(Object.freeze({ seq, ...admitStop(data, a), address: fold.address }));
+    } else if (kind === 'run.loop') {
+      if (fold.collects!.v < RUN_LOOP_EVIDENCE_VERSION) throw new Refusal('run.loop: requires version 2');
+      fold.loops.push({ note: admitLoop(data, a), index });
     } else {
       fold.edges.push({ ...admitStage(data, a), from: 'stage', index });
     }

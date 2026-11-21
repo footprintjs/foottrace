@@ -62,6 +62,7 @@ export type {
   CommitAbout,
   LogCollects,
   RunDecisionNote,
+  RunLoopNote,
   RunNoteData,
   RunNoteKind,
   RunStageNote,

@@ -74,7 +74,7 @@ describe('a file with no evidence reads not-collected', () => {
   it('a log from a newer writer: not-collected (newer-writer), its rows unread', () => {
     const entries = wholeRun()
       .entries()
-      .map((entry) => (entry.kind === 'opened' ? { ...entry, collects: { v: 2, reads: 'keys' } } : entry));
+      .map((entry) => (entry.kind === 'opened' ? { ...entry, collects: { v: 3, reads: 'keys' } } : entry));
     const evidence = evidenceOf(entries);
     expect(evidence.decisions).toEqual({ status: 'not-collected', rows: [], why: 'newer-writer' });
     expect(evidence.control('b#2').why).toBe('newer-writer');
