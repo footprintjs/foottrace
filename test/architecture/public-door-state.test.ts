@@ -42,7 +42,7 @@ const checks = `
   evidenceLog.noteRun('run.stage', { id: 'm#1', parent: 's#0' });
   evidenceLog.close('ok');
   const [opened, commit, note, closed] = evidenceSink.entries;
-  assert.deepEqual(opened.collects, { v: 1, reads: 'keys' });
+  assert.deepEqual(opened.collects, { v: 2, reads: 'keys' });
   assert.deepEqual(commit.about, { reads: ['a'] });
   assert.equal(note.data.seq, 0);
   assert.equal(closed.runNotes, 1);
