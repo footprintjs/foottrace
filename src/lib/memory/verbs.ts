@@ -177,22 +177,33 @@ export class RecordedPayload {
     private readonly overwrite: MemoryPatch,
     private readonly detach: boolean,
     private readonly only?: string[],
-    private readonly copyValue = structuredClone,
+    private readonly copyValue: <T>(value: T) => T = (value) => structuredClone(value),
   ) {}
 
   /** What a `set` places and an `append` adds: `overwrite[path]`, cloned when detaching. */
   value(segs: string[]): unknown {
     const recorded = nativeGet(this.overwrite, segs);
-    return this.detach ? this.copyValue(recorded) : recorded;
+    return this.detach ? this.copy(recorded) : recorded;
   }
 
   /** The accumulated merge delta at `path`: `updates[path]`, from the bundle's one copy. */
   delta(segs: string[]): unknown {
     if (this.deltas === undefined) {
       const source = this.only === undefined ? this.updates : atPath(this.updates, this.only);
-      this.deltas = this.detach ? this.copyValue(source) : source;
+      this.deltas = this.detach ? this.copy(source) : source;
     }
     return nativeGet(this.deltas, segs);
+  }
+
+  /**
+   * Call the copier with no receiver. A browser's native `structuredClone`
+   * throws `TypeError: Illegal invocation` when it is called as a method of
+   * anything but the global object, and a caller may hand it in as
+   * `copyValue`; Node does not check, so only a browser shows the fault.
+   */
+  private copy<T>(value: T): T {
+    const copyValue = this.copyValue;
+    return copyValue(value);
   }
 }
 
