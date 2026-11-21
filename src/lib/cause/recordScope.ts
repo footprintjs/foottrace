@@ -3,7 +3,6 @@ import { decodeRecordCapture } from './recordCapture.js';
 import { prepareReadSources } from './recordSources.js';
 import { prepareRecordSubflows, type PreparedRecordSubflows } from './recordSubflows.js';
 import type { LogAddress } from '../memory/eventPosition.js';
-import { placedAt } from '../memory/readWindow.js';
 import { RUN_EVIDENCE_LIMITS } from '../run-evidence/kinds.js';
 import type {
   PreparedRecordScope,
@@ -15,12 +14,11 @@ import {
   addressKey,
   addressOf,
   dataCopy,
-  bundleOf,
-  recordList,
   mapOf,
   marksOf,
   recordName,
   names,
+  prepareRecordLog,
   recordOwn,
   RecordRefusal,
   recordRefusalCode,
@@ -72,14 +70,8 @@ export function prepareRecordScope(
   sourceLinkPolicyIsSet = false,
 ): PreparedRecordScope {
   if (addressKey(addressOf(recordOwn(value, 'address'))) !== addressKey(address)) throw new RecordRefusal();
-  const rawLog = recordList(recordOwn(value, 'commitLog'), maximumCommits),
-    budget = { left: maximumFields };
-  let after = -1;
-  const log = rawLog.map((_, commitIndex) => {
-    const bundle = bundleOf(recordOwn(rawLog, String(commitIndex)), after, budget);
-    after = placedAt(bundle, after);
-    return bundle;
-  });
+  const budget = { left: maximumFields };
+  const log = prepareRecordLog(recordOwn(value, 'commitLog'), maximumCommits, budget);
   const reads = mapOf(
     recordOwn(value, 'reads'),
     maximumCommits,

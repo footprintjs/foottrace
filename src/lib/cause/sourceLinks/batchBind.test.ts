@@ -191,3 +191,16 @@ it('refuses a foreign list or malformed slot without running getters', () => {
   expect(cause.bindSourceLinkWrites(scope, inaccessible)).toEqual({ writes: [], complete: false });
   expect(throwing).toHaveBeenCalledTimes(1);
 });
+
+describe.each(encodings)('%s batch source-link cap', (encoding) => {
+  it('keeps a missing last slot at both 256 and 257 requested positions', () => {
+    const { scope, locators } = fixture(encoding, 2);
+    const missing = { ...locators[1], element: 999 };
+    const retained = Array.from({ length: 255 }, (_, index) => locators[index % 2]).concat(missing);
+    const writes = retained.map((locator) => cause.bindSourceLinkWrite(scope, locator));
+
+    expect(writes[255]).toBeUndefined();
+    expect(cause.bindSourceLinkWrites(scope, retained)).toEqual({ writes, complete: true });
+    expect(cause.bindSourceLinkWrites(scope, [...retained, locators[0]])).toEqual({ writes, complete: false });
+  });
+});

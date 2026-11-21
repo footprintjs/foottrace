@@ -2,6 +2,8 @@
 export { explain, attentionList } from './lib/cause/explain.js';
 export { pathTo } from './lib/cause/walk.js';
 export { largestDrop, mostAffected } from './lib/cause/strategies.js';
+export { recordScopesFromSnapshot } from './lib/cause/recordScopesFromSnapshot.js';
+export type { SnapshotRecordScopes, SnapshotScopeGap } from './lib/cause/recordScopesFromSnapshot.js';
 export { createRecordGraph } from './lib/cause/recordAdapter.js';
 export { createStoredRecordGraph } from './lib/cause/storedRecordAdapter.js';
 export type {
