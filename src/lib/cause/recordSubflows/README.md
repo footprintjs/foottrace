@@ -10,6 +10,11 @@ field, UTF-8 byte, name, list and reference limits. `admission.ts` binds actual
 parent writes and capture rules; `identity.ts` uses the canonical native ID
 codec. Adjacent tests exercise refusal, privacy, immutable copies and limits.
 
+When an output handoff maps writes, admission indexes that log's commit
+positions by execution once. A handoff only checks later bundles in the
+execution it names. The shared field budget charges index entries, visited
+continuations and path comparisons.
+
 The enclosing parent owns one finite mount inventory and one collection list.
 Every retained fan-out slot needs a real child identity. An unknown-child slot
 is omitted with a partial/missing-child-record limitation, never fabricated.
