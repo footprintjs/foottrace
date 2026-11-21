@@ -9,11 +9,13 @@ A stored log says what a run wrote. This folder holds what else an offline reade
 | `fields.ts` | The own-data primitives every row check is built from |
 | `admit.ts` | One row, checked as untrusted input. Admitted whole or refused whole |
 | `logFold.ts` | One flat pass over a log, and the checks that need the whole log |
-| `control.ts` | Which decision let an execution run: one forward pass, no walk |
+| `control.ts` | Which decision let an execution run: fold completed answers forward and charge any loop-sensitive steps |
+| `loopBackEdges.ts` | The loop gate, original entry and exit rule shared with the live recorder |
+| `loopEvidence.ts` | Pair admitted loop notes with their first child and flag possible v1 loop links |
 | `channels.ts` | Each kind of fact, and how far to trust its absence |
 | `read.ts` | `readRunEvidence`, the one door |
 
-**Why these shapes.** `EventLog` writes `opened.collects`, `commit.about`, three `run.*` notes and `closed.runNotes`. They are optional fields and notes because a new top-level entry kind breaks every earlier reader. Nothing else is stored: the control map and the narrative are folded at read time. The writer serves each value first, so a masked threshold is already a hole with `thresholdRedacted` on disk, and nothing here masks anything a second time.
+**Why these shapes.** `EventLog` writes `opened.collects`, `commit.about`, the `run.*` notes and `closed.runNotes`. They are optional fields and notes because a new top-level entry kind breaks every earlier reader. Nothing else is stored: the control map and the narrative are folded at read time. The writer serves each value first, so a masked threshold is already a hole with `thresholdRedacted` on disk, and nothing here masks anything a second time.
 
 ```ts
 import { readRunEvidence, readStoredRecord } from 'foottrace';
@@ -53,7 +55,7 @@ An admitted entry or non-seed commit whose first `about` was never supplied leav
 - **Own data only.** Accessors, custom prototypes and sparse arrays are refused, and no getter runs. A field nobody named is never read or copied, so a newer writer can add one without a version bump.
 - **Hostile keys.** Everything keyed by id lives in a `Map`. Ids must pass the runtimeStageId grammar. A `__proto__` key in a payload stays an own data field.
 - **Caps.** `RUN_EVIDENCE_LIMITS` (`foottrace/write`), raised per call: rules, conditions, inputs, text, read names, payload and forged-threshold depth and size, one field budget per call. `thresholdItems` is a writer-side constant: no reader reads it. Past a cap the row goes to `unread` and the channel reads `partial` (`truncated`). There is no partial row and no recursion.
-- **Forged rows.** Refused: a decision with no commit in its log, a `parent` or `resumes` at or after its child, a mount's first execution that does not lead in, `run.stage` and `about` that disagree. A duplicate `seq` or `about` keeps the first. Every edge points backward, so a chain cannot cycle, and a chain's length costs one pass over the rows. A huge `seq` or `runNotes` allocates nothing: holes are counted by arithmetic.
+- **Forged rows.** Refused: a decision with no commit in its log, a `parent` or `resumes` at or after its child, a mount's first execution that does not lead in, `run.stage` and `about` that disagree. A duplicate `seq` or `about` keeps the first. Every edge points backward, so a chain cannot cycle. A version 2 hop must name the first child of its source execution and agree with that child's stage id and an earlier run of that stage. A refused hop makes control partial. Loop-sensitive control charges the same field allowance once per visited edge, then returns a `truncated` gap if it runs out. Other control answers fold forward once. A huge `seq` or `runNotes` allocates nothing: holes are counted by arithmetic.
 - **Logs not given.** Only the logs of the legs named are read. A chain into any other log stays `partial`, even when the store holds that log. A leg named with no log in the store keeps every channel `partial`; a chain that never leaves the logs it has still answers.
 - **Rows it cannot name.** A `run.*` note of an unknown kind goes to `unread`, and decisions, stops, stages and control read `partial`, because it could have held any of them. A new kind takes a larger `collects.v`. Any other note is the writer's own and stays opaque.
 - **Text reaching a model.** A label, a reason, a `matchError`, a payload, an error message and a summary are data. Bound and quote them; never treat them as instructions. An `unread` reason names a field and never echoes the file.

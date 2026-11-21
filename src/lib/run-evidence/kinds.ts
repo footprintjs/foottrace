@@ -19,7 +19,8 @@ import { executionIndexOf } from '../ids/runtimeStageId.js';
  * The one integer `opened.collects.v` holds. Additive fields keep it; a reader of a larger `v` says `newer-writer`. A new
  * `run.*` kind takes a larger `v`: under this one, a reader must treat a kind it cannot name as a fact it may have lost.
  */
-export const RUN_EVIDENCE_VERSION = 1;
+export const RUN_LOOP_EVIDENCE_VERSION = 2;
+export const RUN_EVIDENCE_VERSION = RUN_LOOP_EVIDENCE_VERSION;
 
 /**
  * The bounds of a run's evidence. The writer applies the first three (`boundedAbout`) and must keep its notes
@@ -207,11 +208,18 @@ export interface RunStageNote {
   readonly resumes?: string;
 }
 
+/** A loop hop, recorded at its source with the resolved target's full stage id. */
+export interface RunLoopNote {
+  readonly id: string;
+  readonly target: string;
+}
+
 /** What each `run.*` note holds, by kind, before the log stamps its `seq`. */
 export interface RunNoteData {
   readonly 'run.decision': RunDecisionNote;
   readonly 'run.stop': RunStopNote;
   readonly 'run.stage': RunStageNote;
+  readonly 'run.loop': RunLoopNote;
 }
 
 /** The closed list `EventLog · noteRun` writes. The prefix keeps them apart from a writer's own `note('decision', …)`. */
@@ -221,9 +229,10 @@ const RUN_NOTE_KINDS: ReadonlySet<string> = /* @__PURE__ */ new Set<RunNoteKind>
   'run.decision',
   'run.stop',
   'run.stage',
+  'run.loop',
 ]);
 
-/** Is `kind` one of the three the log writes? */
+/** Is `kind` one of the run notes the log writes? */
 export function isRunNoteKind(kind: unknown): kind is RunNoteKind {
   return typeof kind === 'string' && RUN_NOTE_KINDS.has(kind);
 }

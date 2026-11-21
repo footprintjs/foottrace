@@ -86,6 +86,7 @@ export type {
 } from './lib/run-evidence/rows.js';
 export type { RunEvidenceLimits } from './lib/run-evidence/kinds.js';
 export { readRunEvidence } from './lib/run-evidence/read.js';
+export { LoopBackEdges } from './lib/run-evidence/loopBackEdges.js';
 export type {
   CausalChainOptions,
   CausalChainWithUnchangedWritesOptions,

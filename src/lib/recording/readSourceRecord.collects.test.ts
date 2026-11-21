@@ -43,7 +43,7 @@ describe('read-source record collection', () => {
     record.log.close('ok');
 
     expect(record.log.keepsEvidence).toBe(true);
-    expect(sink.entries[0]).toMatchObject({ kind: 'opened', collects: { v: 1, reads: 'keys' } });
+    expect(sink.entries[0]).toMatchObject({ kind: 'opened', collects: { v: 2, reads: 'keys' } });
     expect(sink.entries.flatMap((entry) => (entry.kind === 'note' ? [entry.data.seq] : []))).toEqual([0, 1]);
     expect(sink.entries.at(-1)).toMatchObject({ kind: 'closed', runNotes: 2 });
     const evidence = readRunEvidence(readStoredRecord(sink.entries), address.logRunId);
@@ -63,7 +63,7 @@ describe('read-source record collection', () => {
 
     const evidence = readRunEvidence(readStoredRecord(sink.entries), address.logRunId);
     expect(record.log.keepsEvidence).toBe(true);
-    expect(sink.entries[0]).toMatchObject({ collects: { v: 1, reads: 'off' } });
+    expect(sink.entries[0]).toMatchObject({ collects: { v: 2, reads: 'off' } });
     expect(evidence.reads).toEqual({ status: 'not-collected', rows: [], why: 'reads-off' });
     expect(evidence.stops).toMatchObject({ status: 'collected', rows: [{ by: 'break' }] });
     expect(sink.entries.at(-1)).toMatchObject({ runNotes: 1 });
@@ -198,7 +198,7 @@ describe('read-source record collection', () => {
     );
 
     expect(record.log.keepsEvidence).toBe(true);
-    expect(sink.entries[0]).toMatchObject({ collects: { v: 1, reads: 'keys' } });
+    expect(sink.entries[0]).toMatchObject({ collects: { v: 2, reads: 'keys' } });
     expect(reads).toBe(1);
     expect(declarations).toBe(1);
     expect(unknown).not.toHaveBeenCalled();

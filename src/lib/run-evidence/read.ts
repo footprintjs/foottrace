@@ -16,6 +16,7 @@ import { type ControlDecision, type ControlEdge, decisionLabel, foldControl } fr
 import type { Admission } from './fields.js';
 import { RUN_EVIDENCE_LIMITS, type RunEvidenceLimits } from './kinds.js';
 import { type LogFold, mergeEdges, newFold, walk } from './logFold.js';
+import { matchLoops } from './loopEvidence.js';
 import type { RunControl, RunEvidence, RunEvidenceWhy, StoredDecision, StoredStage, StoredStop } from './rows.js';
 
 export type { RunEvidence } from './rows.js';
@@ -89,6 +90,7 @@ export function foldRunEvidence(
   }
 
   const ordered = [...merged.values()].sort((x, y) => executionIndexOf(x.id) - executionIndexOf(y.id));
+  const { reentries, uncertain } = matchLoops(ordered, merged, held);
   const stageRows: StoredStage[] = ordered.map((edge) =>
     Object.freeze({
       id: edge.id,
@@ -110,8 +112,9 @@ export function foldRunEvidence(
     ...(edge.parent === undefined ? {} : { parent: edge.parent }),
     ...(edge.resumes === undefined ? {} : { resumes: edge.resumes }),
     gaps: controlGaps.get(edge.fold)!,
+    ...(uncertain.has(edge.id) && { possibleLoop: true }),
   }));
-  const answers = foldControl(edges, decisionMap, commits);
+  const answers = foldControl(edges, decisionMap, commits, reentries, budget);
 
   const nothing: RunEvidenceWhy | undefined =
     folds.length === 0 ? 'no-log' : held.length === 0 ? folds[0].why! : undefined;

@@ -623,7 +623,7 @@ describe('forged rows', () => {
 describe('the chain is bounded by the file', () => {
   it('a chain as long as the file costs one pass, with no recursion and no walk per query', () => {
     const length = 60_000;
-    const rows: unknown[] = [opened, commit('s#0', 0, {})];
+    const rows: unknown[] = [{ ...opened, collects: { ...opened.collects, v: 2 } }, commit('s#0', 0, {})];
     for (let i = 1; i < length; i++) rows.push(commit(`s#${i}`, i, { parent: `s#${i - 1}` }));
     rows.push(closed(length, 1), note('run.decision', decision({ id: 's#0', by: 'plain', chosen: 'b' })));
     const evidence = read(rows);
