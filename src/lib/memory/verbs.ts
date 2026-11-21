@@ -177,7 +177,8 @@ export class RecordedPayload {
     private readonly overwrite: MemoryPatch,
     private readonly detach: boolean,
     private readonly only?: string[],
-    private readonly copyValue = structuredClone,
+    // A browser native cannot be called with RecordedPayload as its receiver.
+    private readonly copyValue = <T>(value: T): T => structuredClone(value),
   ) {}
 
   /** What a `set` places and an `append` adds: `overwrite[path]`, cloned when detaching. */
