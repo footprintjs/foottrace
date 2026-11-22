@@ -1,10 +1,57 @@
 /** Match stored loop facts to the same re-entry rule the live recorder uses. */
-import { stageIdOf } from '../ids/runtimeStageId.js';
+import { executionIndexOf, stageIdOf } from '../ids/runtimeStageId.js';
 import { RUN_LOOP_EVIDENCE_VERSION } from './kinds.js';
 import { type LocalEdge, type LogFold, refuseLoop } from './logFold.js';
 import { LoopBackEdges } from './loopBackEdges.js';
 
 type OwnedEdge = LocalEdge & { readonly fold: LogFold };
+
+interface SeenStage {
+  lastIndex: number;
+  readonly forwardParents: Set<string>;
+}
+
+/**
+ * Within one log, a repeat is unexplained until either its own loop note pairs, or it arrives
+ * through a previously seen forward edge in a newer matched pass. A note in another branch or
+ * one from before this stage last ran cannot explain it. V1 has no evidence of a matched pass.
+ */
+function unexplainedRepeats(
+  edges: readonly OwnedEdge[],
+  reentries: ReadonlyMap<string, LoopBackEdges>,
+): ReadonlySet<string> {
+  const uncertain = new Set<string>();
+  const seen = new Map<LogFold, Map<string, SeenStage>>();
+  const passAt = new Map<string, number>();
+  for (const edge of edges) {
+    const { id, parent, resumes, fold } = edge;
+    const index = executionIndexOf(id);
+    const stage = stageIdOf(id);
+    const stages = seen.get(fold) ?? new Map<string, SeenStage>();
+    seen.set(fold, stages);
+    const previous = stages.get(stage);
+    const matched = reentries.has(id);
+    const up = resumes ?? parent;
+    const pass = matched ? index : up === undefined ? undefined : passAt.get(up);
+    if (pass !== undefined) passAt.set(id, pass);
+    const held = previous ?? { lastIndex: index, forwardParents: new Set<string>() };
+
+    if (parent !== undefined && resumes === undefined && !matched) {
+      const fromStage = stageIdOf(parent);
+      const explained =
+        previous === undefined ||
+        (fold.collects!.v >= RUN_LOOP_EVIDENCE_VERSION &&
+          pass !== undefined &&
+          pass > previous.lastIndex &&
+          previous.forwardParents.has(fromStage));
+      if (explained) held.forwardParents.add(fromStage);
+      else uncertain.add(id);
+    }
+    held.lastIndex = index;
+    stages.set(stage, held);
+  }
+  return uncertain;
+}
 
 export function matchLoops(
   edges: readonly OwnedEdge[],
@@ -44,22 +91,9 @@ export function matchLoops(
   }
 
   const rules = new Map<string, LoopBackEdges>();
-  const seen = new Map<LogFold, Set<string>>();
   const reentries = new Map<string, LoopBackEdges>();
-  const uncertain = new Set<string>();
-  for (const edge of edges) {
+  for (const edge of hasNotes ? edges : []) {
     const { logRunId } = edge.fold.address;
-    const version = edge.fold.collects!.v;
-    if (version < RUN_LOOP_EVIDENCE_VERSION) {
-      const stages = seen.get(edge.fold) ?? new Set<string>();
-      seen.set(edge.fold, stages);
-      const stage = stageIdOf(edge.id);
-      if (edge.parent !== undefined && edge.resumes === undefined && stages.has(stage)) uncertain.add(edge.id);
-      stages.add(stage);
-    }
-
-    if (!hasNotes) continue;
-
     // A live recorder starts fresh for a new leg. A note can only name a re-entry within its own leg.
     const rule = rules.get(logRunId) ?? new LoopBackEdges();
     rules.set(logRunId, rule);
@@ -70,5 +104,5 @@ export function matchLoops(
     if (rule.has(edge.id)) reentries.set(edge.id, rule);
     else refuseLoop(hop.fold, hop.index);
   }
-  return { reentries, uncertain };
+  return { reentries, uncertain: unexplainedRepeats(edges, reentries) };
 }

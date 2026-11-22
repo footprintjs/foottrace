@@ -11,7 +11,7 @@ A stored log says what a run wrote. This folder holds what else an offline reade
 | `logFold.ts` | One flat pass over a log, and the checks that need the whole log |
 | `control.ts` | Which decision let an execution run: fold completed answers forward and charge any loop-sensitive steps |
 | `loopBackEdges.ts` | The loop gate, original entry and exit rule shared with the live recorder |
-| `loopEvidence.ts` | Pair admitted loop notes with their first child and flag possible v1 loop links |
+| `loopEvidence.ts` | Pair admitted loop notes with their first child and flag unexplained re-entries |
 | `channels.ts` | Each kind of fact, and how far to trust its absence |
 | `read.ts` | `readRunEvidence`, the one door |
 
@@ -43,6 +43,8 @@ A file with no `collects`, including every file an older writer made, reads `not
 `collected` with no decision means no declared decider or selector ran. An `if` inside a stage is not a decision and was never recorded.
 
 `control(id)` never says ungoverned by accident. No `decider` under `collected` means a whole chain to the true root. A parentless execution that is not the root reads `partial` (`resumed-leg`). A parent no given log holds reads `partial` (`log-not-given`). A child that only a stage with no `about` could tell apart from a branch entry reads `partial` (`no-about`), with no `decider`. A stage with no `about` reads `not-collected` (`no-about`). An id no given log committed reads `not-collected` (`unknown-execution`). Following `resumes` reads `conservative`, because stages after a re-entry may be over-attributed to the branch it continued.
+
+A repeated stage whose incoming path has no evidence explaining the repeat also reads `partial` with `conservative`. In version 2 a matched hop explains its re-entry. A previously seen forward edge in that newer matched pass explains a repeat in the body. An absent or refused note cannot by itself establish that no loop occurred. A version 1 log has no hop notes, so each possible re-entry stays conservative.
 
 `about.reads` joins `bundle.untrackedSources`, which reads `partial` (`untracked-input`): that stage also read what no name shows.
 

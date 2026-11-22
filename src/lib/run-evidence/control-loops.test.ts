@@ -25,6 +25,32 @@ describe('stored control across actual engine loop records', () => {
     }
   });
 
+  it.each(loopFixtures)('$name in $commitValues cannot claim exact control after an omitted hop', (fixture) => {
+    const complete = readRunEvidence(readStoredRecord(loopRecord(fixture, 2)), fixture.legs);
+    const hops = Object.entries(fixture.loops);
+    const missing = (kept: Readonly<Record<string, string>>) =>
+      readRunEvidence(readStoredRecord(loopRecord(fixture, 2, kept)), fixture.legs);
+
+    const without = missing({});
+    expect(without.unread).toEqual([]);
+    for (const { id } of fixture.live) {
+      const expected = complete.control(id);
+      const saved = without.control(id);
+      if (expected.decider !== saved.decider) {
+        expect([id, saved.status, saved.gaps]).toEqual([id, 'partial', ['conservative']]);
+      }
+    }
+
+    for (const [dropped] of hops) {
+      const withoutOne = missing(Object.fromEntries(hops.filter(([source]) => source !== dropped)));
+      expect(withoutOne.unread).toEqual([]);
+      const reentry = fixture.live.find(({ parent }) => parent === dropped);
+      expect(reentry, dropped).toBeDefined();
+      const result = withoutOne.control(reentry!.id);
+      expect([dropped, result.status, result.gaps]).toEqual([dropped, 'partial', ['conservative']]);
+    }
+  });
+
   it.each(paused)('$name in $commitValues follows resumes without treating the stand-in as a hop', (fixture) => {
     const evidence = readRunEvidence(readStoredRecord(loopRecord(fixture, 2)), fixture.legs);
     const [standIn, stopped] = Object.entries(fixture.resumes)[0];
@@ -74,7 +100,7 @@ describe('stored control across actual engine loop records', () => {
         parent = gate;
       }
     }
-    for (let i = 0; i < tail; i++) add('after');
+    for (let i = 0; i < tail; i++) add(`after-${i}`);
     const next = parent!;
     s.close(log);
 
@@ -95,7 +121,7 @@ describe('stored control across actual engine loop records', () => {
   ])('refuses a loop note with $name', ({ loops }) => {
     const evidence = readRunEvidence(readStoredRecord(loopRecord(rememberedLoop, 2, loops)), 'r');
     expect(evidence.unread).toEqual([expect.objectContaining({ reason: expect.stringContaining('run.loop') })]);
-    expect(evidence.control('after#7')).toMatchObject({ status: 'partial', gaps: ['invalid-data'] });
+    expect(evidence.control('after#7')).toMatchObject({ status: 'partial', gaps: ['invalid-data', 'conservative'] });
     expect(evidence.decisions.status).toBe('collected');
   });
 });

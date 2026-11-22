@@ -459,7 +459,7 @@ fields or notes, so a reader that knows none of them reads the same record.
 | `note` `run.loop` | `{ seq, id, target }`, one per actual loop hop, where `id` is the source execution and `target` is the full stage id resolved by the writer. |
 | `closed.runNotes` | How many `run.*` notes the log wrote. A lost tail shows here, a lost note as a hole in `seq`. |
 
-The `run.` prefix is reserved. A reader treats a `run.*` kind it cannot name as a fact it may have lost, so a new kind takes a larger `collects.v`. Loop notes begin at version 2. Control through a possible loop re-entry in version 1 reads `partial` with a `conservative` gap.
+The `run.` prefix is reserved. A reader treats a `run.*` kind it cannot name as a fact it may have lost, so a new kind takes a larger `collects.v`. Loop notes begin at version 2. Control through an unexplained possible loop re-entry reads `partial` with a `conservative` gap in both versions.
 
 The writer serves every value before it reaches the log; the log masks nothing.
 An adapter that copies named fields must copy `collects`, `about` and `runNotes`;

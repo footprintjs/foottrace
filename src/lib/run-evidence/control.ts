@@ -28,7 +28,7 @@ export interface ControlEdge {
   readonly id: string;
   readonly parent?: string;
   readonly resumes?: string;
-  /** A v1 re-execution without a stored reason for the hop. */
+  /** A repeated execution without recorded evidence explaining the hop. */
   readonly possibleLoop?: true;
   readonly gaps: readonly GapCode[];
 }
