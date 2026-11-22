@@ -159,13 +159,19 @@ export function nativeValueUses(program: ts.Program, source: ts.SourceFile, file
   return found;
 }
 
+/**
+ * Type-checking the whole source tree with the DOM library takes about 1.7 s on a laptop and passed the 5 s default
+ * on the hosted runners while the rest of the suite ran beside it, so this one test states its own limit.
+ */
+const SOURCE_SCAN_TIMEOUT_MS = 60_000;
+
 describe('the native receiver rule', () => {
   it('src/ calls every host function directly', () => {
     const files = sourceFiles(join(ROOT, 'src'));
     const program = programOf(files);
     const found = files.flatMap((file) => nativeValueUses(program, program.getSourceFile(file)!, relative(ROOT, file)));
     expect(found).toEqual([]);
-  });
+  }, SOURCE_SCAN_TIMEOUT_MS);
 
   const refused: [string, string][] = [
     ['a default constructor value (2.3.0)', 'class A { constructor(private readonly copy = structuredClone) {} }'],
