@@ -147,10 +147,12 @@ const probe: Record<Boundary, (size: number, above: boolean) => void | Promise<v
     }
   },
   storedAddress(size, above) {
+    const logRunId = 'r'.repeat(size);
     const result = readStoredRecord([
-      { kind: 'opened', at: 0, address: { logRunId: 'r'.repeat(size), drillPath: [] }, initialState: {} },
+      { kind: 'opened', at: 0, address: { logRunId, drillPath: [] }, initialState: {} },
     ]);
-    expect(result.unread.map(({ reason }) => reason)).toEqual(
+    expect(result.root(logRunId) !== undefined).toBe(!above);
+    expect(result[readerLimits.storedAddress.reason].map(({ reason }) => reason)).toEqual(
       above ? [`address is longer than the reader's limit of ${readerLimits.storedAddress.maximum} characters`] : [],
     );
   },
@@ -160,3 +162,46 @@ for (const name of Object.keys(readerLimits) as Boundary[]) {
   const { maximum } = readerLimits[name];
   it.each([-1, 0, 1])(`${name} at limit offset %i`, (offset) => probe[name](maximum + offset, offset > 0));
 }
+
+it('keeps the allowance for other channels when an optional initial-state copy is refused', () => {
+  const selected = { ...output, commitIdx: 2 };
+  const link = linkFor(row, selected, { ...locator, commitIdx: 2 });
+  const initial = Object.fromEntries(Array.from({ length: 500 }, (_, index) => [`k${index}`, index]));
+  const scope = {
+    ...scopeFor(
+      initial,
+      [
+        bundle(0, 'seed', { seed: 'fixture' }),
+        servedWrite(1, [{ key: 'seed' }]),
+        bundle(2, 'door', { answer: 1, evidence: [row] }),
+      ],
+      [link],
+    ),
+    subflows: { version: 1, status: 'captured', mounts: [], collections: [] } as const,
+  };
+  const control = prepareRecordScope(scope, address, 256, 200);
+  const prepared = prepareRecordScope(
+    {
+      ...scope,
+      readSources: {
+        record: {
+          version: 1,
+          address,
+          segment: 1,
+          status: 'captured',
+          occurrences: [],
+          gaps: [],
+          limits: { maxOccurrences: 32, maxPerExecution: 32, maxBytes: 16384, maxOrigins: 32, maxStaging: 32 },
+        },
+        executions: [],
+      },
+    },
+    address,
+    256,
+    200,
+  );
+  expect(prepared.readSources?.gaps).toEqual(['node-limit']);
+  expect(control.sourceLinks?.links).toHaveLength(1);
+  expect(prepared.sourceLinks).toEqual(control.sourceLinks);
+  expect(prepared.subflows).toEqual(control.subflows);
+});

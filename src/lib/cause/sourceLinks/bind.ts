@@ -1,7 +1,16 @@
 import { readerLimits } from '../../evidence/readerLimits.js';
 import { placedAt } from '../../memory/readWindow.js';
 import type { CommitBundle } from '../../memory/types.js';
-import { bundleOf, dataCopy, mapOf, names, recordList, recordOwn, recordRefusalCode } from '../recordValidation.js';
+import {
+  bundleOf,
+  dataCopy,
+  mapOf,
+  names,
+  recordList,
+  recordOwn,
+  recordRefusalCode,
+  type RecordBudget,
+} from '../recordValidation.js';
 import { rowLocation } from './admission.js';
 import { sourceLinkReplay, type SourceLinkReplay } from './replay.js';
 import { readSourceLinkRow } from './rows.js';
@@ -65,7 +74,7 @@ function locatorOf(value: unknown): SourceLinkRowLocation | undefined {
   }
 }
 
-function replayForBinding(scope: BindingScope, budget: { left: number }): SourceLinkReplay | undefined {
+function replayForBinding(scope: BindingScope, budget: RecordBudget): SourceLinkReplay | undefined {
   const source = recordList(recordOwn(scope, 'commitLog'), readerLimits.causeCommits.maximum);
   let prior = -1;
   const log: CommitBundle[] = source.map((entry) => {
@@ -117,7 +126,7 @@ export function bindSourceLinkWrites(scope: BindingScope, locators: readonly Sou
   const writes = Array<SourceLinkWrite | undefined>(requested.length).fill(undefined);
   if (!requested.some((where) => where !== undefined)) return batchResult(writes, reason);
 
-  const budget = { left: readerLimits.binderWork.maximum };
+  const budget = { left: readerLimits.binderWork.maximum, workExhaustion: readerLimits.binderWork.reason };
   let replay: SourceLinkReplay | undefined;
   try {
     replay = replayForBinding(scope, budget);

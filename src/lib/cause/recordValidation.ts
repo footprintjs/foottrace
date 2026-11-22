@@ -28,8 +28,14 @@ export {
   recordRefusalCode,
   spend,
 } from '../evidence/recordData.js';
+
+export interface RecordBudget {
+  left: number;
+  readonly workExhaustion?: 'truncated';
+}
+
 /** Iterative bounded copy: data descriptors only, no getters/toJSON/prototypes or opaque class instances. */
-export function dataCopy(value: unknown, budget: { left: number }, separatelyReadKey?: string): unknown {
+export function dataCopy(value: unknown, budget: RecordBudget, separatelyReadKey?: string): unknown {
   const leaf = (v: unknown): boolean => v === null || typeof v !== 'object';
   const check = (v: unknown): void => {
     spend(budget, 1);
@@ -75,8 +81,8 @@ export function dataCopy(value: unknown, budget: { left: number }, separatelyRea
     } catch {
       throw new RecordRefusal();
     }
-    // Charge the attempted work before refusing, without reading any more fields.
-    if (keys.length > budget.left) spend(budget, keys.length);
+    // Optional record channels can refuse a copy and still share the remaining allowance.
+    if (keys.length > budget.left) throw new RecordRefusal(budget.workExhaustion ?? 'node-limit');
     for (const key of keys) {
       if (key.length > 1024) throw new RecordRefusal('node-limit');
       const v = recordOwn(from, key);
@@ -98,7 +104,7 @@ export function copyRecordValue<T>(value: T): T {
   return dataCopy(value, { left: Number.MAX_SAFE_INTEGER }) as T;
 }
 /** `after`: the index of the copy before this one in the log (-1 for the first); the copy's own rises past it. */
-export function bundleOf(value: unknown, after: number, budget: { left: number }): CommitBundle {
+export function bundleOf(value: unknown, after: number, budget: RecordBudget): CommitBundle {
   const runtimeStageId = recordName(recordOwn(value, 'runtimeStageId')),
     stageId = recordName(recordOwn(value, 'stageId'));
   const trace = recordList(recordOwn(value, 'trace'), readerLimits.traceRows.maximum).map((_, i) => {

@@ -148,28 +148,33 @@ it('returns known misses for ambiguous reads, unaccounted base and union positio
   compare({ scope: readScope, locators: [{ ...locators[0], commitIdx: 2 }] });
 });
 
-it('preserves the answered prefix and leaves the rest unknown when replay work runs out', () => {
-  const { scope, locators } = fixture('delta', 3);
-  const text = 'x'.repeat(1_100_000);
-  const initialState = { ...scope.initialState, profile: { chosen: text } };
-  const log = scope.commitLog as readonly ReturnType<typeof bundle>[];
-  const extreme = witness({ key: 'seed' }, { key: 'profile', pointer: '/chosen', checkedIn: 'written' });
-  const second = log[2];
-  const commitLog = log.map((entry, index) =>
-    index === 2
-      ? {
-          ...second,
-          overwrite: { ...second.overwrite, profile: { chosen: text }, evidence: [extreme] },
-          trace: [...second.trace, { path: 'profile', verb: 'set' as const }],
-        }
-      : entry,
-  );
-  expect(cause.bindSourceLinkWrites({ ...scope, initialState, commitLog }, locators)).toEqual({
-    writes: [{ commitIdx: 1, runtimeStageId: 'door-0' }, undefined, undefined],
-    complete: false,
-    reason: 'truncated',
-  });
-});
+it.each([3, readerLimits.binderLocators.maximum + 1])(
+  'preserves the answered prefix when replay work runs out for %i locators',
+  (size) => {
+    const { scope, locators } = fixture('delta', 3);
+    const text = 'x'.repeat(1_100_000);
+    const initialState = { ...scope.initialState, profile: { chosen: text } };
+    const log = scope.commitLog as readonly ReturnType<typeof bundle>[];
+    const extreme = witness({ key: 'seed' }, { key: 'profile', pointer: '/chosen', checkedIn: 'written' });
+    const second = log[2];
+    const commitLog = log.map((entry, index) =>
+      index === 2
+        ? {
+            ...second,
+            overwrite: { ...second.overwrite, profile: { chosen: text }, evidence: [extreme] },
+            trace: [...second.trace, { path: 'profile', verb: 'set' as const }],
+          }
+        : entry,
+    );
+    const requested = Array.from({ length: size }, (_, index) => locators[Math.min(index, 2)]);
+    const admitted = Math.min(size, readerLimits.binderLocators.maximum);
+    expect(cause.bindSourceLinkWrites({ ...scope, initialState, commitLog }, requested)).toEqual({
+      writes: [{ commitIdx: 1, runtimeStageId: 'door-0' }, ...Array(admitted - 1).fill(undefined)],
+      complete: false,
+      reason: 'truncated',
+    });
+  },
+);
 
 it('refuses a foreign list or malformed slot without running getters', () => {
   const { scope, locators } = fixture('delta', 1);
