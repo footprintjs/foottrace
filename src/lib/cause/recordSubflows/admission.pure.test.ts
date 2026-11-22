@@ -196,6 +196,36 @@ describe('pure bounded metadata admission', () => {
     g.log[1].phase = 'exit';
     refused(g);
   });
+  it('charges the shared index, later execution bundles and each path comparison', () => {
+    const f = fixture();
+    const start = 10000;
+    const baseline = { left: start };
+    expect(prepareRecordSubflows(f.inventory, parent, f.log, baseline, 32).record).toBeDefined();
+    const later = f.log[1];
+    f.log.push(
+      { ...later, idx: 2, runtimeStageId: 'other#2' },
+      { ...later, idx: 3, phase: 'exit' },
+      { ...later, idx: 4, phase: 'repeat', trace: [{ path: 'other', verb: 'set' }] },
+    );
+    // Index the three added bundles, then visit the two matching bundles and compare one path.
+    const extraWork = 3 + 2 + 1;
+    const at = { left: start - baseline.left + extraWork };
+    expect(prepareRecordSubflows(f.inventory, parent, f.log, at, 32).record).toBeDefined();
+    expect(at.left).toBe(0);
+    const below = { left: start - baseline.left + extraWork - 1 };
+    expect(prepareRecordSubflows(f.inventory, parent, f.log, below, 32)).toEqual({ gaps: ['node-limit'] });
+    expect(f.log).toHaveLength(5);
+  });
+  it('skips the suffix when an output handoff maps no writes', () => {
+    const f = fixture();
+    f.output.writes = [];
+    const budget = { left: 10000 };
+    expect(prepareRecordSubflows(f.inventory, parent, f.log, budget, 32).record).toBeDefined();
+    const after = { left: 10000 };
+    f.log.push({ ...f.log[1], idx: 2, phase: 'repeat' });
+    expect(prepareRecordSubflows(f.inventory, parent, f.log, after, 32).record).toBeDefined();
+    expect(after.left).toBe(budget.left);
+  });
   it('refuses a future parent cutoff instead of borrowing a later write', () => {
     const f = fixture();
     f.input.parent.beforeCommitIdx = 2;

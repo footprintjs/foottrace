@@ -137,9 +137,11 @@ limitation codes; unknown versions, fields, aliases and inconsistent identities
 retain a fixed gap alongside safe local evidence.
 
 An output-v1 handoff identifies the actual parent mapping commit/path and the
-closed child snapshot's exclusive cutoff. An input handoff identifies the actual
-child seed commit/path and the parent's saved exclusive cutoff. The reader uses
-that prefix, so a later overwrite cannot replace the recorded source. Literal
+closed child snapshot's exclusive cutoff. A later non-exit commit by that same
+execution to the mapped path, an ancestor or a descendant invalidates the
+handoff with `invalid-data`. The local log remains available. An input handoff
+identifies the actual child seed commit/path and the parent's saved exclusive
+cutoff. The reader uses that prefix, so a later overwrite cannot replace the recorded source. Literal
 root names such as `a.b` remain literal; they are not split into nested paths.
 
 A native snapshot adapter supplies unique, immediate-child runtime-ID entries,
