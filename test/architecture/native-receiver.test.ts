@@ -166,12 +166,18 @@ export function nativeValueUses(program: ts.Program, source: ts.SourceFile, file
 const SOURCE_SCAN_TIMEOUT_MS = 60_000;
 
 describe('the native receiver rule', () => {
-  it('src/ calls every host function directly', () => {
-    const files = sourceFiles(join(ROOT, 'src'));
-    const program = programOf(files);
-    const found = files.flatMap((file) => nativeValueUses(program, program.getSourceFile(file)!, relative(ROOT, file)));
-    expect(found).toEqual([]);
-  }, SOURCE_SCAN_TIMEOUT_MS);
+  it(
+    'src/ calls every host function directly',
+    () => {
+      const files = sourceFiles(join(ROOT, 'src'));
+      const program = programOf(files);
+      const found = files.flatMap((file) =>
+        nativeValueUses(program, program.getSourceFile(file)!, relative(ROOT, file)),
+      );
+      expect(found).toEqual([]);
+    },
+    SOURCE_SCAN_TIMEOUT_MS,
+  );
 
   const refused: [string, string][] = [
     ['a default constructor value (2.3.0)', 'class A { constructor(private readonly copy = structuredClone) {} }'],
