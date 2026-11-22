@@ -2,6 +2,7 @@ import { viewStampFits } from '../memory/builtOn.js';
 import { admitStamps, placedAt } from '../memory/readWindow.js';
 import { readAttemptWindow } from '../evidence/readAttempts.js';
 import { parseAttemptId } from '../ids/attemptId.js';
+import { readerLimits } from '../evidence/readerLimits.js';
 /** Admission before the existing readers touch untrusted record fields. Payloads never leave this module's graph. */
 import type { CommitBundle } from '../memory/types.js';
 import { attention as marksOf, admissionCode, observePromise } from './validation.js';
@@ -74,7 +75,8 @@ export function dataCopy(value: unknown, budget: { left: number }, separatelyRea
     } catch {
       throw new RecordRefusal();
     }
-    if (keys.length > budget.left) throw new RecordRefusal('node-limit');
+    // Charge the attempted work before refusing, without reading any more fields.
+    if (keys.length > budget.left) spend(budget, keys.length);
     for (const key of keys) {
       if (key.length > 1024) throw new RecordRefusal('node-limit');
       const v = recordOwn(from, key);
@@ -99,7 +101,7 @@ export function copyRecordValue<T>(value: T): T {
 export function bundleOf(value: unknown, after: number, budget: { left: number }): CommitBundle {
   const runtimeStageId = recordName(recordOwn(value, 'runtimeStageId')),
     stageId = recordName(recordOwn(value, 'stageId'));
-  const trace = recordList(recordOwn(value, 'trace'), 128).map((_, i) => {
+  const trace = recordList(recordOwn(value, 'trace'), readerLimits.traceRows.maximum).map((_, i) => {
     const t = recordOwn(recordOwn(value, 'trace'), String(i)),
       path = recordName(recordOwn(t, 'path'), true),
       verb = recordOwn(t, 'verb');

@@ -96,6 +96,7 @@
   "src/lib/evidence/outsideInputs.ts": 0,
   "src/lib/evidence/codes.ts": 0,
   "src/lib/evidence/recordData.ts": 0,
+  "src/lib/evidence/readerLimits.ts": 0,
   "src/lib/evidence/requirementTypes.ts": 0,
   "src/lib/evidence/requirements.ts": 0,
   "src/lib/cause/ranking.ts": 0,

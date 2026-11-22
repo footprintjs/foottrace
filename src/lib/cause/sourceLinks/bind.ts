@@ -1,7 +1,8 @@
+import { readerLimits } from '../../evidence/readerLimits.js';
 import { placedAt } from '../../memory/readWindow.js';
 import type { CommitBundle } from '../../memory/types.js';
 import { bundleOf, dataCopy, mapOf, names, recordList, recordOwn, recordRefusalCode } from '../recordValidation.js';
-import { maximumSourceLinks, rowLocation } from './admission.js';
+import { rowLocation } from './admission.js';
 import { sourceLinkReplay, type SourceLinkReplay } from './replay.js';
 import { readSourceLinkRow } from './rows.js';
 import type { SourceLinkRow, SourceLinkRowLocation, SourceLinkWrite } from './types.js';
@@ -49,6 +50,8 @@ interface BindingScope {
 interface BatchBinding {
   readonly writes: readonly (SourceLinkWrite | undefined)[];
   readonly complete: boolean;
+  /** Present when a named read limit prevented the batch from completing. */
+  readonly reason?: 'node-limit' | 'truncated';
 }
 
 function locatorOf(value: unknown): SourceLinkRowLocation | undefined {
@@ -62,9 +65,8 @@ function locatorOf(value: unknown): SourceLinkRowLocation | undefined {
   }
 }
 
-function replayForBinding(scope: BindingScope): SourceLinkReplay | undefined {
-  const budget = { left: 1_000_000 };
-  const source = recordList(recordOwn(scope, 'commitLog'), 4096);
+function replayForBinding(scope: BindingScope, budget: { left: number }): SourceLinkReplay | undefined {
+  const source = recordList(recordOwn(scope, 'commitLog'), readerLimits.causeCommits.maximum);
   let prior = -1;
   const log: CommitBundle[] = source.map((entry) => {
     const bundle = bundleOf(entry, prior, budget);
@@ -78,9 +80,16 @@ function replayForBinding(scope: BindingScope): SourceLinkReplay | undefined {
   return sourceLinkReplay({ log, base, reads }, budget);
 }
 
-function exhausted(error: unknown): boolean {
+function bindingRefusal(error: unknown, budget: { left: number }): BatchBinding['reason'] {
   const code = recordRefusalCode(error);
-  return code === 'node-limit' || code === 'truncated';
+  if (code === 'truncated' || (code === 'node-limit' && budget.left < 0)) {
+    return readerLimits.binderWork.reason;
+  }
+  return code === 'node-limit' ? code : undefined;
+}
+
+function batchResult(writes: BatchBinding['writes'], reason?: BatchBinding['reason']): BatchBinding {
+  return { writes, complete: reason === undefined, ...(reason === undefined ? {} : { reason }) };
 }
 
 /**
@@ -88,33 +97,34 @@ function exhausted(error: unknown): boolean {
  * once and the replay is shared. Answers keep locator order and include one slot for each of
  * the first 256 locators. A missing or refused locator has no binding.
  *
- * An unreadable locator list produces no answers and is incomplete. If the locator cap or a
- * replay allowance is reached, the result is incomplete and unfilled slots are unknown.
+ * An unreadable locator list produces no answers and is incomplete. A count cap reports
+ * `node-limit`; exhausted record work reports `truncated`. Unfilled slots are still unknown.
  */
 export function bindSourceLinkWrites(scope: BindingScope, locators: readonly SourceLinkRowLocation[]): BatchBinding {
   let requested: (SourceLinkRowLocation | undefined)[];
-  let complete: boolean;
+  let reason: BatchBinding['reason'];
   try {
     if (!Array.isArray(locators)) return { writes: [], complete: false };
     const size = recordOwn(locators, 'length');
     if (typeof size !== 'number' || !Number.isSafeInteger(size) || size < 0) return { writes: [], complete: false };
-    const count = Math.min(size, maximumSourceLinks);
+    const count = Math.min(size, readerLimits.binderLocators.maximum);
     requested = Array.from({ length: count }, (_, index) => locatorOf(recordOwn(locators, String(index))));
-    complete = size === count;
+    if (size > count) reason = readerLimits.binderLocators.reason;
   } catch {
     return { writes: [], complete: false };
   }
 
   const writes = Array<SourceLinkWrite | undefined>(requested.length).fill(undefined);
-  if (!requested.some((where) => where !== undefined)) return { writes, complete };
+  if (!requested.some((where) => where !== undefined)) return batchResult(writes, reason);
 
+  const budget = { left: readerLimits.binderWork.maximum };
   let replay: SourceLinkReplay | undefined;
   try {
-    replay = replayForBinding(scope);
+    replay = replayForBinding(scope, budget);
   } catch (error) {
-    return { writes, complete: complete && !exhausted(error) };
+    return batchResult(writes, bindingRefusal(error, budget) ?? reason);
   }
-  if (!replay) return { writes, complete };
+  if (!replay) return batchResult(writes, reason);
 
   for (const [index, where] of requested.entries()) {
     if (where === undefined) continue;
@@ -123,10 +133,11 @@ export function bindSourceLinkWrites(scope: BindingScope, locators: readonly Sou
       if (row !== undefined && !replay.unionTouchesPosition(row.output, where.commitIdx))
         writes[index] = boundWrite(replay, row, where);
     } catch (error) {
-      if (exhausted(error)) return { writes, complete: false };
+      const refusal = bindingRefusal(error, budget);
+      if (refusal !== undefined) return batchResult(writes, refusal);
     }
   }
-  return { writes, complete };
+  return batchResult(writes, reason);
 }
 
 /**

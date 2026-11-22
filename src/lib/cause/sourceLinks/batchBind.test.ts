@@ -11,6 +11,7 @@ import {
   type Encoding,
 } from '../../../../test/fixtures/source-links/recordHarness.js';
 import * as replay from './replay.js';
+import { readerLimits } from '../../evidence/readerLimits.js';
 
 function fixture(encoding: Encoding, total: number, hidden = 'short') {
   const input = { key: 'seed' };
@@ -103,6 +104,7 @@ it('reports a scope limit instead of claiming that its rows do not bind', () => 
   expect(cause.bindSourceLinkWrites({ ...scope, commitLog: tooManyCommits }, locators)).toEqual({
     writes: [undefined],
     complete: false,
+    reason: 'node-limit',
   });
 });
 
@@ -114,6 +116,7 @@ it('stops at 256 locators without reading an accessor beyond that cap', () => {
   const result = cause.bindSourceLinkWrites(scope, requested);
   expect(getter).not.toHaveBeenCalled();
   expect(result.complete).toBe(false);
+  expect(result.reason).toBe('node-limit');
   expect(result.writes).toEqual(Array.from({ length: 256 }, () => ({ commitIdx: 1, runtimeStageId: 'door-0' })));
 });
 
@@ -164,6 +167,7 @@ it('preserves the answered prefix and leaves the rest unknown when replay work r
   expect(cause.bindSourceLinkWrites({ ...scope, initialState, commitLog }, locators)).toEqual({
     writes: [{ commitIdx: 1, runtimeStageId: 'door-0' }, undefined, undefined],
     complete: false,
+    reason: 'truncated',
   });
 });
 
@@ -192,6 +196,20 @@ it('refuses a foreign list or malformed slot without running getters', () => {
   expect(throwing).toHaveBeenCalledTimes(1);
 });
 
+it('names structural work exhaustion when a record object cannot fit the remaining allowance', () => {
+  const { scope, locators } = fixture('delta', 1);
+  const initialState = {
+    ...scope.initialState,
+    tail: Object.fromEntries(Array.from({ length: 200 }, (_, index) => [`entry${index}`, index])),
+    pad: Array<number>(499_950).fill(0),
+  };
+  expect(cause.bindSourceLinkWrites({ ...scope, initialState }, locators)).toEqual({
+    writes: [undefined],
+    complete: false,
+    reason: 'truncated',
+  });
+});
+
 describe.each(encodings)('%s batch source-link cap', (encoding) => {
   it('keeps a missing last slot at both 256 and 257 requested positions', () => {
     const { scope, locators } = fixture(encoding, 2);
@@ -201,6 +219,60 @@ describe.each(encodings)('%s batch source-link cap', (encoding) => {
 
     expect(writes[255]).toBeUndefined();
     expect(cause.bindSourceLinkWrites(scope, retained)).toEqual({ writes, complete: true });
-    expect(cause.bindSourceLinkWrites(scope, [...retained, locators[0]])).toEqual({ writes, complete: false });
+    expect(cause.bindSourceLinkWrites(scope, [...retained, locators[0]])).toEqual({
+      writes,
+      complete: false,
+      reason: 'node-limit',
+    });
   });
+});
+
+it('bounds replay work for repeated and distinct locators as the batch grows', () => {
+  const keys = Array.from({ length: 64 }, (_, index) => `answer-${index}`);
+  const evidence = keys.map((key) => witness({ key: 'seed' }, { key, checkedIn: 'written' }));
+  const outputs = Object.fromEntries(keys.map((key, index) => [key, index]));
+  const scope = scopeFor(
+    { seed: 'fixture' },
+    [servedWrite(0, [{ key: 'seed' }]), bundle(1, 'door', { ...outputs, evidence })],
+    [],
+  );
+  const distinct = keys.map((_, element) => ({ runtimeStageId: 'door', commitIdx: 1, key: 'evidence', element }));
+  const original = replay.sourceLinkReplay;
+  let afterIndex = 0;
+  const spy = vi.spyOn(replay, 'sourceLinkReplay').mockImplementation((...args) => {
+    const indexed = original(...args);
+    afterIndex = args[1].left;
+    return indexed;
+  });
+  const workOf = (locators: readonly SourceLinkRowLocation[]) => {
+    let visits = 0;
+    const observed = new Proxy(locators, {
+      getOwnPropertyDescriptor(target, key) {
+        if (typeof key === 'string' && /^\d+$/.test(key)) visits++;
+        return Reflect.getOwnPropertyDescriptor(target, key);
+      },
+    });
+    const result = cause.bindSourceLinkWrites(scope, observed);
+    expect(result.complete).toBe(true);
+    expect(result.writes.filter(Boolean)).toHaveLength(locators.length);
+    expect(visits).toBe(locators.length);
+    return afterIndex - spy.mock.calls.at(-1)![1].left;
+  };
+  try {
+    const sizes = [16, 32, 64];
+    const repeated = sizes.map((size) => workOf(Array.from({ length: size }, () => distinct[0])));
+    const different = sizes.map((size) => workOf(distinct.slice(0, size)));
+    expect(repeated).toEqual(sizes.map(() => repeated[0]));
+    expect(different[0]).toBeGreaterThan(0);
+    for (let i = 1; i < sizes.length; i++) {
+      expect(different[i]).toBeGreaterThan(different[i - 1]);
+      expect(different[i] / different[i - 1]).toBeLessThan(2.6);
+    }
+    expect(spy).toHaveBeenCalledTimes(2 * sizes.length);
+    expect(spy.mock.calls.every(([, budget]) => budget.left > 0 && budget.left < readerLimits.binderWork.maximum)).toBe(
+      true,
+    );
+  } finally {
+    spy.mockRestore();
+  }
 });
