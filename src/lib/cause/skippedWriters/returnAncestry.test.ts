@@ -47,7 +47,7 @@ it('does not report an executable return branch as skipped when its confirmed ho
   const options = { address, chart: graph, authority: { lookup: () => ({ capture, binding }) } };
   const result = await couldHaveChanged(recording, 'price', 4, options);
   expect(result.candidates).toEqual([]);
-  expect(result.gaps).toContain('loop-evidence');
+  expect(result.gaps).toEqual(['loop-evidence']);
 
   const beforeHop = await couldHaveChanged(recording, 'price', 2, options);
   expect(beforeHop.candidates).toMatchObject([{ decision: { id: 'choose#1' }, skippedEntry: 'again' }]);
@@ -97,24 +97,31 @@ it('keeps an uncertain return visible through a nested decision', async () => {
   expect(result.gaps).toEqual(expect.arrayContaining(['conservative', 'loop-evidence']));
 });
 
-it('withholds a matching loop when a recorded return has incomplete ancestry', async () => {
+it.each([
+  { boundary: 'a missing parent', parent: 'unrecorded#0' },
+  { boundary: 'a parentless non-root source', parent: undefined },
+])('withholds the earlier matching loop across $boundary', async ({ parent }) => {
   const writer = evidenceStore();
   writer.commit(['r'], 'body#0', {});
   writer.commit(['r'], 'choose#1', { parent: 'body#0' });
   writer.note(['r'], 'run.decision', { id: 'choose#1', by: 'plain', chosen: 'Exit' });
-  writer.commit(['r'], 'again#2', { parent: 'unrecorded#0' });
+  writer.commit(['r'], 'again#2', parent === undefined ? {} : { parent });
   writer.note(['r'], 'run.loop', { id: 'again#2', target: 'body' });
   writer.commit(['r'], 'body#3', { parent: 'again#2' });
+  writer.commit(['r'], 'choose#4', { parent: 'body#3' });
+  writer.note(['r'], 'run.decision', { id: 'choose#4', by: 'plain', chosen: 'Exit' });
+  writer.commit(['r'], 'exit#5', { parent: 'choose#4' });
   writer.close(['r']);
 
   const recording = readStoredRecord(writer.entries());
-  const capture = { recordingVersion: 'test/missing-ancestry', runId: 'r', address, from: 0, to: 4 };
+  expect(readRunEvidence(recording, 'r').control('again#2').status).toBe('partial');
+  const capture = { recordingVersion: 'test/missing-ancestry', runId: 'r', address, from: 0, to: 6 };
   const binding = { ...capture, version: 'footprint.skipped-chart.v1' as const, digest: await savedChartDigest(graph) };
-  const result = await couldHaveChanged(recording, 'price', 4, {
-    address,
-    chart: graph,
-    authority: { lookup: () => ({ capture, binding }) },
-  });
+  const options = { address, chart: graph, authority: { lookup: () => ({ capture, binding }) } };
+  const result = await couldHaveChanged(recording, 'price', 4, options);
   expect(result.candidates).toEqual([]);
   expect(result.gaps).toEqual(expect.arrayContaining(['conservative', 'loop-evidence']));
+
+  const afterExit = await couldHaveChanged(recording, 'price', 6, options);
+  expect(afterExit.candidates).toMatchObject([{ decision: { id: 'choose#4' }, skippedEntry: 'again' }]);
 });

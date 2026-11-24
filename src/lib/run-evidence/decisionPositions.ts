@@ -56,18 +56,15 @@ function attributeReturns(
   const unownedReturnCutoffs = new Map<string, number>();
   for (const { source, target, position, uncertain } of returns) {
     if (uncertain) gaps.add('conservative');
-    let ancestor: string | undefined = source;
+    let ancestor = source;
     let down = position;
+    let reachedRoot = false;
     // A nested decision can dispatch the return on behalf of an outer loop. Keep
     // each applicable ancestor and let the bound chart match the return target.
-    while (ancestor !== undefined) {
+    for (;;) {
       if (!charge(budget, 1)) return undefined;
       const edge = edges.get(ancestor);
-      if (!edge || edge.index >= down || edge.resumes !== undefined) {
-        gaps.add('conservative');
-        unownedReturnCutoffs.set(target, Math.max(unownedReturnCutoffs.get(target) ?? 0, position));
-        break;
-      }
+      if (!edge || edge.index >= down || edge.resumes !== undefined) break;
       const entry = decisions.get(ancestor);
       if (entry !== undefined) {
         if (entry >= position) gaps.add('conservative');
@@ -75,8 +72,17 @@ function attributeReturns(
         targets.add(target);
         returnTargets.set(ancestor, targets);
       }
+      if (edge.parent === undefined) {
+        // Match control's root rule. A parentless later execution is a resumed leg.
+        reachedRoot = executionIndexOf(edge.id) === 0;
+        break;
+      }
       down = edge.index;
       ancestor = edge.parent;
+    }
+    if (!reachedRoot) {
+      gaps.add('conservative');
+      unownedReturnCutoffs.set(target, Math.max(unownedReturnCutoffs.get(target) ?? 0, position));
     }
   }
   return { returnTargets, unownedReturnCutoffs };
