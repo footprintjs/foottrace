@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.4.0 — 2026-11-24
+
+### Added
+
+- Report `node-limit` when a count limit stops source-link batch binding and `truncated` when its work allowance runs out. Admitted bindings keep their original positions.
+
 ## 2.3.2 — 2026-11-22
 
 ### Fixed
