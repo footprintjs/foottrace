@@ -55,6 +55,7 @@
  */
 
 import { stageIdOf } from '../ids/runtimeStageId.js';
+import { readerLimits } from '../evidence/readerLimits.js';
 import type { LogAddress } from '../memory/eventPosition.js';
 import { LOG_OUTCOMES, type LogOutcome, type Meta, type RecordEntry } from '../memory/sink.js';
 import type { CommitBundle } from '../memory/types.js';
@@ -169,7 +170,7 @@ export const DEFAULT_LIMITS: Required<StoredRecordLimits> = Object.freeze({
   entries: 2 ** 24,
   missingCommits: 2 ** 20,
   drillDepth: 1024,
-  addressLength: 65_536,
+  addressLength: readerLimits.storedAddress.maximum,
 });
 
 /** The limits to read with: each a non-negative integer or `Infinity`, or a `RangeError` naming it. */
