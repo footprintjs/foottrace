@@ -118,7 +118,7 @@ function nextScopes(state: Projection, address: LogAddress, mounts: readonly str
 function snapshotLog(history: unknown, budget: Budget, outsideBudget: Budget): readonly unknown[] {
   const owners = new Set<string>();
   return list(history, budget, MAX_LOG).map((raw) => {
-    const bundle = dataCopy(raw, budget, 'outsideInputs');
+    const bundle = dataCopy(raw, budget, { separatelyReadKey: 'outsideInputs' });
     if (bundle === null || typeof bundle !== 'object') return bundle;
     const id = field(bundle, 'runtimeStageId');
     if (typeof id !== 'string' || id === '' || owners.has(id)) return bundle;
@@ -166,7 +166,9 @@ function visit(input: ScopeInput, state: Projection): void {
           return typeof id === 'string' && ((index === 0 && id === '') || projection.ids.has(id));
         }));
     const initialState = dataCopy(field(raw, 'initialState'), budget) as RecordScope['initialState'];
-    const readSources = dataCopy(rootSources(raw, address, log.length, budget), budget) as RecordScope['readSources'];
+    const readSources = dataCopy(rootSources(raw, address, log.length, budget), budget, {
+      allowShared: true,
+    }) as RecordScope['readSources'];
     const inventory = field(raw, 'fanoutCollections'),
       status = field(inventory, 'status');
     const collections =

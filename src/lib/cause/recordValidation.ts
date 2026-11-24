@@ -35,7 +35,12 @@ export interface RecordBudget {
 }
 
 /** Iterative bounded copy: data descriptors only, no getters/toJSON/prototypes or opaque class instances. */
-export function dataCopy(value: unknown, budget: RecordBudget, separatelyReadKey?: string): unknown {
+export function dataCopy(
+  value: unknown,
+  budget: RecordBudget,
+  options: { separatelyReadKey?: string; allowShared?: boolean } = {},
+): unknown {
+  const { separatelyReadKey, allowShared } = options;
   const leaf = (v: unknown): boolean => v === null || typeof v !== 'object';
   const check = (v: unknown): void => {
     spend(budget, 1);
@@ -62,10 +67,20 @@ export function dataCopy(value: unknown, budget: RecordBudget, separatelyReadKey
     return Object.create(null) as Record<string, unknown>;
   };
   const root = make(value as object),
-    seen = new Set<object>([value as object]),
-    work = [{ from: value as object, to: root }];
+    seen = new Set<object>([value as object]);
+  // Separate native read occurrences can share their source. In that channel
+  // retain an identity only while visiting its descendants, and charge every copy.
+  const work: { from: object; to?: typeof root }[] = [{ from: value as object, to: root }];
   while (work.length) {
     const { from, to } = work.pop()!;
+    if (to === undefined) {
+      seen.delete(from);
+      continue;
+    }
+    if (allowShared) {
+      seen.add(from);
+      work.push({ from });
+    }
     let keys: string[];
     try {
       // The optional evidence's descriptor is read by its own admission, even when it throws.
@@ -90,7 +105,7 @@ export function dataCopy(value: unknown, budget: RecordBudget, separatelyReadKey
       let copy = v;
       if (!leaf(v)) {
         if (seen.has(v as object)) throw new RecordRefusal();
-        seen.add(v as object);
+        if (!allowShared) seen.add(v as object);
         copy = make(v as object);
         work.push({ from: v as object, to: copy as typeof root });
       }

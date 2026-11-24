@@ -69,3 +69,27 @@ it.each([
   expect(scopes[1].complete).toBe(false);
   expect(gaps).toContainEqual({ code: 'invalid-data', address: child.address });
 });
+
+it.each([1, 2, 3])('preserves each of %i reads of the same writer in live and saved scopes', (count) => {
+  const live = structuredClone(corpus.find(({ name }) => name === 'on')!.snapshot) as {
+    readSources: { record: { occurrences: { ordinal: number; source: { kind: string; commitIdx: number } }[] } };
+  };
+  const record = live.readSources.record;
+  const first = record.occurrences[0];
+  const writer = Object.freeze(first.source);
+  record.occurrences = Array.from({ length: count }, (_, i) => ({
+    ...structuredClone(first),
+    ordinal: i + 1,
+    source: writer,
+  }));
+  const saved = JSON.parse(JSON.stringify(live));
+  const fromSaved = recordScopesFromSnapshot(saved);
+  const fromLive = recordScopesFromSnapshot(live);
+  expect(fromLive).toEqual(fromSaved);
+  const rows = fromLive.scopes[0].readSources!.record.occurrences;
+  expect(rows.map(({ ordinal, source }) => [ordinal, source])).toEqual(
+    Array.from({ length: count }, (_, i) => [i + 1, { kind: 'committed', commitIdx: 1 }]),
+  );
+  expect(rows[0].source).not.toBe(writer);
+  if (count > 1) expect(rows[0].source).not.toBe(rows[1].source);
+});
