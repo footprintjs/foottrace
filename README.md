@@ -267,6 +267,8 @@ Enable `writeProvenance: 'reads-prefix'` in the producer for precise per-write q
 
 The `/cause` door provides typed ESM and CommonJS exports. Use `import { explain } from 'foottrace/cause'` in ESM or `const { explain } = require('foottrace/cause')` in CommonJS. Native `import('foottrace/cause')` remains available for lazy loading.
 
+For recordings with capture-time chart binding and native decision evidence, [inspect possible writers on skipped paths](src/lib/cause/skippedWriters/README.md).
+
 ```ts
 import type { Attention } from 'foottrace';
 import { attentionList, explain, type CauseGraph } from 'foottrace/cause';
