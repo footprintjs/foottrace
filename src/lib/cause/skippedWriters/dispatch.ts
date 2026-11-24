@@ -85,9 +85,22 @@ export function skippedBranches(
       continue;
     }
     const stop = skippedLoop ? new Set([...boundary, skippedLoop.owner]) : boundary;
-    const path = walkSkippedPath(stages, skippedLoop?.body ?? choice.entry, stop, observed, declaredMatches, budget);
-    for (const gap of path.gaps) gaps.add(gap);
-    if (path.writers.length) branches.push({ entry: choice.entry, writers: path.writers });
+    // A loop-return choice can be executable before its reference. Credit that choice and one re-entered body.
+    const entries =
+      skippedLoop && skippedLoop.body !== choice.entry ? [choice.entry, skippedLoop.body] : [choice.entry];
+    const writers = new Map<string, SkippedWriter>();
+    let ambiguous = false;
+    for (const entry of entries) {
+      const path = walkSkippedPath(stages, entry, stop, observed, declaredMatches, budget);
+      for (const gap of path.gaps) gaps.add(gap);
+      if (path.gaps.includes('graph-ambiguous')) {
+        ambiguous = true;
+        break;
+      }
+      for (const writer of path.writers) writers.set(writer.placementId, writer);
+      if (gaps.has('limit')) break;
+    }
+    if (!ambiguous && writers.size) branches.push({ entry: choice.entry, writers: [...writers.values()] });
     if (gaps.has('limit')) break;
   }
   return { branches, gaps: [...gaps] };

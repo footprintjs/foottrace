@@ -10,8 +10,8 @@ export const SKIPPED_QUERY_WORK = 100_000;
 
 export interface SavedSkippedChartAuthority {
   /**
-   * Resolve the capture and binding from an independent host catalog for this exact admitted record and scope.
-   * The host returns no binding when the request or recording is unauthorized or the projected metadata is withheld.
+   * Resolve the exact admitted record and scope from an independent host catalog.
+   * Return undefined when access is denied. An authorized capture can omit its chart binding.
    */
   lookup(
     recording: StoredRecord,
@@ -19,7 +19,7 @@ export interface SavedSkippedChartAuthority {
   ):
     | {
         readonly capture: SavedChartCapture;
-        readonly binding: TrustedSavedChartBinding;
+        readonly binding?: TrustedSavedChartBinding;
         readonly retained?: UnchangedWriteRecording;
       }
     | undefined;

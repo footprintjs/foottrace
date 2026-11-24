@@ -45,6 +45,18 @@ export function analyzeBoundSkippedPaths(
       return { candidates: [], gaps: ['truncated'] };
     }
   }
+  if (observed.size) {
+    const seen = new Set<string>();
+    for (const stage of graph.stages.values()) {
+      if (budget.left < 1) return { candidates: [], gaps: ['truncated'] };
+      budget.left--;
+      // Static IDs can name several different placements (for example builder-created fallbacks).
+      if (stage.role === 'stage' && observed.has(stage.stageId)) {
+        if (seen.has(stage.stageId)) observed.delete(stage.stageId);
+        else seen.add(stage.stageId);
+      }
+    }
+  }
   const window = readDecisionWindow(log, beforeIdx, history.lastChangeIdx, budget, fromIdx);
   const gaps = new Set<SkippedGap>(window.gaps);
   const candidates: CouldHaveChangedCandidate[] = [];

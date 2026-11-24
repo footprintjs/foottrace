@@ -38,7 +38,7 @@ function chart(writes: readonly string[]) {
   };
 }
 
-async function catalog(stored: ReturnType<typeof recording>, graph: ReturnType<typeof chart>) {
+async function catalog(stored: ReturnType<typeof recording>, graph: unknown) {
   const capture = { recordingVersion: 'shelf/item/1', runId: 'r', address, from: 0, to: 3 };
   const binding = { ...capture, version: 'footprint.skipped-chart.v1' as const, digest: await savedChartDigest(graph) };
   return {
@@ -79,6 +79,55 @@ describe('saved could-have-changed reader', () => {
       gaps: ['chart-binding'],
     });
     expect(await couldHaveChanged(stored, 'price', 2)).toEqual({ candidates: [], gaps: ['chart-binding'] });
+  });
+
+  it('does not transfer an observed write between distinct placements sharing a static ID', async () => {
+    const stored = recording();
+    const authored = chart([]);
+    const graph = {
+      ...authored,
+      stages: [
+        ...authored.stages.slice(0, 2),
+        { id: 'skip', stageId: 'seed', role: 'stage', edges: [] },
+        { id: 'earlier', stageId: 'seed', role: 'stage', edges: [] },
+      ],
+    };
+    const result = await couldHaveChanged(stored, 'price', 2, await catalog(stored, graph));
+    expect(result.candidates).toEqual([]);
+    expect(result.gaps).toContain('writers-unknown');
+  });
+
+  it('retains ordinary causes for an admitted scope without a chart binding', async () => {
+    const stored = recording();
+    const log = stored.log(address);
+    if (!log) throw new Error('Missing saved test scope');
+    const keys = (id: string) => (id === 'keep#2' ? ['price'] : []);
+    const baseline = causalChain([...log.commitLog], 'keep#2', keys);
+    expect(baseline).toBeDefined();
+    const options = {
+      address,
+      chart: undefined,
+      authority: {
+        lookup: (candidate: typeof stored, scope: typeof address) =>
+          candidate === stored && scope.logRunId === address.logRunId && !scope.drillPath.length
+            ? { capture: { recordingVersion: 'shelf/legacy/1', runId: 'r', address, from: 0, to: 3 } }
+            : undefined,
+      },
+    };
+
+    expect(await causalChainWithCouldHaveChanged(stored, 'keep#2', keys, 'price', options)).toEqual({
+      causal: baseline,
+      skipped: [],
+      gaps: ['chart-binding'],
+    });
+    expect(await couldHaveChanged(stored, 'price', 2, options)).toEqual({ candidates: [], gaps: ['chart-binding'] });
+    const deniedKeys = vi.fn(keys);
+    expect(await causalChainWithCouldHaveChanged(recording(), 'keep#2', deniedKeys, 'price', options)).toEqual({
+      causal: undefined,
+      skipped: [],
+      gaps: ['chart-binding'],
+    });
+    expect(deniedKeys).not.toHaveBeenCalled();
   });
 
   it('keeps causal edges and weighting calls unchanged when it adds a separate omission edge', async () => {

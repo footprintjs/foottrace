@@ -12,10 +12,13 @@ const stage = (id: string, edges: readonly string[], writes: readonly string[] =
   edges,
   writes,
 });
-const graph = new Map([
+const graph = new Map<string, NormalizedSkippedStage>([
   ['choose', stage('choose', ['keep', 'skip', 'tail'])],
   ['keep', stage('keep', ['tail'])],
   ['skip', stage('skip', ['tail'], ['price'])],
+  ['repeat', stage('repeat', ['hop'], ['price'])],
+  ['hop', { ...stage('hop', ['skip']), role: 'loop-reference' }],
+
   ['tail', stage('tail', ['choose'], ['price'])],
 ]);
 const control: NormalizedControl = {
@@ -67,7 +70,13 @@ describe('admitted dispatch and skipped direct choices', () => {
     expect(investigate(actual, loop, { recorded: false, reentered: false }).gaps).toEqual(['loop-evidence']);
     expect(investigate(actual, loop, { recorded: true, reentered: true }).gaps).toEqual(['loop-evidence']);
     expect(investigate(actual, loop).branches).toEqual([
-      { entry: 'repeat', writers: [{ placementId: 'skip', stageId: 'skip', basis: 'declared' }] },
+      {
+        entry: 'repeat',
+        writers: [
+          { placementId: 'repeat', stageId: 'repeat', basis: 'declared' },
+          { placementId: 'skip', stageId: 'skip', basis: 'declared' },
+        ],
+      },
     ]);
   });
 });
