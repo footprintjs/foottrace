@@ -1,6 +1,6 @@
 # Skipped paths and possible writers
 
-This folder holds the pure reader pieces for plan 1.3. The reader uses admitted decision rows in durable order and the native fold of the selected log to locate its question window. It follows only skipped placements in the known control region. The graph and the recorded choice have independent evidence. The writer is a declared possibility or another observed execution of that static stage. The resulting value and outcome remain unknown.
+This folder holds the pure reader pieces for plan 1.3. The reader uses admitted decision rows in durable order and the native fold of the selected log to locate its question window. It follows only skipped placements in the known control region. The graph and the recorded choice have independent evidence. The writer is a declared possibility or another observed execution of that static stage. The resulting value and outcome remain unknown. An unexplained repeated stage in the recording window adds a conservative gap. A repeat that could be a loop return from the same decision also prevents that loop body from being reported as skipped.
 
 The adapter owns chart authority, scope, redaction and capture identity. A saved query needs an independently trusted immutable recording version over the full entry stream and a capture-time digest of the exact projected topology. A live query must bind the actual immutable traversal projection. An authorized adapter admits the graph before invoking the internal fold.
 

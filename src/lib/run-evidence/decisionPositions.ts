@@ -1,5 +1,5 @@
 import type { GapCode } from '../evidence/codes.js';
-import { executionIndexOf } from '../ids/runtimeStageId.js';
+import { executionIndexOf, stageIdOf } from '../ids/runtimeStageId.js';
 import type { StoredLog } from '../time-travel/storedRecord.js';
 import { RUN_EVIDENCE_LIMITS, RUN_LOOP_EVIDENCE_VERSION } from './kinds.js';
 import { mergeEdges, newFold, walk } from './logFold.js';
@@ -16,6 +16,7 @@ export interface PositionedDecision {
 type DecisionWindow = {
   readonly decisions: readonly PositionedDecision[];
   readonly reenteredFrom: ReadonlySet<string>;
+  readonly uncertainTargets: ReadonlyMap<string, ReadonlySet<string>>;
   readonly loopEvidence: boolean;
   readonly gaps: readonly GapCode[];
 };
@@ -23,6 +24,7 @@ type DecisionWindow = {
 const unproved = (code: GapCode): DecisionWindow => ({
   decisions: [],
   reenteredFrom: new Set(),
+  uncertainTargets: new Map(),
   loopEvidence: false,
   gaps: [code],
 });
@@ -95,7 +97,8 @@ export function readDecisionWindow(
     throw error;
   }
   if (!charge(budget, ordered.length * 4 + fold.loops.length)) return unproved('truncated');
-  const { reentries } = matchLoops(ordered, merged, [fold]);
+  const { reentries, uncertain } = matchLoops(ordered, merged, [fold]);
+  const uncertainReentries = new Set(uncertain);
   const gaps = new Set([...fold.gaps, ...(fold.taint.get('decisions') ?? []), ...(fold.taint.get('control') ?? [])]);
   const loopPositions = new Map(fold.loops.map(({ note, index }) => [note.id, index]));
   const reenteredFrom = new Set<string>();
@@ -106,29 +109,58 @@ export function readDecisionWindow(
     const source = fold.abouts.get(edge.parent)?.index;
     if (hopped === undefined || source === undefined || hopped <= source || hopped >= edge.index) {
       gaps.add('conservative');
+      uncertainReentries.add(id);
     } else {
       reenteredFrom.add(edge.parent);
     }
   }
   const decisions: PositionedDecision[] = [];
+  const decisionIds = new Set<string>();
   for (const { row, index } of fold.decisions) {
     if (!charge(budget, 1)) {
       gaps.add('truncated');
       break;
     }
-    if (index <= lower || index >= upper) continue;
+    if (index >= upper) continue;
+    if (index <= lower && !uncertainReentries.size) continue;
     const committed = fold.abouts.get(row.id)?.index;
     const commit = committed === undefined ? undefined : log.entries[committed];
     const commitPosition = commit?.kind === 'commit' ? commit.bundle.idx : undefined;
     if (commitPosition === undefined || committed === undefined || committed >= index || commitPosition >= beforeIdx) {
-      gaps.add('conservative');
+      if (index > lower) gaps.add('conservative');
       continue;
     }
-    if (commitPosition >= fromIdx) decisions.push({ decision: row, entryPosition: index, commitPosition });
+    if (uncertainReentries.size) decisionIds.add(row.id);
+    if (index > lower && commitPosition >= fromIdx)
+      decisions.push({ decision: row, entryPosition: index, commitPosition });
+  }
+  const uncertainTargets = new Map<string, Set<string>>();
+  if (uncertainReentries.size) {
+    if (!charge(budget, ordered.length)) return unproved('truncated');
+    const captureStart = fromIdx === 0 ? 0 : positions.get(fromIdx) ?? upper;
+    const enclosingDecision = new Map<string, string>();
+    // Parents precede children in this order. Assign uncertainty to the decision above the
+    // incoming edge, even when the return goes through a branch stage. A new decision at
+    // the repeated stage starts its own path and can independently prove a later exit.
+    for (const edge of ordered) {
+      if (edge.index >= upper || edge.resumes !== undefined) continue;
+      const owner = edge.parent === undefined ? undefined : enclosingDecision.get(edge.parent);
+      if (edge.index > lower && edge.index >= captureStart && uncertainReentries.has(edge.id)) {
+        gaps.add('conservative');
+        if (owner !== undefined) {
+          const targets = uncertainTargets.get(owner) ?? new Set<string>();
+          targets.add(stageIdOf(edge.id));
+          uncertainTargets.set(owner, targets);
+        }
+      }
+      if (decisionIds.has(edge.id)) enclosingDecision.set(edge.id, edge.id);
+      else if (owner !== undefined) enclosingDecision.set(edge.id, owner);
+    }
   }
   return {
     decisions,
     reenteredFrom,
+    uncertainTargets,
     loopEvidence: (fold.collects?.v ?? 0) >= RUN_LOOP_EVIDENCE_VERSION && !fold.taint.has('control'),
     gaps: [...gaps],
   };

@@ -79,4 +79,32 @@ describe('admitted dispatch and skipped direct choices', () => {
       },
     ]);
   });
+  it('withholds only the loop alternative with an unexplained return target', () => {
+    const differentLoop = new Map(graph);
+    differentLoop.set('retry', stage('retry', []));
+    differentLoop.set('retry-body', stage('retry-body', ['choose'], ['price']));
+    const bound: NormalizedControl = {
+      ...control,
+      choices: [
+        { entry: 'keep', name: 'Keep' },
+        { entry: 'repeat', name: 'Repeat', loopBack: { body: 'skip', exit: 'keep', owner: 'choose' } },
+        { entry: 'retry', name: 'Retry', loopBack: { body: 'retry-body', exit: 'keep', owner: 'choose' } },
+      ],
+    };
+    const result = skippedBranches(
+      actual,
+      bound,
+      differentLoop,
+      new Set(),
+      (path) => path === 'price',
+      { recorded: true, reentered: false, uncertainTargets: new Set(['skip']) },
+      { left: 100 },
+    );
+    expect(result).toEqual({
+      branches: [
+        { entry: 'retry', writers: [{ placementId: 'retry-body', stageId: 'retry-body', basis: 'declared' }] },
+      ],
+      gaps: ['loop-evidence'],
+    });
+  });
 });

@@ -80,6 +80,7 @@ export function analyzeBoundSkippedPaths(
       declaredMatches,
       {
         recorded: window.loopEvidence,
+        uncertainTargets: window.uncertainTargets.get(decision.id),
         reentered: window.reenteredFrom.has(decision.id),
       },
       budget,
