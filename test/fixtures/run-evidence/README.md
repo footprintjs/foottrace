@@ -20,3 +20,9 @@ node test/fixtures/run-evidence/generate.cjs /path/to/an-install > test/fixtures
 `real-1.11.1.jsonl` is one whole file the real `fileSink` wrote under `footprintjs@11.0.0` and `foottrace@1.11.1`: a subflow that fails, unedited. It holds no evidence, and must read `not-collected`.
 
 `test/helpers/evidenceFixture.ts` replays the rows through the real `EventLog`, so what the reader reads is what the writer writes.
+
+## Loop control (FootPrint 14.1.0)
+
+`generate-loops.cjs` uses the published FootPrint 14.1.0 and Foottrace 2.2.0 in a separate install. From this directory, run `node generate-loops.cjs /path/to/that/install > engine-loops-14.1.0.json`. It records real commit bundles, exact parent and loop events, and live control lookups for both encodings. Capture clocks and correlation ids are replaced with stable fixture values. The published hook reports target display names, so the fixture maps the names of its own chart nodes to their declared ids and verifies them against observed re-entry executions. The checked-in data does not require FootPrint to run Foottrace's suite.
+
+`test/helpers/loopEvidenceFixture.ts` projects the captured facts as v1 or v2 run evidence for the reader. The paused case records the actual stand-in as a resume, separately from the loop hops. Its resumed chain remains conservative.

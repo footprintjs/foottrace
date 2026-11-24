@@ -96,6 +96,7 @@ describe('foottrace public ownership', () => {
       '.': [
         'deepEqual',
         'readRunEvidence',
+        'LoopBackEdges',
         'EXECUTION_DELIMITER',
         'PATH_DELIMITER',
         'isExecutionKey',

@@ -77,14 +77,14 @@ describe('opened.collects', () => {
   it('says what this log collects, with the version the record stamps', () => {
     const { sink, log } = evidenceLog();
     const collects: LogCollects | undefined = only(sink.entries, 'opened')[0].collects;
-    expect(collects).toEqual({ v: 1, reads: 'keys' });
+    expect(collects).toEqual({ v: 2, reads: 'keys' });
     expect(log.keepsEvidence).toBe(true);
   });
 
   it('carries `reads: off` for a run that tracks no reads', () => {
     const sink = memorySink();
     const log = new EventLog({}, { sink, address: ROOT, collects: { reads: 'off' } });
-    expect(only(sink.entries, 'opened')[0].collects).toEqual({ v: 1, reads: 'off' });
+    expect(only(sink.entries, 'opened')[0].collects).toEqual({ v: 2, reads: 'off' });
     expect(log.keepsEvidence).toBe(true);
   });
 
@@ -684,7 +684,7 @@ describe('a named-field adapter', () => {
     expect(Object.keys(calls.commit)).toEqual(['address', 'at', 'bundle', 'about']);
     expect(Object.keys(calls.note)).toEqual(['address', 'at', 'kind', 'data']);
     expect(Object.keys(calls.closed)).toEqual(['address', 'at', 'outcome', 'commits', 'meta', 'runNotes']);
-    expect(calls.opened.collects).toEqual({ v: 1, reads: 'keys' });
+    expect(calls.opened.collects).toEqual({ v: 2, reads: 'keys' });
     expect(calls.commit.about).toEqual({ reads: ['a'] });
     expect(calls.note).toMatchObject({ kind: 'run.stage', data: { seq: 0, id: 'm#1' } });
     expect(calls.closed.runNotes).toBe(1);
@@ -695,7 +695,7 @@ describe('a named-field adapter', () => {
     log.record(bundle('s#0'), { reads: ['a'] });
     log.close('ok');
     const [opened, commit, closed] = sink.entries as [Stored<'opened'>, Stored<'commit'>, Stored<'closed'>];
-    expect(opened.collects).toEqual({ v: 1, reads: 'keys' });
+    expect(opened.collects).toEqual({ v: 2, reads: 'keys' });
     expect(commit.about).toEqual({ reads: ['a'] });
     expect(closed.runNotes).toBe(0);
     expect(Object.isFrozen(opened.collects)).toBe(true);

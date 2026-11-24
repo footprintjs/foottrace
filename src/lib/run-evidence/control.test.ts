@@ -21,14 +21,23 @@ const read = (name: string, legs?: string[]) => {
 };
 
 describe('the fold equals the live recorder on a real run', () => {
-  it.each(['branches', 'agent'])('%s: every execution', (name) => {
+  it.each([
+    ['branches', 'redraft#12', 'draft#13'],
+    ['agent', 'seed#0', 'sf-injection-engine#23'],
+  ])('%s: every live attribution, with conservative gaps after unexplained repeats', (name, early, repeat) => {
+    // These captures predate loop evidence. They pin the live attribution, which is tentative when the saved
+    // record cannot explain a re-entry. The v2 loop fixtures separately pin exact answers with stored hops.
     const { scenario, evidence } = read(name);
     const ids = Object.keys(scenario.live);
     expect(ids.length).toBeGreaterThan(20);
+    expect(evidence.control(early)).toMatchObject({ status: 'collected', gaps: [] });
+    expect(evidence.control(repeat)).toMatchObject({ status: 'partial', gaps: ['conservative'] });
     for (const id of ids) {
       const live = scenario.live[id];
       const folded = evidence.control(id);
-      expect([id, folded.status, folded.gaps]).toEqual([id, 'collected', []]);
+      expect([id, folded.status, folded.gaps]).toEqual(
+        folded.gaps.length === 0 ? [id, 'collected', []] : [id, 'partial', ['conservative']],
+      );
       expect([id, folded.decider, folded.label]).toEqual([id, live?.decider, live?.label]);
     }
   });

@@ -13,13 +13,14 @@
 
 import { boundedName } from '../evidence/admission.js';
 import { admitMarks } from '../evidence/marks.js';
-import { executionIndexOf } from '../ids/runtimeStageId.js';
+import { EXECUTION_DELIMITER, executionIndexOf } from '../ids/runtimeStageId.js';
 import type { UntrackedSource } from '../memory/types.js';
 import {
   type CommitAbout,
   isCount,
   type LogCollects,
   type RunDecisionNote,
+  type RunLoopNote,
   type RunStageNote,
   type RunStopNote,
   type StoredDecisionEvidence,
@@ -263,6 +264,16 @@ export function admitStop(data: unknown, a: Admission): RunStopNote {
     ...field('category', ownField(data, 'category'), (v) => text(v, maxText)),
     ...field('error', ownField(data, 'error'), (v) => stopError(v, a)),
   });
+}
+
+/** A loop hop names a source execution and a target stage, independent of their display names. */
+export function admitLoop(data: unknown, a: Admission): RunLoopNote {
+  plain(data);
+  const raw = ownField(data, 'target');
+  if (typeof raw === 'string' && raw.length > a.limits.text) throw tooMany();
+  const target = boundedName(raw, a.limits.text, refuse);
+  if (target.includes(EXECUTION_DELIMITER)) throw refuse();
+  return Object.freeze({ id: executionId(ownField(data, 'id'), a), target });
 }
 
 /** A `run.stage` note's body. */
