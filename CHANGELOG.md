@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.3.2 — 2026-11-22
+
+### Fixed
+
+- Refuse stale subflow output handoffs when a later commit by the same execution writes the mapped path or an overlapping path, while keeping local causal evidence available.
+
 ## 2.3.1 — 2026-11-22
 
 ### Fixed
