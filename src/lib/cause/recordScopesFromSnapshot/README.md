@@ -5,3 +5,5 @@ This adapter translates the native engine snapshot's scope inventory, documented
 Outside-input names use a separate allowance at the owning commit. A refused optional annotation is available to the graph as a gap and the rest of the projected value record remains available.
 
 Native read occurrences may share a source descriptor when a stage reads the same writer several times. Projection copies and charges each occurrence separately. The copy tracks its current ancestors to refuse cycles and preserves the shared work allowance across scopes.
+
+Two initial-state keys can also point to one plain object. Projection gives each key its own detached copy and charges both copies to the same allowance, as it does when the snapshot is reopened from JSON. Cycles and enumerable accessors still refuse the scope.

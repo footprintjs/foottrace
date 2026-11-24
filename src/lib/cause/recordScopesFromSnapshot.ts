@@ -165,7 +165,9 @@ function visit(input: ScopeInput, state: Projection): void {
           const id = field(bundle, 'runtimeStageId');
           return typeof id === 'string' && ((index === 0 && id === '') || projection.ids.has(id));
         }));
-    const initialState = dataCopy(field(raw, 'initialState'), budget) as RecordScope['initialState'];
+    const initialState = dataCopy(field(raw, 'initialState'), budget, {
+      allowShared: true,
+    }) as RecordScope['initialState'];
     const readSources = dataCopy(rootSources(raw, address, log.length, budget), budget, {
       allowShared: true,
     }) as RecordScope['readSources'];
