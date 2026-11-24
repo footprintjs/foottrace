@@ -31,7 +31,7 @@ const control: NormalizedControl = {
   continuation: 'tail',
 };
 const actual: StoredDecision = { id: 'choose#2', address, seq: 0, by: 'decide', chosen: 'Keep' };
-const investigate = (decision = actual, bound = control, loop = { recorded: true, reentered: false }) =>
+const investigate = (decision = actual, bound = control, loop = { recorded: true, sawReturn: () => false }) =>
   skippedBranches(decision, bound, graph, new Set(), (path) => path === 'price', loop, { left: 100 });
 
 describe('admitted dispatch and skipped direct choices', () => {
@@ -67,8 +67,8 @@ describe('admitted dispatch and skipped direct choices', () => {
         { entry: 'repeat', name: 'Repeat', loopBack: { body: 'skip', exit: 'keep', owner: 'choose' } },
       ],
     };
-    expect(investigate(actual, loop, { recorded: false, reentered: false }).gaps).toEqual(['loop-evidence']);
-    expect(investigate(actual, loop, { recorded: true, reentered: true }).gaps).toEqual(['loop-evidence']);
+    expect(investigate(actual, loop, { recorded: false, sawReturn: () => false }).gaps).toEqual(['loop-evidence']);
+    expect(investigate(actual, loop, { recorded: true, sawReturn: () => true }).gaps).toEqual(['loop-evidence']);
     expect(investigate(actual, loop).branches).toEqual([
       {
         entry: 'repeat',
@@ -97,7 +97,7 @@ describe('admitted dispatch and skipped direct choices', () => {
       differentLoop,
       new Set(),
       (path) => path === 'price',
-      { recorded: true, reentered: false, uncertainTargets: new Set(['skip']) },
+      { recorded: true, sawReturn: (target: string) => target === 'skip' },
       { left: 100 },
     );
     expect(result).toEqual({

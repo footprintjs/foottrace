@@ -63,7 +63,7 @@ export function skippedBranches(
   stages: ReadonlyMap<string, NormalizedSkippedStage>,
   observed: ReadonlySet<string>,
   declaredMatches: (path: string) => boolean,
-  loop: { readonly recorded: boolean; readonly reentered: boolean; readonly uncertainTargets?: ReadonlySet<string> },
+  loop: { readonly recorded: boolean; readonly sawReturn: (targetStageId: string) => boolean },
   budget: SkippedWork,
 ): { readonly branches: readonly SkippedBranch[]; readonly gaps: readonly (SkippedPathGap | 'loop-evidence')[] } {
   const taken = selected(decision, control, budget);
@@ -81,13 +81,7 @@ export function skippedBranches(
     if (taken.has(choice.entry)) continue;
     const skippedLoop = choice.loopBack;
     const body = skippedLoop && stages.get(skippedLoop.body);
-    if (
-      skippedLoop &&
-      (!loop.recorded ||
-        loop.reentered ||
-        !taken.has(skippedLoop.exit) ||
-        (body && loop.uncertainTargets?.has(body.stageId)))
-    ) {
+    if (skippedLoop && (!loop.recorded || !taken.has(skippedLoop.exit) || (body && loop.sawReturn(body.stageId)))) {
       gaps.add('loop-evidence');
       continue;
     }

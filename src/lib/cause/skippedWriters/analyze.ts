@@ -61,7 +61,7 @@ export function analyzeBoundSkippedPaths(
   const gaps = new Set<SkippedGap>(window.gaps);
   const candidates: CouldHaveChangedCandidate[] = [];
   const declaredMatches = (path: string) => relation(path, key) !== undefined;
-  for (const { decision } of window.decisions) {
+  for (const { decision, entryPosition } of window.decisions) {
     if (budget.left < 1) {
       gaps.add('truncated');
       break;
@@ -80,8 +80,9 @@ export function analyzeBoundSkippedPaths(
       declaredMatches,
       {
         recorded: window.loopEvidence,
-        uncertainTargets: window.uncertainTargets.get(decision.id),
-        reentered: window.reenteredFrom.has(decision.id),
+        sawReturn: (target) =>
+          window.returnTargets.get(decision.id)?.has(target) === true ||
+          (window.unownedReturnCutoffs.get(target) ?? -1) > entryPosition,
       },
       budget,
     );

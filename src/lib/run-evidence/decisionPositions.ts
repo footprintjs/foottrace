@@ -2,7 +2,7 @@ import type { GapCode } from '../evidence/codes.js';
 import { executionIndexOf, stageIdOf } from '../ids/runtimeStageId.js';
 import type { StoredLog } from '../time-travel/storedRecord.js';
 import { RUN_EVIDENCE_LIMITS, RUN_LOOP_EVIDENCE_VERSION } from './kinds.js';
-import { mergeEdges, newFold, walk } from './logFold.js';
+import { type LocalEdge, mergeEdges, newFold, walk } from './logFold.js';
 import { matchLoops } from './loopEvidence.js';
 import type { StoredDecision } from './rows.js';
 
@@ -15,16 +15,16 @@ export interface PositionedDecision {
 
 type DecisionWindow = {
   readonly decisions: readonly PositionedDecision[];
-  readonly reenteredFrom: ReadonlySet<string>;
-  readonly uncertainTargets: ReadonlyMap<string, ReadonlySet<string>>;
+  readonly returnTargets: ReadonlyMap<string, ReadonlySet<string>>;
+  readonly unownedReturnCutoffs: ReadonlyMap<string, number>;
   readonly loopEvidence: boolean;
   readonly gaps: readonly GapCode[];
 };
 
 const unproved = (code: GapCode): DecisionWindow => ({
   decisions: [],
-  reenteredFrom: new Set(),
-  uncertainTargets: new Map(),
+  returnTargets: new Map(),
+  unownedReturnCutoffs: new Map(),
   loopEvidence: false,
   gaps: [code],
 });
@@ -36,6 +36,50 @@ function charge(budget: { left: number }, count: number): boolean {
   }
   budget.left -= count;
   return true;
+}
+
+interface ReturnEvidence {
+  readonly source: string;
+  readonly target: string;
+  readonly position: number;
+  readonly uncertain: boolean;
+}
+
+function attributeReturns(
+  returns: readonly ReturnEvidence[],
+  edges: ReadonlyMap<string, LocalEdge>,
+  decisions: ReadonlyMap<string, number>,
+  gaps: Set<GapCode>,
+  budget: { left: number },
+) {
+  const returnTargets = new Map<string, Set<string>>();
+  const unownedReturnCutoffs = new Map<string, number>();
+  for (const { source, target, position, uncertain } of returns) {
+    if (uncertain) gaps.add('conservative');
+    let ancestor: string | undefined = source;
+    let down = position;
+    // A nested decision can dispatch the return on behalf of an outer loop. Keep
+    // each applicable ancestor and let the bound chart match the return target.
+    while (ancestor !== undefined) {
+      if (!charge(budget, 1)) return undefined;
+      const edge = edges.get(ancestor);
+      if (!edge || edge.index >= down || edge.resumes !== undefined) {
+        gaps.add('conservative');
+        unownedReturnCutoffs.set(target, Math.max(unownedReturnCutoffs.get(target) ?? 0, position));
+        break;
+      }
+      const entry = decisions.get(ancestor);
+      if (entry !== undefined) {
+        if (entry >= position) gaps.add('conservative');
+        const targets = returnTargets.get(ancestor) ?? new Set<string>();
+        targets.add(target);
+        returnTargets.set(ancestor, targets);
+      }
+      down = edge.index;
+      ancestor = edge.parent;
+    }
+  }
+  return { returnTargets, unownedReturnCutoffs };
 }
 
 /**
@@ -98,69 +142,53 @@ export function readDecisionWindow(
   }
   if (!charge(budget, ordered.length * 4 + fold.loops.length)) return unproved('truncated');
   const { reentries, uncertain } = matchLoops(ordered, merged, [fold]);
-  const uncertainReentries = new Set(uncertain);
   const gaps = new Set([...fold.gaps, ...(fold.taint.get('decisions') ?? []), ...(fold.taint.get('control') ?? [])]);
+  const captureStart = fromIdx === 0 ? 0 : positions.get(fromIdx) ?? upper;
+  const inWindow = (position: number) => position > lower && position >= captureStart && position < upper;
   const loopPositions = new Map(fold.loops.map(({ note, index }) => [note.id, index]));
-  const reenteredFrom = new Set<string>();
-  for (const id of reentries.keys()) {
+  const returns: ReturnEvidence[] = [];
+  const pairedSources = new Set<string>();
+  for (const id of new Set([...reentries.keys(), ...uncertain])) {
+    if (!charge(budget, 1)) return unproved('truncated');
     const edge = merged.get(id);
-    if (edge?.parent === undefined || edge.index >= upper) continue;
-    const hopped = loopPositions.get(edge.parent);
+    if (edge?.parent === undefined || !inWindow(edge.index)) continue;
+    const hop = loopPositions.get(edge.parent);
     const source = fold.abouts.get(edge.parent)?.index;
-    if (hopped === undefined || source === undefined || hopped <= source || hopped >= edge.index) {
-      gaps.add('conservative');
-      uncertainReentries.add(id);
-    } else {
-      reenteredFrom.add(edge.parent);
+    const confirmed =
+      reentries.has(id) && hop !== undefined && source !== undefined && source < hop && hop < edge.index;
+    if (confirmed) pairedSources.add(edge.parent);
+    returns.push({ source: edge.parent, target: stageIdOf(id), position: edge.index, uncertain: !confirmed });
+  }
+  for (const { note, index } of fold.loops) {
+    if (!charge(budget, 1)) return unproved('truncated');
+    if (inWindow(index) && !pairedSources.has(note.id)) {
+      // A retained hop before the cutoff without its confirmed target cannot prove an exit.
+      returns.push({ source: note.id, target: note.target, position: index, uncertain: true });
     }
   }
+
   const decisions: PositionedDecision[] = [];
-  const decisionIds = new Set<string>();
+  const decisionPositions = new Map<string, number>();
   for (const { row, index } of fold.decisions) {
-    if (!charge(budget, 1)) {
-      gaps.add('truncated');
-      break;
-    }
-    if (index >= upper) continue;
-    if (index <= lower && !uncertainReentries.size) continue;
+    if (!charge(budget, 1)) return unproved('truncated');
+    if (index <= lower || index >= upper) continue;
     const committed = fold.abouts.get(row.id)?.index;
     const commit = committed === undefined ? undefined : log.entries[committed];
     const commitPosition = commit?.kind === 'commit' ? commit.bundle.idx : undefined;
     if (commitPosition === undefined || committed === undefined || committed >= index || commitPosition >= beforeIdx) {
-      if (index > lower) gaps.add('conservative');
+      gaps.add('conservative');
       continue;
     }
-    if (uncertainReentries.size) decisionIds.add(row.id);
-    if (index > lower && commitPosition >= fromIdx)
+    if (commitPosition >= fromIdx) {
       decisions.push({ decision: row, entryPosition: index, commitPosition });
-  }
-  const uncertainTargets = new Map<string, Set<string>>();
-  if (uncertainReentries.size) {
-    if (!charge(budget, ordered.length)) return unproved('truncated');
-    const captureStart = fromIdx === 0 ? 0 : positions.get(fromIdx) ?? upper;
-    const enclosingDecision = new Map<string, string>();
-    // Parents precede children in this order. Assign uncertainty to the decision above the
-    // incoming edge, even when the return goes through a branch stage. A new decision at
-    // the repeated stage starts its own path and can independently prove a later exit.
-    for (const edge of ordered) {
-      if (edge.index >= upper || edge.resumes !== undefined) continue;
-      const owner = edge.parent === undefined ? undefined : enclosingDecision.get(edge.parent);
-      if (edge.index > lower && edge.index >= captureStart && uncertainReentries.has(edge.id)) {
-        gaps.add('conservative');
-        if (owner !== undefined) {
-          const targets = uncertainTargets.get(owner) ?? new Set<string>();
-          targets.add(stageIdOf(edge.id));
-          uncertainTargets.set(owner, targets);
-        }
-      }
-      if (decisionIds.has(edge.id)) enclosingDecision.set(edge.id, edge.id);
-      else if (owner !== undefined) enclosingDecision.set(edge.id, owner);
+      if (returns.length) decisionPositions.set(row.id, index);
     }
   }
+  const attribution = attributeReturns(returns, merged, decisionPositions, gaps, budget);
+  if (!attribution) return unproved('truncated');
   return {
     decisions,
-    reenteredFrom,
-    uncertainTargets,
+    ...attribution,
     loopEvidence: (fold.collects?.v ?? 0) >= RUN_LOOP_EVIDENCE_VERSION && !fold.taint.has('control'),
     gaps: [...gaps],
   };
