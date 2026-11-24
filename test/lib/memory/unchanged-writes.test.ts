@@ -11,6 +11,7 @@ import {
   stateAt,
   type CommitBundle,
 } from '../../../src/index.js';
+import { prepareUnchangedWrites } from '../../../src/lib/memory/unchangedWrites.js';
 import { normaliseStateKey } from '../../../src/paths.js';
 import { recordRun } from '../../helpers/recordRun.js';
 
@@ -135,6 +136,26 @@ function edgeFacts(edges: NonNullable<ReturnType<typeof walk>>['parentEdges']) {
 }
 
 describe('unchanged writes and value provenance', () => {
+  it('retains an observed no-op from before a newer change when the capture is bound', () => {
+    const run = recordRun({}, { commitValues: 'full' });
+    const seed = run.step('seed', (scope) => scope.set(complete, true));
+    const audit = run.step('audit', (scope) => scope.set(complete, true));
+    const reset = run.step('reset', (scope) => scope.set(complete, false));
+    const { commitLog } = run.snapshot();
+    const recording = paired(commitLog, [
+      stage(seed, { stageWrites: { complete: true } }),
+      stage(audit, { stageWrites: { complete: true } }),
+      stage(reset, { stageWrites: { complete: false } }),
+    ]);
+    const bound = { ...recording, ...capture(recording, 'full') };
+    const prepared = prepareUnchangedWrites(bound, commitLog, { left: 10000 });
+    expect(prepared.observedBefore(complete, 3)).toEqual(['audit']);
+    expect(prepared.observedBefore(complete, 1)).toEqual([]);
+    expect(prepared.read(complete, 3).writes).toEqual([]);
+    expect(prepareUnchangedWrites(recording, commitLog, { left: 10000 }).observedBefore(complete, 3)).toEqual([]);
+    expect(prepareUnchangedWrites(bound, [...commitLog], { left: 10000 }).observedBefore(complete, 3)).toEqual([]);
+  });
+
   it.each([
     ['full', 'full'],
     ['full', 'summary'],

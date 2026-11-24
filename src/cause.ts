@@ -78,3 +78,15 @@ export type {
   SourceLinkRowLocation,
   SourceLinkWrite,
 } from './lib/cause/sourceLinks/types.js';
+
+export { couldHaveChanged } from './lib/cause/skippedWriters/couldHaveChanged.js';
+export { causalChainWithCouldHaveChanged } from './lib/cause/skippedWriters/walk.js';
+export { savedChartDigest } from './lib/cause/skippedWriters/savedBinding.js';
+export type {
+  CouldHaveChangedOptions,
+  CouldHaveChangedResult,
+  SavedSkippedChartAuthority,
+} from './lib/cause/skippedWriters/couldHaveChanged.js';
+export type { SavedChartCapture, TrustedSavedChartBinding } from './lib/cause/skippedWriters/savedBinding.js';
+export type { CausalChainWithCouldHaveChanged, CouldHaveChangedEdge } from './lib/cause/skippedWriters/walk.js';
+export type { SkippedChartProjection } from './lib/cause/skippedWriters/types.js';

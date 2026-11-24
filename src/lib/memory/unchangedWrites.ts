@@ -37,7 +37,10 @@ const GAP_CODES = {
 type Budget = { left: number };
 type Positions = Map<string, number[]>;
 type Stage = { readonly node: object; readonly id: unknown; readonly child: boolean };
-type Prepared = { read(key: string, beforeIdx?: number): UnchangedWriteResult };
+type Prepared = {
+  read(key: string, beforeIdx?: number): UnchangedWriteResult;
+  observedBefore(key: string, beforeIdx: number, fromIdx?: number): readonly string[];
+};
 
 function gap(reason: UnchangedWriteGapReason, commitIdx?: number): UnchangedWriteGap {
   return Object.freeze({ code: GAP_CODES[reason], reason, ...(commitIdx === undefined ? {} : { commitIdx }) });
@@ -49,7 +52,7 @@ function missing(reason: UnchangedWriteGapReason, commitIdx?: number): Unchanged
 
 function unavailable(reason: UnchangedWriteGapReason): Prepared {
   const result = missing(reason);
-  return { read: () => result };
+  return { read: () => result, observedBefore: () => [] };
 }
 
 function list(value: unknown, budget: Budget): readonly unknown[] {
@@ -182,6 +185,7 @@ function indexRecording(
   capture: CaptureObservation | undefined,
   treeMissing: boolean,
   budget: Budget,
+  includeObserved: boolean,
 ): Prepared {
   const counts = new Map<string, number>();
   for (const bundle of log) counts.set(bundle.runtimeStageId, (counts.get(bundle.runtimeStageId) ?? 0) + 1);
@@ -189,6 +193,7 @@ function indexRecording(
   const undefinedWrites: Positions = new Map();
   const redactions: Positions = new Map();
   const observations = new Map<number, UnchangedWrite>();
+  const verified = includeObserved ? new Set<number>() : undefined;
   const stageGaps = new Map<UnchangedWriteGapReason, number[]>();
   for (const [position, bundle] of log.entries()) {
     for (const path of bundle.redactedPaths) addPosition(redactions, rootOf(path), position);
@@ -244,6 +249,7 @@ function indexRecording(
           }),
         );
         for (const name of present) addPosition(writes, name, position);
+        if (tracked) verified?.add(position);
       }
       for (const name of omitted) addPosition(undefinedWrites, name, position);
     } catch {
@@ -252,6 +258,33 @@ function indexRecording(
   }
 
   return {
+    observedBefore(key, beforeIdx, fromIdx = 0) {
+      if (
+        !verified ||
+        key.includes(DELIM) ||
+        key.includes('.') ||
+        !Number.isSafeInteger(beforeIdx) ||
+        beforeIdx < 0 ||
+        beforeIdx > log.length
+      )
+        return [];
+      if ((redactions.get(key)?.[0] ?? beforeIdx) < beforeIdx) return [];
+      const positions = writes.get(key) ?? [];
+      const observed = new Set<string>();
+      for (let index = lowerBound(positions, fromIdx); index < positions.length; index++) {
+        const position = positions[index];
+        if (position >= beforeIdx) break;
+        spend(budget, 1);
+        if (!verified.has(position)) continue;
+        const committed = log[position].trace.some(({ path }) => {
+          spend(budget, 1 + path.length);
+          return relation(path, key) !== undefined;
+        });
+        const retained = observations.get(position);
+        if (!committed && retained) observed.add(retained.stageId);
+      }
+      return [...observed];
+    },
     read(key, beforeIdx = log.length) {
       if (typeof key !== 'string' || !Number.isSafeInteger(beforeIdx) || beforeIdx < 0 || beforeIdx > log.length) {
         return missing('malformed');
@@ -287,7 +320,11 @@ function indexRecording(
 }
 
 /** Prepare one same-scope tree/log join for all questions in an opt-in causal walk. */
-export function prepareUnchangedWrites(recording: unknown, expectedLog?: readonly CommitBundle[]): Prepared {
+export function prepareUnchangedWrites(
+  recording: unknown,
+  expectedLog?: readonly CommitBundle[],
+  sharedBudget?: Budget,
+): Prepared {
   try {
     const rawLog = recordOwn(recording, 'commitLog');
     if (expectedLog !== undefined && rawLog !== expectedLog) return unavailable('scope-mismatch');
@@ -295,7 +332,7 @@ export function prepareUnchangedWrites(recording: unknown, expectedLog?: readonl
     const address = addressOf(recordOwn(recording, 'logAddress'));
     if (address.drillPath.length) return unavailable('child-namespace');
     if (address.logRunId !== runId) return unavailable('scope-mismatch');
-    const budget = { left: MAX_RECORD_FIELDS };
+    const budget = sharedBudget ?? { left: MAX_RECORD_FIELDS };
     let log: readonly CommitBundle[];
     try {
       log = admitLog(rawLog, budget);
@@ -309,6 +346,7 @@ export function prepareUnchangedWrites(recording: unknown, expectedLog?: readonl
       captureOf(recording, address, runId, log),
       tree === undefined,
       budget,
+      sharedBudget !== undefined,
     );
   } catch {
     return unavailable('malformed');

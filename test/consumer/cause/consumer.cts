@@ -1,16 +1,18 @@
 import {
+  couldHaveChanged,
   explain,
   pathTo,
   type BackwardResult,
   type CauseGraph,
   type CauseResult,
+  type CouldHaveChangedResult,
   type RootSelection,
   type RootStrategy,
   type RootStrategyWalk,
   type TraversalLimits,
   type WithheldRoot,
 } from 'foottrace/cause';
-import type { Attention } from 'foottrace';
+import type { Attention, StoredRecord } from 'foottrace';
 
 const mark: Attention = { kind: 'error', reason: 'ERROR_RECORDED', evidence: ['proof:source'] };
 declare const graph: CauseGraph;
@@ -94,3 +96,7 @@ void firstBinding;
 void complete;
 // @ts-expect-error The result contains an immutable positional list.
 bindings.writes.push(undefined);
+
+declare const recorded: StoredRecord;
+const skipped: Promise<CouldHaveChangedResult> = couldHaveChanged(recorded, 'total', 1);
+void skipped;
