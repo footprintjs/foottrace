@@ -1,10 +1,11 @@
+import { readerLimits } from '../../evidence/readerLimits.js';
 import { recordList, recordName, recordOwn, RecordRefusal, recordRefusalCode, spend } from '../recordValidation.js';
 import type { GapCode } from '../types.js';
 import { checkOf } from './rows.js';
 import { count, keyOf, outputSelection, selection } from './selectors.js';
 import type { RecordSourceLink, RecordSourceLinks, SourceLinkRowLocation } from './types.js';
 
-export const maximumSourceLinks = 256;
+export const maximumSourceLinks = readerLimits.sourceLinkInventory.maximum;
 
 export interface SourceLinkInventory {
   readonly links: readonly RecordSourceLink[];

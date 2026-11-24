@@ -532,9 +532,12 @@ describe('the cost of one question on a record made to be expensive', () => {
   it.each(['children', 'parents'] as const)('%s: twice the log costs about twice the work', async (question) => {
     const small = await workOf(400, question);
     const large = await workOf(800, question);
+    const largest = await workOf(1600, question);
     // The answer is cut at the cap on edges either way, and says so.
     expect(small).toMatchObject({ edges: 64, complete: false });
     expect(large).toMatchObject({ edges: 64, complete: false });
+    expect(largest).toMatchObject({ edges: 64, complete: false });
     expect(large.units / small.units).toBeLessThan(2.6);
+    expect(largest.units / large.units).toBeLessThan(2.6);
   });
 });

@@ -3,6 +3,7 @@ import { decodeRecordCapture } from './recordCapture.js';
 import { prepareReadSources } from './recordSources.js';
 import { prepareRecordSubflows, type PreparedRecordSubflows } from './recordSubflows.js';
 import { carryOutsideInputs, readOutsideInputs, type OutsideInputAdmission } from '../evidence/outsideInputs.js';
+import { readerLimits } from '../evidence/readerLimits.js';
 import type { LogAddress } from '../memory/eventPosition.js';
 import { RUN_EVIDENCE_LIMITS } from '../run-evidence/kinds.js';
 import type {
@@ -50,8 +51,8 @@ export function recordOptions(options: RecordGraphOptions): ResolvedRecordGraphO
       ...(policy === undefined
         ? {}
         : { sourceLinkPolicy: policy as NonNullable<RecordGraphOptions['sourceLinkPolicy']> }),
-      maxCommits: boundedOption(recordOwn(options, 'maxCommits'), 256, 4096),
-      maxFields: boundedOption(recordOwn(options, 'maxFields'), 20000, 1000000),
+      maxCommits: boundedOption(recordOwn(options, 'maxCommits'), 256, readerLimits.causeCommits.maximum),
+      maxFields: boundedOption(recordOwn(options, 'maxFields'), 20000, readerLimits.causeTextWork.maximum),
       maxEdges: boundedOption(recordOwn(options, 'maxEdges'), 64, 256),
       maxScopes: boundedOption(recordOwn(options, 'maxScopes'), 32, 256),
       loadTimeoutMs: boundedOption(recordOwn(options, 'loadTimeoutMs'), 1000, 30000),
