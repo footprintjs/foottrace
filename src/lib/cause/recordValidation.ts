@@ -38,17 +38,17 @@ export interface RecordBudget {
 export function dataCopy(
   value: unknown,
   budget: RecordBudget,
-  options: { separatelyReadKey?: string; allowShared?: boolean } = {},
+  options: { separatelyReadKey?: string; allowShared?: boolean; operandBudget?: RecordBudget } = {},
 ): unknown {
   const { separatelyReadKey, allowShared } = options;
   const leaf = (v: unknown): boolean => v === null || typeof v !== 'object';
-  const check = (v: unknown): void => {
-    spend(budget, 1);
+  const check = (v: unknown, allowance: RecordBudget): void => {
+    spend(allowance, 1);
     if (typeof v === 'function' || typeof v === 'symbol') throw new RecordRefusal();
   };
-  check(value);
+  check(value, budget);
   if (leaf(value)) return value;
-  const make = (v: object): unknown[] | Record<string, unknown> => {
+  const make = (v: object, allowance: RecordBudget): unknown[] | Record<string, unknown> => {
     let p;
     try {
       p = Object.getPrototypeOf(v);
@@ -59,27 +59,29 @@ export function dataCopy(
     if (Array.isArray(v)) {
       const length = recordOwn(v, 'length');
       if (typeof length !== 'number' || !Number.isSafeInteger(length) || length < 0) throw new RecordRefusal();
-      spend(budget, length);
+      spend(allowance, length);
       const array: unknown[] = [];
       array.length = length;
       return array;
     }
     return Object.create(null) as Record<string, unknown>;
   };
-  const root = make(value as object),
+  const root = make(value as object, budget),
     seen = new Set<object>([value as object]);
   // Separate native read occurrences can share their source. In that channel
   // retain an identity only while visiting its descendants, and charge every copy.
-  const work: { from: object; to?: typeof root }[] = [{ from: value as object, to: root }];
+  const work: { from: object; to?: typeof root; allowance: RecordBudget }[] = [
+    { from: value as object, to: root, allowance: budget },
+  ];
   while (work.length) {
-    const { from, to } = work.pop()!;
+    const { from, to, allowance } = work.pop()!;
     if (to === undefined) {
       seen.delete(from);
       continue;
     }
     if (allowShared) {
       seen.add(from);
-      work.push({ from });
+      work.push({ from, allowance });
     }
     let keys: string[];
     try {
@@ -97,17 +99,22 @@ export function dataCopy(
       throw new RecordRefusal();
     }
     // Optional record channels can refuse a copy and still share the remaining allowance.
-    if (keys.length > budget.left) throw new RecordRefusal(budget.workExhaustion ?? 'node-limit');
+    if (keys.length > allowance.left) throw new RecordRefusal(allowance.workExhaustion ?? 'node-limit');
     for (const key of keys) {
       if (key.length > 1024) throw new RecordRefusal('node-limit');
       const v = recordOwn(from, key);
-      check(v);
+      // Bundle keys remain discovery work. Only the two recorded value operands and their descendants
+      // use the explicit payload allowance; identity checks still span the entire bundle.
+      const childBudget =
+        from === value && (key === 'overwrite' || key === 'updates') ? options.operandBudget ?? allowance : allowance;
+      if (childBudget !== allowance) spend(allowance, 1);
+      check(v, childBudget);
       let copy = v;
       if (!leaf(v)) {
         if (seen.has(v as object)) throw new RecordRefusal();
         if (!allowShared) seen.add(v as object);
-        copy = make(v as object);
-        work.push({ from: v as object, to: copy as typeof root });
+        copy = make(v as object, childBudget);
+        work.push({ from: v as object, to: copy as typeof root, allowance: childBudget });
       }
       Object.defineProperty(to, key, { value: copy, enumerable: true, writable: true, configurable: true });
     }
@@ -119,7 +126,12 @@ export function copyRecordValue<T>(value: T): T {
   return dataCopy(value, { left: Number.MAX_SAFE_INTEGER }) as T;
 }
 /** `after`: the index of the copy before this one in the log (-1 for the first); the copy's own rises past it. */
-export function bundleOf(value: unknown, after: number, budget: RecordBudget): CommitBundle {
+export function bundleOf(
+  value: unknown,
+  after: number,
+  budget: RecordBudget,
+  operandBudget: RecordBudget = budget,
+): CommitBundle {
   const runtimeStageId = recordName(recordOwn(value, 'runtimeStageId')),
     stageId = recordName(recordOwn(value, 'stageId'));
   const trace = recordList(recordOwn(value, 'trace'), readerLimits.traceRows.maximum).map((_, i) => {
@@ -151,8 +163,8 @@ export function bundleOf(value: unknown, after: number, budget: RecordBudget): C
     budget,
     trace.length + trace.reduce((n, t) => n + (t.readKeys?.length ?? 0) + (t.readAttempts?.length ?? 0), 0) + 1,
   );
-  const overwrite = dataCopy(recordOwn(value, 'overwrite'), budget),
-    updates = dataCopy(recordOwn(value, 'updates'), budget);
+  const overwrite = dataCopy(recordOwn(value, 'overwrite'), operandBudget),
+    updates = dataCopy(recordOwn(value, 'updates'), operandBudget);
   if (
     !overwrite ||
     typeof overwrite !== 'object' ||
@@ -215,12 +227,13 @@ export function prepareRecordLog(
   maximum: number,
   budget: { left: number },
   onBundle?: (raw: unknown, bundle: CommitBundle) => void,
+  operandBudget: RecordBudget = budget,
 ): CommitBundle[] {
   const rows = recordList(value, maximum);
   let after = -1;
   return rows.map((_, index) => {
     const raw = recordOwn(rows, String(index));
-    const bundle = bundleOf(raw, after, budget);
+    const bundle = bundleOf(raw, after, budget, operandBudget);
     after = placedAt(bundle, after);
     onBundle?.(raw, bundle);
     return bundle;

@@ -4,4 +4,6 @@ This adapter translates the native engine snapshot's scope inventory, documented
 
 Outside-input names use a separate allowance at the owning commit. A refused optional annotation is available to the graph as a gap and the rest of the projected value record remains available.
 
+An explicit `maxFields` gives commit operands one budget across the entire projection, including any parent-log copy needed to validate a child handoff. The discovery and outside-input budgets remain fixed. The graph admits each scope independently under its own limit when it is opened. [Public example](../../../../docs/cause.md#open-scopes-from-a-snapshot)
+
 Native read occurrences may share a source descriptor when a stage reads the same writer several times. Projection copies and charges each occurrence separately. The copy tracks its current ancestors to refuse cycles and preserves the shared work allowance across scopes.
