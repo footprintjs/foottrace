@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.0.1 — 2026-11-26
+
+### Fixed
+
+- Preserve recorded writers in live snapshots when multiple initial-state keys share a plain object. Each occurrence uses the same allowance as its saved copy.
+
 ## 3.0.0 — 2026-11-24
 
 ### Added
