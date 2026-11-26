@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { evidenceStore } from '../../../../test/helpers/evidenceFixture';
-import { causalChainWithCouldHaveChanged, couldHaveChanged, savedChartDigest } from '../../../cause.js';
+import {
+  causalChainWithCouldHaveChanged,
+  couldHaveChanged,
+  evaluateSkippedPaths,
+  savedChartDigest,
+} from '../../../cause.js';
 import { causalChain } from '../../memory/backtrack.js';
 import { readStoredRecord } from '../../time-travel/storedRecord.js';
 
@@ -52,6 +57,87 @@ async function catalog(stored: ReturnType<typeof recording>, graph: unknown) {
     },
   };
 }
+
+describe('unbound skipped-path evaluation', () => {
+  const interval = { address, from: 0, to: 3 };
+
+  it('shares saved candidate facts without issuing the saved authority label', async () => {
+    const stored = recording();
+    const graph = chart(['price']);
+    const options = { ...interval, chart: graph, binding: 'native', authority: 'host-attested' };
+    const unbound = evaluateSkippedPaths(stored.root('r')!.entries, 'price', 2, options);
+    const saved = await couldHaveChanged(stored, 'price', 2, await catalog(stored, graph));
+    expect(saved.candidates).toHaveLength(1);
+    expect(unbound).toEqual({
+      candidates: saved.candidates.map(({ binding: _binding, ...candidate }) => candidate),
+      gaps: [],
+    });
+    expect(unbound.candidates[0]).not.toHaveProperty('binding');
+  });
+
+  it('withholds uncertain intervals and notes', () => {
+    const entries = recording().root('r')!.entries;
+    const options = { ...interval, chart: chart(['price']) };
+    expect(evaluateSkippedPaths(entries, 'price', 2, { ...options, from: 3 })).toEqual({
+      candidates: [],
+      gaps: ['invalid-data'],
+    });
+    expect(evaluateSkippedPaths(entries, 'price', 2, { ...options, to: 4 })).toEqual({
+      candidates: [],
+      gaps: ['not-collected'],
+    });
+    expect(
+      evaluateSkippedPaths(
+        entries.filter((entry) => entry.kind !== 'note'),
+        'price',
+        2,
+        options,
+      ).candidates,
+    ).toEqual([]);
+  });
+
+  it('reports the recorded evidence gap when the scope never collected decisions', () => {
+    const entries = recording()
+      .root('r')!
+      .entries.map((entry) => {
+        if (entry.kind !== 'opened') return entry;
+        const { collects: _collects, ...legacy } = entry;
+        return legacy;
+      });
+    expect(evaluateSkippedPaths(entries, 'price', 2, { ...interval, chart: chart(['price']) })).toEqual({
+      candidates: [],
+      gaps: ['not-collected'],
+    });
+  });
+
+  it('refuses foreign accessors and bounds oversized inputs', () => {
+    const entries = recording().root('r')!.entries;
+    const getter = vi.fn(() => chart(['price']));
+    const options = {
+      ...interval,
+      get chart() {
+        return getter();
+      },
+    };
+    expect(evaluateSkippedPaths(entries, 'price', 2, options)).toEqual({ candidates: [], gaps: ['invalid-data'] });
+    expect(getter).not.toHaveBeenCalled();
+
+    const kindGetter = vi.fn(() => 'opened');
+    const foreignEntry = Object.defineProperty({}, 'kind', { enumerable: true, get: kindGetter });
+    const validOptions = { ...interval, chart: chart(['price']) };
+    expect(evaluateSkippedPaths([foreignEntry, ...entries], 'price', 2, validOptions)).toEqual({
+      candidates: [],
+      gaps: ['invalid-data'],
+    });
+    expect(kindGetter).not.toHaveBeenCalled();
+
+    const oversized = Array.from({ length: 20_001 }, () => null);
+    expect(evaluateSkippedPaths(oversized, 'price', 2, { ...interval, chart: chart(['price']) })).toEqual({
+      candidates: [],
+      gaps: ['truncated'],
+    });
+  });
+});
 
 describe('saved could-have-changed reader', () => {
   it('reports the skipped writer only on its independently bound recording and chart', async () => {

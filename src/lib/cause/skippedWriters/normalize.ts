@@ -4,8 +4,12 @@ import { isDeniedSegment } from '../../memory/pathOps.js';
 import { pathSegments } from '../../record-paths/codec.js';
 import { text } from '../../run-evidence/fields.js';
 import { RUN_EVIDENCE_LIMITS } from '../../run-evidence/kinds.js';
-import type { AdmittedSkippedChart } from './analyze.js';
 import type { NormalizedChoice, NormalizedControl, NormalizedSkippedStage, SkippedWork } from './types.js';
+
+export interface NormalizedSkippedChart {
+  readonly stages: ReadonlyMap<string, NormalizedSkippedStage>;
+  readonly controlsByStage: ReadonlyMap<string, readonly NormalizedControl[]>;
+}
 
 type Fields = Record<string, JsonValue | undefined>;
 
@@ -151,9 +155,8 @@ function admitChoices(
 /** Admit the captured description before any decision can use it as a graph. */
 export function normalizeSkippedChart(
   graph: JsonValue,
-  binding: AdmittedSkippedChart['binding'],
   budget: SkippedWork,
-): AdmittedSkippedChart | 'graph-ambiguous' | 'truncated' {
+): NormalizedSkippedChart | 'graph-ambiguous' | 'truncated' {
   try {
     const raw = object(graph, ['stages', 'controls'], budget);
     const stages = new Map<string, NormalizedSkippedStage>();
@@ -180,7 +183,7 @@ export function normalizeSkippedChart(
       else controlsByStage.set(stage.stageId, [control]);
     }
     for (const controls of controlsByStage.values()) Object.freeze(controls);
-    return Object.freeze({ stages, controlsByStage, binding });
+    return Object.freeze({ stages, controlsByStage });
   } catch (error) {
     return recordRefusalCode(error) === 'node-limit' ? 'truncated' : 'graph-ambiguous';
   }

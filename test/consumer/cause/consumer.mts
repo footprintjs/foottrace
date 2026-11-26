@@ -1,11 +1,13 @@
 import {
   couldHaveChanged,
+  evaluateSkippedPaths,
   explain,
   pathTo,
   type BackwardResult,
   type CauseGraph,
   type CauseResult,
   type CouldHaveChangedResult,
+  type EvaluateSkippedPathsResult,
   type RootSelection,
   type RootStrategy,
   type RootStrategyWalk,
@@ -100,3 +102,12 @@ bindings.writes.push(undefined);
 declare const recorded: StoredRecord;
 const skipped: Promise<CouldHaveChangedResult> = couldHaveChanged(recorded, 'total', 1);
 void skipped;
+
+const evaluated: EvaluateSkippedPathsResult = evaluateSkippedPaths([], 'total', 0, {
+  address: { logRunId: 'run', drillPath: [] },
+  chart: {},
+  from: 0,
+  to: 0,
+});
+// @ts-expect-error The shared evaluator cannot issue an authority label.
+evaluated.candidates[0]?.binding;

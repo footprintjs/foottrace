@@ -11,3 +11,10 @@ Import `couldHaveChanged` and `savedChartDigest` from `foottrace/cause`. The cap
 Call `couldHaveChanged(recording, key, beforeIdx, { address, chart, authority })` with the canonical `readStoredRecord` result the host admitted. The host's `authority.lookup` returns the capture and any available binding for that exact admitted record and scope. It returns `undefined` when access is denied. Use an exclusive array position for `beforeIdx`. The host supplies only chart metadata it is authorized to serve. A legacy file, a missing catalog entry, or a chart from another build returns a gap.
 
 `causalChainWithCouldHaveChanged` derives the exclusive position from the selected execution's first commit. Its `causal` property is the ordinary DAG for an admitted scope, including when chart evidence is unavailable. The separate `skipped` property holds `could-have-changed` links with the recorded decision and each reachable writer's basis. They leave weighting and causal JSON unchanged.
+
+
+## Evaluating an independently admitted source
+
+An adapter can use `evaluateSkippedPaths(entries, key, beforeIdx, { address, chart, from, to })` from `foottrace/cause` after it has checked the origin and authority of its capture. Supply JSON record entries, the matching projection, and the covered half-open commit interval. The query position is an exclusive commit index in that interval. Rows outside the selected log cannot supply candidate evidence.
+
+The evaluator copies bounded own JSON data before reading it, with a 1 MiB input limit and shared work across shape checks, record parsing and reachability. It reports candidate facts and gaps. Its result has no binding field. The adapter owns provenance, including the decision to decline copied snapshots, stale captures, foreign scopes or data it cannot independently establish. For saved catalog-backed data, use the existing `couldHaveChanged` entry point.
