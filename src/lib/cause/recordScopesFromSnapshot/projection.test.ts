@@ -38,6 +38,44 @@ function nested(depth: number) {
 }
 
 describe('recordScopesFromSnapshot', () => {
+  it('detaches each initial-state occurrence and matches the reopened snapshot', () => {
+    const shared = { check: 47 };
+    const live = { ...snapshot(), initialState: { left: shared, right: shared } };
+    const saved = JSON.parse(JSON.stringify(live));
+    const projected = recordScopesFromSnapshot(live);
+    expect(projected).toEqual(recordScopesFromSnapshot(saved));
+    const seed = projected.scopes[0].initialState!;
+    expect(seed.left).not.toBe(seed.right);
+    shared.check = 13;
+    expect(seed).toEqual({ left: { check: 47 }, right: { check: 47 } });
+  });
+
+  it('charges both initial-state occurrences to the same projection allowance', () => {
+    const samples = Array(25_000).fill(42);
+    expect(recordScopesFromSnapshot({ ...snapshot(), initialState: { samples } }).scopes).toHaveLength(1);
+    const live = { ...snapshot(), initialState: { left: samples, right: samples } };
+    for (const input of [live, JSON.parse(JSON.stringify(live))]) {
+      expect(recordScopesFromSnapshot(input)).toEqual({ scopes: [], gaps: [{ code: 'node-limit' }] });
+    }
+  });
+
+  it('still refuses cycles and accessors in initial state, and repeated objects in commit payloads', () => {
+    const cycle: { parent?: object } = {};
+    cycle.parent = cycle;
+    const getter = vi.fn(() => 47);
+    const accessor = Object.defineProperty({}, 'check', { enumerable: true, get: getter });
+    const shared = { check: 47 };
+    const commit = { ...snapshot().commitLog[0], overwrite: { left: shared, right: shared } };
+    for (const input of [
+      { ...snapshot(), initialState: cycle },
+      { ...snapshot(), initialState: { left: accessor, right: accessor } },
+      { ...snapshot(), commitLog: [commit] },
+    ]) {
+      expect(recordScopesFromSnapshot(input)).toEqual({ scopes: [], gaps: [{ code: 'invalid-data' }] });
+    }
+    expect(getter).not.toHaveBeenCalled();
+  });
+
   it('projects a flat runtime scope and opens the same nodes in the graph', async () => {
     const { scopes, gaps } = recordScopesFromSnapshot(snapshot());
     expect(gaps).toEqual([]);

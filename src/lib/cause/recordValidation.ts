@@ -68,8 +68,8 @@ export function dataCopy(
   };
   const root = make(value as object, budget),
     seen = new Set<object>([value as object]);
-  // Separate native read occurrences can share their source. In that channel
-  // retain an identity only while visiting its descendants, and charge every copy.
+  // Initial-state keys can share a value, and native read occurrences can share their source.
+  // For these channels retain an identity only while visiting its descendants, and charge every copy.
   const work: { from: object; to?: typeof root; allowance: RecordBudget }[] = [
     { from: value as object, to: root, allowance: budget },
   ];
