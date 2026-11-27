@@ -487,7 +487,9 @@ ID paths and record paths use different grammars. `idPathSegments('/a//b/')`
 returns `['a', 'b']`, dropping empty ID segments. Record `pathSegments` preserves
 empty segments and literal dots. `normaliseStateKey` accepts either an already
 encoded record path or a readonly array of segments; a string such as `'a.b'`
-is a literal key. `nativeGet` and `nativeHas` accept arrays or dot-separated
+is a literal key. `STATE_PATH_SEPARATOR` from `foottrace/paths` names the
+ASCII unit separator (U+001F) for integrations inspecting encoded record paths.
+Use the codec to encode and decode segments. `nativeGet` and `nativeHas` accept arrays or dot-separated
 strings, so decode a recorded path before passing it to them:
 
 ```ts

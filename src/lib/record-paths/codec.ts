@@ -21,8 +21,8 @@
  * identifier and is vanishingly unlikely in a hand-written key, so the
  * encoding stays unambiguous. It is NOT a display character: a path rendered
  * straight to a UI or a log looks like one broken word. Split it with
- * {@link pathSegments} — that, not this constant, is the contract consumers
- * should hold.
+ * {@link pathSegments}. Integrations inspecting canonical paths can access
+ * this character as `STATE_PATH_SEPARATOR` from `foottrace/paths`.
  */
 export const DELIM = '\u001F';
 
@@ -46,10 +46,8 @@ export function normalisePath(path: (string | number)[]): string {
  *
  * A path in the commit log is DELIM-joined (see {@link DELIM}), which is not a
  * display encoding — printing one verbatim shows a single broken-looking word,
- * as a consumer rendering a path discovered. This is the supported way to take
- * it apart; the delimiter itself stays an implementation detail, so a path can
- * be read, rendered or re-joined without anyone hard-coding a control
- * character.
+ * as a consumer rendering a path discovered. Use this function to take it
+ * apart and `normaliseStateKey` to re-join the segments.
  *
  * A single-segment path (the common case — a top-level state key) returns a
  * one-element array, so callers need no special case.

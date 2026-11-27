@@ -1,3 +1,4 @@
+import { STATE_PATH_SEPARATOR } from 'foottrace/paths';
 import { RecordFrame, type LocatedRead, type ReadSourceOwner, type ReadSourceOccurrence } from 'foottrace/write';
 // @ts-expect-error LocatedRead has no root-door type export.
 import type { LocatedRead as RootLocation } from 'foottrace';
@@ -83,3 +84,6 @@ function declarationChecks(frame: RecordFrame, owner: ReadSourceOwner, unknownPr
   ];
 }
 void declarationChecks;
+
+const publishedSeparator: '\u001f' = STATE_PATH_SEPARATOR;
+void publishedSeparator;

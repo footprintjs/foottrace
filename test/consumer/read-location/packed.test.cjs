@@ -135,6 +135,17 @@ test('the actual offline pack supports located reads in both public module forma
     run(process.execPath, [compiler, '-p', configFile, '--noUncheckedIndexedAccess'], consumer, 30000);
 
     const assertions = String.raw`
+      const { STATE_PATH_SEPARATOR, normaliseStateKey, pathSegments } = pathsDoor;
+      assert.equal(STATE_PATH_SEPARATOR, '\u001f');
+      assert.equal(rootDoor.PATH_DELIMITER, '/');
+      assert.equal(Object.hasOwn(rootDoor, 'STATE_PATH_SEPARATOR'), false);
+      const encodedStatePath = normaliseStateKey(['a.b', 0, 'qty']);
+      assert.equal(encodedStatePath, 'a.b\u001f0\u001fqty');
+      assert.equal(encodedStatePath, ['a.b', '0', 'qty'].join(STATE_PATH_SEPARATOR));
+      assert.deepEqual(pathSegments(encodedStatePath), ['a.b', '0', 'qty']);
+      assert.equal(normaliseStateKey('a.b'), 'a.b');
+      assert.deepEqual(pathSegments('a.b'), ['a.b']);
+
       const { RecordFrame, SharedMemory, createReadSourceRecord } = write;
       const privateNames = ['beginLocatedRead', 'resetLocationCandidate', 'noteLocationSegment',
         'completeLocationCandidate', 'takeLocation', 'endLocatedRead', 'readSource', 'trackedRead', 'absolutePath'];
@@ -251,6 +262,7 @@ test('the actual offline pack supports located reads in both public module forma
     fs.writeFileSync(cjs, `const assert=require('node:assert/strict');
       const fs=require('node:fs'),path=require('node:path');
       const write=require('foottrace/write'),rootDoor=require('foottrace');
+      const pathsDoor=require('foottrace/paths');
       const pkg=require('foottrace/package.json');
       const expected=${expectedPackage};
       assert.equal(pkg.name,expected.name);assert.equal(pkg.version,expected.version);
@@ -261,6 +273,7 @@ test('the actual offline pack supports located reads in both public module forma
     fs.writeFileSync(esm, `import assert from 'node:assert/strict';
       import fs from 'node:fs';import path from 'node:path';import {fileURLToPath} from 'node:url';
       import * as write from 'foottrace/write';import * as rootDoor from 'foottrace';
+      import * as pathsDoor from 'foottrace/paths';
       const expected=${expectedPackage};
       const installed=new URL('./node_modules/foottrace/',import.meta.url);
       const pkg=JSON.parse(fs.readFileSync(new URL('package.json',installed),'utf8'));
