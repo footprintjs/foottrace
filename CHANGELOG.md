@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.1.0 — 2026-11-27
+
+### Added
+
+- Pass `maxFields` to `recordScopesFromSnapshot` to admit larger commit values across a snapshot. The graph checks its own field limit when opening each scope.
+
 ## 3.0.2 — 2026-11-27
 
 ### Fixed
