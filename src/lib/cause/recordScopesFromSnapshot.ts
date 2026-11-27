@@ -17,7 +17,8 @@ import {
 } from './recordScopesFromSnapshot/read.js';
 import { snapshotTree } from './recordScopesFromSnapshot/tree.js';
 import type { RecordFanoutCollection, RecordSubflowMount } from './recordSubflows.js';
-import type { RecordScope } from './recordTypes.js';
+import type { RecordScope, RecordGraphOptions } from './recordTypes.js';
+import { configuredFieldLimit } from './recordLimits.js';
 import { dataCopy, recordName } from './recordValidation.js';
 import type { GapCode } from './types.js';
 
@@ -45,6 +46,7 @@ interface Projection {
   readonly gaps: SnapshotScopeGap[];
   readonly budget: Budget;
   readonly outsideBudget: Budget;
+  readonly payloadBudget: Budget;
   readonly results: unknown;
   visited: number;
 }
@@ -115,10 +117,10 @@ function nextScopes(state: Projection, address: LogAddress, mounts: readonly str
 }
 
 /** Copy the value record and admit optional outside evidence independently on the first owning row. */
-function snapshotLog(history: unknown, budget: Budget, outsideBudget: Budget): readonly unknown[] {
+function snapshotLog(history: unknown, { budget, outsideBudget, payloadBudget }: Projection): readonly unknown[] {
   const owners = new Set<string>();
   return list(history, budget, MAX_LOG).map((raw) => {
-    const bundle = dataCopy(raw, budget, { separatelyReadKey: 'outsideInputs' });
+    const bundle = dataCopy(raw, budget, { separatelyReadKey: 'outsideInputs', operandBudget: payloadBudget });
     if (bundle === null || typeof bundle !== 'object') return bundle;
     const id = field(bundle, 'runtimeStageId');
     if (typeof id !== 'string' || id === '' || owners.has(id)) return bundle;
@@ -146,7 +148,7 @@ function visit(input: ScopeInput, state: Projection): void {
   const { children, records } = nextScopes(state, address, projection.mounts, depth < RECORD_ADDRESS_MAX_DEPTH);
   let cuts: ReadonlyMap<string, number> | undefined;
   if (depth <= RECORD_ADDRESS_MAX_DEPTH) {
-    const log = snapshotLog(input.history, budget, state.outsideBudget);
+    const log = snapshotLog(input.history, state);
     const capture = rootCapture(raw, address, log.length, budget);
     for (const channel of ['reads', 'writes', 'readSources'] as const) {
       const observed = capture?.channels[channel];
@@ -191,7 +193,7 @@ function visit(input: ScopeInput, state: Projection): void {
       ...(readSources === undefined ? {} : { readSources }),
       ...(controlDeps === undefined ? {} : { controlDeps }),
     });
-    const admission = admittedChildCuts(subflows, address, log, budget);
+    const admission = admittedChildCuts(subflows, address, log, budget, state.payloadBudget);
     cuts = admission?.cuts;
     if (admission?.refusal) {
       for (const mount of records) {
@@ -206,10 +208,15 @@ function visit(input: ScopeInput, state: Projection): void {
 
 /**
  * Project bounded plain-data engine snapshots for `createRecordGraph`. Use the returned gaps
- * when showing what could not be projected. This function never calls an accessor body.
+ * when showing what could not be projected. Pass the graph's explicit maxFields to bound commit operands
+ * across scopes separately from discovery. Omission preserves the original shared allowance. This function never calls an accessor body.
  * Reflective operations can execute Proxy traps; parse inert JSON first when no caller code may run.
  */
-export function recordScopesFromSnapshot(snapshot: unknown): SnapshotRecordScopes {
+export function recordScopesFromSnapshot(
+  snapshot: unknown,
+  options: Pick<RecordGraphOptions, 'maxFields'> = {},
+): SnapshotRecordScopes {
+  const maxFields = configuredFieldLimit(options);
   const budget = { left: MAX_WORK };
   try {
     if (!plain(snapshot)) throw refuseRecord();
@@ -222,6 +229,7 @@ export function recordScopesFromSnapshot(snapshot: unknown): SnapshotRecordScope
       gaps: [],
       budget,
       outsideBudget: { left: MAX_WORK },
+      payloadBudget: maxFields === undefined ? budget : { left: maxFields },
       results: field(snapshot, 'subflowResults'),
       visited: 0,
     };

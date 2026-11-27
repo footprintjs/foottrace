@@ -3,6 +3,7 @@ import { decodeRecordCapture } from './recordCapture.js';
 import { prepareReadSources } from './recordSources.js';
 import { prepareRecordSubflows, type PreparedRecordSubflows } from './recordSubflows.js';
 import { carryOutsideInputs, readOutsideInputs, type OutsideInputAdmission } from '../evidence/outsideInputs.js';
+import { boundedOption, configuredFieldLimit } from './recordLimits.js';
 import { readerLimits } from '../evidence/readerLimits.js';
 import type { LogAddress } from '../memory/eventPosition.js';
 import { RUN_EVIDENCE_LIMITS } from '../run-evidence/kinds.js';
@@ -27,35 +28,21 @@ import {
   spend,
 } from './recordValidation.js';
 
-/** Refuse an invalid limit before loading a scope or allocating its preparation budget. */
-function boundedOption(value: unknown, defaultValue: number, maximum: number): number {
-  const configuredValue = value ?? defaultValue;
-  if (
-    typeof configuredValue !== 'number' ||
-    !Number.isSafeInteger(configuredValue) ||
-    configuredValue < 1 ||
-    configuredValue > maximum
-  )
-    throw new TypeError('cause: invalid record configuration');
-  return configuredValue;
-}
-
 /** Read configuration as data so option accessors cannot execute during adapter construction. */
 export function recordOptions(options: RecordGraphOptions): ResolvedRecordGraphOptions {
   try {
-    const prototype = Object.getPrototypeOf(options);
-    if (prototype !== Object.prototype && prototype !== null) throw new TypeError();
+    const maxFields = configuredFieldLimit(options) ?? 20_000;
     const policy = recordOwn(options, 'sourceLinkPolicy');
     if (policy !== undefined && typeof policy !== 'function') throw new TypeError();
     return Object.freeze({
       ...(policy === undefined
         ? {}
         : { sourceLinkPolicy: policy as NonNullable<RecordGraphOptions['sourceLinkPolicy']> }),
-      maxCommits: boundedOption(recordOwn(options, 'maxCommits'), 256, readerLimits.causeCommits.maximum),
-      maxFields: boundedOption(recordOwn(options, 'maxFields'), 20000, readerLimits.causeTextWork.maximum),
-      maxEdges: boundedOption(recordOwn(options, 'maxEdges'), 64, 256),
-      maxScopes: boundedOption(recordOwn(options, 'maxScopes'), 32, 256),
-      loadTimeoutMs: boundedOption(recordOwn(options, 'loadTimeoutMs'), 1000, 30000),
+      maxCommits: boundedOption(recordOwn(options, 'maxCommits') ?? 256, readerLimits.causeCommits.maximum),
+      maxFields,
+      maxEdges: boundedOption(recordOwn(options, 'maxEdges') ?? 64, 256),
+      maxScopes: boundedOption(recordOwn(options, 'maxScopes') ?? 32, 256),
+      loadTimeoutMs: boundedOption(recordOwn(options, 'loadTimeoutMs') ?? 1000, 30000),
     });
   } catch {
     throw new TypeError('cause: invalid record configuration');

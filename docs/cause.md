@@ -381,8 +381,9 @@ or saved engine snapshot into the scopes accepted by `createRecordGraph`:
 ```ts
 import { createRecordGraph, recordScopesFromSnapshot } from 'foottrace/cause';
 
-const { scopes, gaps } = recordScopesFromSnapshot(snapshot);
-const graph = createRecordGraph(scopes, { maxScopes: 256, maxCommits: 4096 });
+const limits = { maxFields: 250_000, maxScopes: 256, maxCommits: 4096 };
+const { scopes, gaps } = recordScopesFromSnapshot(snapshot, limits);
+const graph = createRecordGraph(scopes, limits);
 // Show gaps alongside the graph when evidence or a scope could not be projected.
 ```
 
@@ -400,6 +401,15 @@ with their depth and address. Discovery is bounded at 256 scopes and a shared
 The graph defaults to 32 scopes (including the root) and 256 commits per
 scope. Set `maxScopes` and `maxCommits` together for larger projections as in
 the example. The graph still applies its separate field and edge limits.
+An explicit `maxFields` gives projection one allowance for the values in all
+commit `overwrite` and `updates` objects across all scopes. Copying an array
+charges its capacity and each populated value. Validating a parent log for a
+child handoff charges its operands again. Other fields still consume the
+discovery allowance, and outside-input evidence keeps its own limit. Omit
+`maxFields` to charge operands to the original shared discovery allowance.
+The graph independently checks each scope it opens against its own
+`maxFields` (default 20,000), including when the projected data has changed.
+Both readers accept explicit field limits from 1 through 1,000,000.
 The reader rejects accessors without invoking their bodies. Reflective
 operations can execute Proxy traps, so parse inert JSON before passing the
 snapshot if caller code must never run at this boundary.

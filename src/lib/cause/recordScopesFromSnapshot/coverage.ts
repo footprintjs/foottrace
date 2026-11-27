@@ -9,13 +9,14 @@ export function admittedChildCuts(
   address: LogAddress,
   log: readonly unknown[],
   budget: Budget,
+  payloadBudget: Budget,
 ) {
   if (!subflows.mounts.some((mount) => mount.outputHandoff !== undefined)) return undefined;
   try {
     const prepared = prepareRecordSubflows(
       subflows,
       address,
-      prepareRecordLog(log, MAX_LOG, budget),
+      prepareRecordLog(log, MAX_LOG, budget, undefined, payloadBudget),
       budget,
       MAX_SCOPES,
     );

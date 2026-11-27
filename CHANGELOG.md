@@ -1,5 +1,17 @@
 # Changelog
 
+## 3.0.2 — 2026-11-27
+
+### Fixed
+
+- The saved skipped-writer reader reports a `not-collected` gap when the capture starts after a relevant recorded decision. Earlier versions could answer that no skipped writer could have changed the key without reporting the missing part of the window.
+
+## 3.0.1 — 2026-11-26
+
+### Fixed
+
+- Preserve recorded writers in live snapshots when multiple initial-state keys share a plain object. Each occurrence uses the same allowance as its saved copy.
+
 ## 3.0.0 — 2026-11-24
 
 ### Added

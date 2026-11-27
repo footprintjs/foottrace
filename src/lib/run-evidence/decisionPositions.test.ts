@@ -28,6 +28,24 @@ describe('durable decision positions in a skipped-path window', () => {
     expect(result.gaps).toEqual([]);
   });
 
+  it('marks an in-window decision before capture start as uncollected', () => {
+    const log = recording();
+    for (const from of [0, 1]) {
+      expect(readDecisionWindow(log, 3, 0, { left: 1000 }, from)).toMatchObject({
+        decisions: [{ decision: { id: 'decision#1' }, commitPosition: 1 }],
+        gaps: [],
+      });
+    }
+    expect(readDecisionWindow(log, 3, 0, { left: 1000 }, 2)).toMatchObject({
+      decisions: [],
+      gaps: ['not-collected'],
+    });
+    expect(readDecisionWindow(log, 3, 2, { left: 1000 }, 2)).toMatchObject({
+      decisions: [],
+      gaps: [],
+    });
+  });
+
   it('excludes choices at a later commit and fails closed if its raw order was reversed', () => {
     expect(readDecisionWindow(recording(), 1, undefined, { left: 1000 }).decisions).toEqual([]);
     const reversed = readDecisionWindow(recording(true), 2, undefined, { left: 1000 });
