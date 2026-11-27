@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { evidenceStore } from '../../../../test/helpers/evidenceFixture';
+import { engineScenario, evidenceStore, writeScenario } from '../../../../test/helpers/evidenceFixture';
 import { causalChainWithCouldHaveChanged, couldHaveChanged, savedChartDigest } from '../../../cause.js';
 import { causalChain } from '../../memory/backtrack.js';
+import type { LogAddress } from '../../memory/eventPosition.js';
 import { readStoredRecord } from '../../time-travel/storedRecord.js';
 
 const address = { logRunId: 'r', drillPath: [] };
@@ -38,15 +39,19 @@ function chart(writes: readonly string[]) {
   };
 }
 
-async function catalog(stored: ReturnType<typeof recording>, graph: unknown) {
-  const capture = { recordingVersion: 'shelf/item/1', runId: 'r', address, from: 0, to: 3 };
+async function catalog(
+  stored: ReturnType<typeof recording>,
+  graph: unknown,
+  interval: { address: LogAddress; from: number; to: number } = { address, from: 0, to: 3 },
+) {
+  const capture = { recordingVersion: 'shelf/item/1', runId: interval.address.logRunId, ...interval };
   const binding = { ...capture, version: 'footprint.skipped-chart.v1' as const, digest: await savedChartDigest(graph) };
   return {
-    address,
+    address: interval.address,
     chart: graph,
     authority: {
-      lookup: (candidate: typeof stored, scope: typeof address) =>
-        candidate === stored && scope.logRunId === address.logRunId && !scope.drillPath.length
+      lookup: (candidate: typeof stored, scope: LogAddress) =>
+        candidate === stored && scope.logRunId === interval.address.logRunId && !scope.drillPath.length
           ? { capture, binding }
           : undefined,
     },
@@ -79,6 +84,60 @@ describe('saved could-have-changed reader', () => {
       gaps: ['chart-binding'],
     });
     expect(await couldHaveChanged(stored, 'price', 2)).toEqual({ candidates: [], gaps: ['chart-binding'] });
+  });
+
+  it('returns an uncollected gap for a saved interval that begins after a relevant decision', async () => {
+    const stored = recording();
+    const graph = chart(['price']);
+    for (const from of [0, 1]) {
+      expect(
+        await couldHaveChanged(stored, 'price', 3, await catalog(stored, graph, { address, from, to: 3 })),
+      ).toMatchObject({
+        candidates: [{ skippedEntry: 'skip', binding: 'host-attested' }],
+        gaps: [],
+      });
+    }
+    expect(
+      await couldHaveChanged(stored, 'price', 3, await catalog(stored, graph, { address, from: 2, to: 3 })),
+    ).toEqual({
+      candidates: [],
+      gaps: ['not-collected'],
+    });
+  });
+
+  it('reports the missing first-leg decision when a same-executor resume serves only its second leg', async () => {
+    const scenario = engineScenario('resume-same');
+    const [runId] = scenario.legs;
+    const stored = readStoredRecord(writeScenario(scenario));
+    const log = stored.root(runId)!;
+    const paused = log.entries.find((entry) => entry.kind === 'closed' && entry.outcome === 'paused');
+    if (paused?.kind !== 'closed') throw new Error('Missing pause in the engine fixture');
+    const scope = { address: log.address, to: log.commitLog.length };
+    const graph = {
+      stages: [
+        { id: 'gate', stageId: 'gate', role: 'stage', edges: ['go', 'skip'], writes: [] },
+        { id: 'go', stageId: 'go', role: 'mount', edges: [] },
+        { id: 'skip', stageId: 'skip', role: 'stage', edges: [], writes: ['v'] },
+      ],
+      controls: [
+        {
+          placementId: 'gate',
+          kind: 'decider',
+          continuation: null,
+          choices: [
+            { entry: 'go', name: 'Sub' },
+            { entry: 'skip', name: 'Skip' },
+          ],
+        },
+      ],
+    };
+    const whole = await couldHaveChanged(stored, 'v', scope.to, await catalog(stored, graph, { ...scope, from: 0 }));
+    expect(whole.candidates).toMatchObject([{ decision: { id: 'gate#1' }, skippedEntry: 'skip' }]);
+    const resumed = await catalog(stored, graph, { ...scope, from: paused.commits });
+    expect(await couldHaveChanged(stored, 'v', scope.to, resumed)).toEqual({
+      candidates: [],
+      gaps: ['not-collected'],
+    });
   });
 
   it('does not transfer an observed write between distinct placements sharing a static ID', async () => {

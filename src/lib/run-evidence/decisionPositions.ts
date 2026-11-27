@@ -185,10 +185,12 @@ export function readDecisionWindow(
       gaps.add('conservative');
       continue;
     }
-    if (commitPosition >= fromIdx) {
-      decisions.push({ decision: row, entryPosition: index, commitPosition });
-      if (returns.length) decisionPositions.set(row.id, index);
+    if (commitPosition < fromIdx) {
+      gaps.add('not-collected');
+      continue;
     }
+    decisions.push({ decision: row, entryPosition: index, commitPosition });
+    if (returns.length) decisionPositions.set(row.id, index);
   }
   const attribution = attributeReturns(returns, merged, decisionPositions, gaps, budget);
   if (!attribution) return unproved('truncated');
