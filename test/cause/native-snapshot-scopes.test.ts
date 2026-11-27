@@ -53,6 +53,19 @@ it('keeps the explicit gaps on observed read-source modes', () => {
   });
 });
 
+it('charges parent operands to the payload allowance when validating a child handoff', () => {
+  const snapshot = structuredClone(corpus.find(({ name }) => name === 'on')!.snapshot) as {
+    commitLog: Array<{ updates: Record<string, unknown> }>;
+  };
+  snapshot.commitLog[0].updates.samples = Array(52_000).fill(42);
+  const { gaps, scopes } = recordScopesFromSnapshot(snapshot, { maxFields: 250_000 });
+  expect(gaps.some(({ code }) => code === 'node-limit')).toBe(false);
+  expect(scopes[1].complete).toBe(true);
+  expect(scopes[0].commitLog[0]).toMatchObject({ updates: { samples: snapshot.commitLog[0].updates.samples } });
+  const tighter = recordScopesFromSnapshot(snapshot, { maxFields: 150_000 });
+  expect(tighter).toEqual({ scopes: [], gaps: [{ code: 'node-limit' }] });
+});
+
 it.each([
   ['an unsupported version', { version: 2 }],
   ['an unrecorded write', { writes: [{ path: 'unrecorded', reads: [] }] }],
