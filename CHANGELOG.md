@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.1.0 — 2026-11-27
+
+### Added
+
+- Pass `maxFields` to `recordScopesFromSnapshot` to admit larger commit values across a snapshot. The graph checks its own field limit when opening each scope.
+- Add `evaluateSkippedPaths` to `foottrace/cause` for bounded analysis of supplied JSON recording entries and a chart projection. It returns possible-writer facts and gaps without a provenance label. The saved reader continues to attach catalog attestation after independent admission.
+
 ## 3.0.2 — 2026-11-27
 
 ### Fixed
