@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.2.0 — 2026-11-27
+
+### Added
+
+- Export `STATE_PATH_SEPARATOR` from `foottrace/paths` for integrations inspecting canonical state paths. State and runtime ID path encodings stay compatible.
+
 ## 3.1.0 — 2026-11-27
 
 ### Added
