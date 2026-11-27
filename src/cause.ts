@@ -80,6 +80,11 @@ export type {
 } from './lib/cause/sourceLinks/types.js';
 
 export { couldHaveChanged } from './lib/cause/skippedWriters/couldHaveChanged.js';
+export {
+  evaluateSkippedPaths,
+  type EvaluateSkippedPathsOptions,
+  type EvaluateSkippedPathsResult,
+} from './lib/cause/skippedWriters/evaluate.js';
 export { causalChainWithCouldHaveChanged } from './lib/cause/skippedWriters/walk.js';
 export { savedChartDigest } from './lib/cause/skippedWriters/savedBinding.js';
 export type {

@@ -1,15 +1,14 @@
 import { causalChain, type CausalChainOptions, type CausalNode, type KeysReadLookup } from '../../memory/backtrack.js';
 import { buildCommitIndex } from '../../memory/commitLogUtils.js';
 import type { StoredRecord } from '../../time-travel/storedRecord.js';
-import type { CouldHaveChangedCandidate } from './analyze.js';
 import {
   analyzeSavedSkippedPaths,
+  type CouldHaveChangedCandidate,
   type CouldHaveChangedOptions,
   type CouldHaveChangedResult,
   savedSkippedQuery,
-  SKIPPED_QUERY_WORK,
-  unavailableSkippedPaths,
 } from './couldHaveChanged.js';
+import { SKIPPED_QUERY_WORK, unavailableSkippedPaths } from './evaluate.js';
 
 export interface CouldHaveChangedEdge extends CouldHaveChangedCandidate {
   readonly kind: 'could-have-changed';

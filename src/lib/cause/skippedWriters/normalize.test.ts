@@ -23,13 +23,12 @@ const basic = [
   { ...stage('next'), role: 'join', writes: [] },
 ];
 const normalize = (value: unknown, budget = { left: 1000 }) =>
-  normalizeSkippedChart(canonicalSnapshot(value).value, 'host-attested', budget);
+  normalizeSkippedChart(canonicalSnapshot(value).value, budget);
 
 describe('normalizeSkippedChart', () => {
   it('keeps graph edges, explicit continuation and absent versus empty write declarations', () => {
     const normalized = normalize(graph(basic));
     if (typeof normalized === 'string') throw new Error(normalized);
-    expect(normalized.binding).toBe('host-attested');
     expect(normalized.stages.get('skip')?.writes).toEqual(['stock']);
     expect(normalized.stages.get('next')?.writes).toEqual([]);
     expect(Object.hasOwn(normalized.stages.get('keep')!, 'writes')).toBe(false);
@@ -113,7 +112,7 @@ describe('normalizeSkippedChart', () => {
       controls: { enumerable: true, value: [] },
     }) as JsonValue;
     Object.freeze(accessor);
-    expect(normalizeSkippedChart(accessor, 'native', { left: 1000 })).toBe('graph-ambiguous');
+    expect(normalizeSkippedChart(accessor, { left: 1000 })).toBe('graph-ambiguous');
     expect(called).toBe(false);
     const budget = { left: 5 };
     expect(normalize(graph(basic), budget)).toBe('truncated');

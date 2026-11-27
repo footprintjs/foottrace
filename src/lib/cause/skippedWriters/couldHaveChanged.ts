@@ -2,11 +2,9 @@ import { addressKey, addressOf } from '../../evidence/recordData.js';
 import type { LogAddress } from '../../memory/eventPosition.js';
 import type { UnchangedWriteRecording } from '../../memory/unchangedWriteTypes.js';
 import type { StoredLog, StoredRecord } from '../../time-travel/storedRecord.js';
-import { analyzeBoundSkippedPaths, type CouldHaveChangedCandidate, type SkippedGap } from './analyze.js';
-import { normalizeSkippedChart } from './normalize.js';
+import type { SkippedGap, SkippedPathCandidate } from './analyze.js';
+import { evaluateOwnedSkippedPaths, SKIPPED_QUERY_WORK, unavailableSkippedPaths } from './evaluate.js';
 import { readBoundSavedProjection, type SavedChartCapture, type TrustedSavedChartBinding } from './savedBinding.js';
-
-export const SKIPPED_QUERY_WORK = 100_000;
 
 export interface SavedSkippedChartAuthority {
   /**
@@ -32,6 +30,10 @@ export interface CouldHaveChangedOptions {
   readonly authority: SavedSkippedChartAuthority;
 }
 
+export interface CouldHaveChangedCandidate extends SkippedPathCandidate {
+  readonly binding: 'native' | 'host-attested';
+}
+
 export interface CouldHaveChangedResult {
   readonly candidates: readonly CouldHaveChangedCandidate[];
   readonly gaps: readonly (SkippedGap | 'chart-binding')[];
@@ -44,11 +46,6 @@ interface SavedSkippedQuery {
 }
 
 type QueryFailure = 'chart-binding' | 'not-collected';
-
-export const unavailableSkippedPaths = (gap: CouldHaveChangedResult['gaps'][number]): CouldHaveChangedResult => ({
-  candidates: [],
-  gaps: [gap],
-});
 
 export function savedSkippedQuery(
   recording: StoredRecord,
@@ -80,9 +77,11 @@ export async function analyzeSavedSkippedPaths(
   try {
     const verified = await readBoundSavedProjection(capture, binding, query.chart, budget);
     if (verified.status !== 'host-attested') return unavailableSkippedPaths(verified.status);
-    const graph = normalizeSkippedChart(verified.projection, verified.status, budget);
-    if (typeof graph === 'string') return unavailableSkippedPaths(graph);
-    return analyzeBoundSkippedPaths(query.log, graph, key, beforeIdx, budget, fromIdx, retained);
+    const result = evaluateOwnedSkippedPaths(query.log, verified.projection, key, beforeIdx, budget, fromIdx, retained);
+    return {
+      candidates: result.candidates.map((candidate) => ({ ...candidate, binding: 'host-attested' })),
+      gaps: result.gaps,
+    };
   } catch {
     return unavailableSkippedPaths('chart-binding');
   }

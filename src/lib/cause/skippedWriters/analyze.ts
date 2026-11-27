@@ -7,33 +7,27 @@ import { readDecisionWindow, type PositionedDecision } from '../../run-evidence/
 import type { StoredLog } from '../../time-travel/storedRecord.js';
 import { skippedBranches } from './dispatch.js';
 import { readSkippedKeyHistory } from './keyHistory.js';
-import type { NormalizedControl, NormalizedSkippedStage, SkippedPathGap, SkippedWork, SkippedWriter } from './types.js';
+import type { NormalizedSkippedChart } from './normalize.js';
+import type { SkippedPathGap, SkippedWork, SkippedWriter } from './types.js';
 
-export interface AdmittedSkippedChart {
-  readonly stages: ReadonlyMap<string, NormalizedSkippedStage>;
-  readonly controlsByStage: ReadonlyMap<string, readonly NormalizedControl[]>;
-  readonly binding: 'native' | 'host-attested';
-}
-
-export interface CouldHaveChangedCandidate {
+export interface SkippedPathCandidate {
   readonly decision: PositionedDecision['decision'];
   readonly skippedEntry: string;
   readonly writers: readonly SkippedWriter[];
-  readonly binding: AdmittedSkippedChart['binding'];
 }
 
 export type SkippedGap = GapCode | Exclude<SkippedPathGap, 'limit'> | 'loop-evidence';
 
-/** Internal fold. An authenticated adapter must own and admit the graph before passing it here. */
-export function analyzeBoundSkippedPaths(
+/** Internal fold over a structurally normalized graph. Binding belongs to the calling adapter. */
+export function analyzeSkippedPaths(
   log: StoredLog,
-  graph: AdmittedSkippedChart,
+  graph: NormalizedSkippedChart,
   key: string,
   beforeIdx: number,
   budget: SkippedWork,
   fromIdx = 0,
   retained?: UnchangedWriteRecording,
-): { readonly candidates: readonly CouldHaveChangedCandidate[]; readonly gaps: readonly SkippedGap[] } {
+): { readonly candidates: readonly SkippedPathCandidate[]; readonly gaps: readonly SkippedGap[] } {
   const history = readSkippedKeyHistory(log, key, beforeIdx, budget, fromIdx);
   if (history.status === 'unknown') return { candidates: [], gaps: [history.reason] };
   const observed = new Set(history.observed);
@@ -59,7 +53,7 @@ export function analyzeBoundSkippedPaths(
   }
   const window = readDecisionWindow(log, beforeIdx, history.lastChangeIdx, budget, fromIdx);
   const gaps = new Set<SkippedGap>(window.gaps);
-  const candidates: CouldHaveChangedCandidate[] = [];
+  const candidates: SkippedPathCandidate[] = [];
   const declaredMatches = (path: string) => relation(path, key) !== undefined;
   for (const { decision, entryPosition } of window.decisions) {
     if (budget.left < 1) {
@@ -91,7 +85,6 @@ export function analyzeBoundSkippedPaths(
         decision,
         skippedEntry: branch.entry,
         writers: branch.writers,
-        binding: graph.binding,
       });
     }
     for (const gap of result.gaps) gaps.add(gap === 'limit' ? 'truncated' : gap);
