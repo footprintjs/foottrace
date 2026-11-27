@@ -112,6 +112,10 @@ describe('unbound skipped-path evaluation', () => {
         gaps: ['invalid-data'],
       });
     }
+    expect(evaluateSkippedPaths('x' as never, 'price', 2, options)).toEqual({
+      candidates: [],
+      gaps: ['invalid-data'],
+    });
     expect(evaluateSkippedPaths([...entries, null], 'price', 2, options)).toEqual({
       candidates: [],
       gaps: ['not-collected'],

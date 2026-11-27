@@ -46,6 +46,25 @@ describe('durable decision positions in a skipped-path window', () => {
     });
   });
 
+  it('locates a late decision note by its earlier commit when testing capture coverage', () => {
+    const store = evidenceStore();
+    store.commit(root, 'first#0', {});
+    store.commit(root, 'decision#1', { parent: 'first#0' });
+    store.commit(root, 'branch#2', { parent: 'decision#1' });
+    store.note(root, 'run.decision', { id: 'decision#1', by: 'plain', chosen: 'continue' });
+    store.close(root);
+    const log = readStoredRecord(store.entries()).root('r')!;
+
+    expect(readDecisionWindow(log, 3, 0, { left: 1000 }, 1)).toMatchObject({
+      decisions: [{ decision: { id: 'decision#1' }, commitPosition: 1, entryPosition: 4 }],
+      gaps: [],
+    });
+    expect(readDecisionWindow(log, 3, 0, { left: 1000 }, 2)).toMatchObject({
+      decisions: [],
+      gaps: ['not-collected'],
+    });
+  });
+
   it('excludes choices at a later commit and fails closed if its raw order was reversed', () => {
     expect(readDecisionWindow(recording(), 1, undefined, { left: 1000 }).decisions).toEqual([]);
     const reversed = readDecisionWindow(recording(true), 2, undefined, { left: 1000 });
