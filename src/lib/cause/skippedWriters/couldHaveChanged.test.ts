@@ -80,12 +80,41 @@ describe('unbound skipped-path evaluation', () => {
     expect(unbound.candidates[0]).not.toHaveProperty('binding');
   });
 
+  it('reports relevant decisions outside the capture at the exclusive end cutoff', () => {
+    const entries = recording().root('r')!.entries;
+    const options = { ...interval, chart: chart(['price']) };
+    for (const from of [0, 1]) {
+      expect(evaluateSkippedPaths(entries, 'price', 3, { ...options, from })).toMatchObject({
+        candidates: [{ decision: { id: 'choose#1' }, skippedEntry: 'skip' }],
+        gaps: [],
+      });
+    }
+    expect(evaluateSkippedPaths(entries, 'price', 3, { ...options, from: 2 })).toEqual({
+      candidates: [],
+      gaps: ['not-collected'],
+    });
+  });
+
+  it('charges entry grouping against the budget remaining after the shape reservation', () => {
+    const entries = Array.from({ length: 6_500 }, () => null);
+    expect(evaluateSkippedPaths(entries, 'price', 3, { ...interval, chart: chart(['price']) })).toEqual({
+      candidates: [],
+      gaps: ['truncated'],
+    });
+  });
+
   it('withholds uncertain intervals and notes', () => {
     const entries = recording().root('r')!.entries;
     const options = { ...interval, chart: chart(['price']) };
-    expect(evaluateSkippedPaths(entries, 'price', 2, { ...options, from: 3 })).toEqual({
+    for (const from of [-1, 3]) {
+      expect(evaluateSkippedPaths(entries, 'price', 2, { ...options, from })).toEqual({
+        candidates: [],
+        gaps: ['invalid-data'],
+      });
+    }
+    expect(evaluateSkippedPaths([...entries, null], 'price', 2, options)).toEqual({
       candidates: [],
-      gaps: ['invalid-data'],
+      gaps: ['not-collected'],
     });
     expect(evaluateSkippedPaths(entries, 'price', 2, { ...options, to: 4 })).toEqual({
       candidates: [],
