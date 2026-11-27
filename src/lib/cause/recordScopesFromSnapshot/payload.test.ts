@@ -41,6 +41,20 @@ it.each([40_000, 52_000, 64_000])('preserves the entire %i-element operand and i
   }
 });
 
+it('shares one default budget between initial state and commit operands when maxFields is omitted', () => {
+  const snapshot = (samples: number, seed: number) => ({
+    ...recording(Array(samples).fill(1)),
+    initialState: { seed: Array(seed).fill(0) },
+  });
+  expect(recordScopesFromSnapshot(snapshot(30_000, 0)).scopes).toHaveLength(1);
+  expect(recordScopesFromSnapshot(snapshot(0, 25_000)).scopes).toHaveLength(1);
+  const combined = snapshot(30_000, 25_000);
+  const ordinary = recordScopesFromSnapshot(combined);
+  expect(ordinary.scopes.length).toBe(0);
+  expect(ordinary.gaps).toEqual(nodeLimit.gaps);
+  expect(recordScopesFromSnapshot(combined, wider).scopes).toHaveLength(1);
+});
+
 it('admits sparse capacity and populated elements independently at each reader', async () => {
   const sparse = new Array<number>(64_000);
   sparse[42] = 9;
